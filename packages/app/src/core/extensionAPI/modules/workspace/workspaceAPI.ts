@@ -1,5 +1,3 @@
-// src/core/extensionAPI/modules/workspace/workspaceAPI.ts
-
 import { useExplorerStore } from '@/features/explorer/store/exploreStore';
 import { msEvents } from '@/core/extensionAPI/events/EventManager';
 
@@ -34,5 +32,12 @@ export const createWorkspaceAPI = () => ({
    */
   onDidChangeWorkspace: (handler: (workspace: { name: string | null, path: string | null }) => void) => {
     return { dispose: msEvents.on('onDidChangeWorkspace', handler) };
+  },
+
+  /**
+   * Fired when a text document is successfully saved to disk.
+   */
+  onDidSaveTextDocument: (handler: (document: { filePath: string }) => void) => {
+    return { dispose: msEvents.on('onDidSaveTextDocument', handler) };
   }
 });

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="reset_ide"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="Reset IDE"
+        android:shortcutLongLabel="Clear IDE State &amp; Cache">
+        
+        <intent
+            android:action="com.editor.mscode.RESET_IDE"
+            android:targetPackage="com.editor.mscode"
+            android:targetClass="com.editor.mscode.MainActivity" />
+    </shortcut>
+</shortcuts>

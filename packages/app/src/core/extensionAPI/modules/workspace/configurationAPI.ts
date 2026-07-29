@@ -34,18 +34,7 @@ export const createConfigurationAPI = (extId: string) => ({
    * @param {IConfigurationSection} schema - The configuration schema defining properties and defaults.
    * @returns An object with a `dispose` method to unregister the settings.
    */
-  // registerConfiguration: (schema: IConfigurationSection) => {
-  //   configRegistry.registerConfiguration(schema);
-  //   useSettingsStore.getState().mergeDefaults(configRegistry.getDefaults());
 
-  //   return {
-  //     /** Unregisters the configuration associated with this extension. */
-  //     dispose: () => {
-  //       (configRegistry as any).removeSettingsByTag?.(extId);
-  //     },
-  //   };
-  // },
-  
   registerConfiguration: (schema: IConfigurationSection) => {
     // Automatically inject the extId as a tag into every property!
     const taggedProperties: Record<string, any> = {};
