@@ -4,8 +4,8 @@
         android:shortcutId="reset_ide"
         android:enabled="true"
         android:icon="@mipmap/ic_launcher"
-        android:shortcutShortLabel="Reset IDE"
-        android:shortcutLongLabel="Clear IDE State &amp; Cache">
+        android:shortcutShortLabel="@string/shortcut_reset_short"
+        android:shortcutLongLabel="@string/shortcut_reset_long">
         
         <intent
             android:action="com.editor.mscode.RESET_IDE"
