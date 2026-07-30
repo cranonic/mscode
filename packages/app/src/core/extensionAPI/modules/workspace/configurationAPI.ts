@@ -27,6 +27,11 @@ export const createConfigurationAPI = (extId: string) => ({
       const val     = useSettingsStore.getState().settings[fullKey];
       return val !== undefined ? (val as T) : (defaultValue as T);
     },
+    
+    update: (key: string, value: any) => {
+        const fullKey = section && !key.startsWith(section) ? `${section}.${key}` : key;
+        useSettingsStore.getState().updateSetting(fullKey, value);
+      }
   }),
 
   /**

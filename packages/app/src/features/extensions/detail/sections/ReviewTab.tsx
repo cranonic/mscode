@@ -146,7 +146,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({ extensionId, avgRating = 0
   const [isLoading, setLoading] = useState(true);
   const [error, setError]       = useState<string | null>(null);
 
-  const reviewPageUrl = `${STORE_BASE_URL}/store/item?id=${encodeURIComponent(extensionId)}`;
+  const reviewPageUrl = `${STORE_BASE_URL}/item?id=${encodeURIComponent(extensionId)}`;
 
   const fetchReviews = useCallback(async () => {
     setLoading(true);
