@@ -9,7 +9,7 @@ import java.io.IOException;
  *
  * Each terminal session gets its own init script so:
  *   • Different sessions can start in different directories.
- *   • Scripts are cleaned up after the session exits
+ *   • Scripts are cleaned up after the session exits.
  */
 public class InitScriptWriter {
 
@@ -22,23 +22,26 @@ public class InitScriptWriter {
     /**
      * Writes a session init script to {@code outputPath}.
      *
-     * @param outputPath  Where to write the script (e.g. filesDir/init_tab1.sh)
+     * @param outputPath  Where to write the script (e.g. filesDir/init_tab1.sh).
      * @param projectCwd  Proot-accessible path to open on startup.
      *                    Falls back silently to /root if the dir doesn't exist inside proot.
      */
     public void write(String outputPath, String projectCwd) throws IOException {
         String hostname = rootfs.getStoredHostname();
 
-        // Single-quote safe path
         String safeCwd = (projectCwd != null && !projectCwd.isEmpty())
             ? projectCwd.replace("'", "'\\''")
             : "/root";
 
-        // Escape single quotes in hostname for embedding in shell
         String safeHost = hostname != null
             ? hostname.replace("'", "'\\''")
             : "localhost";
 
+        // Prompt strategy:
+        //   • bash: PROMPT_DIRTRIM=2 + \w  →  .../0/Download
+        //   • ash:  inline awk in PS1
+        //   • Written to /etc/profile.d so `bash --login` actually picks it up
+        //     (Alpine login shells source /etc/profile, NOT ~/.bashrc)
         String script =
             "#!/bin/sh\n" +
             "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n" +
@@ -50,7 +53,7 @@ public class InitScriptWriter {
             "if [ ! -s /etc/resolv.conf ]; then\n" +
             "    echo 'nameserver 8.8.8.8' > /etc/resolv.conf\n" +
             "fi\n" +
-            // First-run package install (guarded by marker file)
+            // First-run package install
             "if [ ! -f /root/.mscode_setup_done ]; then\n" +
             "    echo -e '\\e[34;1m[*]\\e[0m Installing packages...'\n" +
             "    apk update -q && apk upgrade -q\n" +
@@ -59,7 +62,7 @@ public class InitScriptWriter {
             "    clear\n" +
             "    echo -e '\\e[1;32m[+] Alpine Ready! Welcome to MS Code.\\e[0m'\n" +
             "fi\n" +
-            // cd to project dir with feedback
+            // cd to project dir
             "if [ -d '" + safeCwd + "' ]; then\n" +
             "    cd '" + safeCwd + "'\n" +
             "    echo -e \"\\e[33m[+] Opened: $PWD\\e[0m\"\n" +
@@ -67,38 +70,31 @@ public class InitScriptWriter {
             "    cd /root\n" +
             "    echo -e \"\\e[31m[!] Path not found, opened /root\\e[0m\"\n" +
             "fi\n" +
-            // Dynamic hostname (reads from file so setHostname() takes effect live)
+            // Hostname
             "MSCODE_HOST=$(cat /etc/mscode_hostname 2>/dev/null || echo '" + safeHost + "')\n" +
-            // Short path: max last 2 components  →  ../0/Download
-            "_short_pwd() {\n" +
-            "  pwd | awk -F/ '{\n" +
-            "    if (NF <= 1) { print \"/\"; exit }\n" +
-            "    if (NF == 2) { print \"/\" $2; exit }\n" +
-            "    if (NF == 3) { print $(NF-1) \"/\" $NF; exit }\n" +
-            "    print \"../\" $(NF-1) \"/\" $NF\n" +
-            "  }'\n" +
-            "}\n" +
-            // Bash: refresh PS1 every prompt via PROMPT_COMMAND
-            // Ash: PS1 with $(_short_pwd) is expanded each time on busybox ash too
-            "export PROMPT_COMMAND='PS1=\"\\[\\e[1;32m\\]${MSCODE_HOST}\\[\\e[0m\\]:\\[\\e[1;34m\\]$(_short_pwd)\\[\\e[0m\\]\\$ \"'\n" +
-            "export PS1='\\[\\e[1;32m\\]'" + "\"$MSCODE_HOST\"" + "'\\[\\e[0m\\]:\\[\\e[1;34m\\]$(_short_pwd)\\[\\e[0m\\]\\$ '\n" +
-            // Persist into ~/.bashrc so `bash --login` does not wipe the short prompt
-            "if [ -f /bin/bash ]; then\n" +
-            "  # Idempotent: only inject once\n" +
-            "  if ! grep -q '_short_pwd' /root/.bashrc 2>/dev/null; then\n" +
-            "    cat >> /root/.bashrc << 'MSCODE_PROMPT'\n" +
-            "_short_pwd() {\n" +
-            "  pwd | awk -F/ '{\n" +
-            "    if (NF <= 1) { print \"/\"; exit }\n" +
-            "    if (NF == 2) { print \"/\" $2; exit }\n" +
-            "    if (NF == 3) { print $(NF-1) \"/\" $NF; exit }\n" +
-            "    print \"../\" $(NF-1) \"/\" $NF\n" +
-            "  }'\n" +
-            "}\n" +
+            // Install prompt into /etc/profile.d (sourced by bash --login)
+            "mkdir -p /etc/profile.d\n" +
+            "cat > /etc/profile.d/mscode_prompt.sh << 'MSCODE_EOF'\n" +
+            "# MS Code short prompt — last 2 path components via PROMPT_DIRTRIM\n" +
             "MSCODE_HOST=$(cat /etc/mscode_hostname 2>/dev/null || echo localhost)\n" +
-            "PROMPT_COMMAND='PS1=\"\\[\\e[1;32m\\]${MSCODE_HOST}\\[\\e[0m\\]:\\[\\e[1;34m\\]$(_short_pwd)\\[\\e[0m\\]\\$ \"'\n" +
-            "MSCODE_PROMPT\n" +
-            "  fi\n" +
+            "export PROMPT_DIRTRIM=2\n" +
+            "export PS1='\\[\\e[1;32m\\]${MSCODE_HOST}\\[\\e[0m\\]:\\[\\e[1;34m\\]\\w\\[\\e[0m\\]\\$ '\n" +
+            "MSCODE_EOF\n" +
+            // Also set for current shell
+            "export PROMPT_DIRTRIM=2\n" +
+            "export PS1='\\[\\e[1;32m\\]'" + "\"$MSCODE_HOST\"" +
+                "'\\[\\e[0m\\]:\\[\\e[1;34m\\]\\w\\[\\e[0m\\]\\$ '\n" +
+            // Ash does not support PROMPT_DIRTRIM — give it awk-based PS1
+            "if [ ! -f /bin/bash ]; then\n" +
+            "  export PS1='\\[\\e[1;32m\\]'" + "\"$MSCODE_HOST\"" +
+                "'\\[\\e[0m\\]:\\[\\e[1;34m\\]$(pwd | awk -F/ '\\''{if (NF>3) print \"../\"$(NF-1)\"/\"$NF; else if (NF>=2) print $(NF-1)\"/\"$NF; else print $0}'\\'')\\[\\e[0m\\]\\$ '\n" +
+            "fi\n" +
+            // Remove broken leftovers from previous update
+            "if [ -f /root/.bashrc ] && grep -q '_short_pwd\\|short_pwd' /root/.bashrc 2>/dev/null; then\n" +
+            "  sed -i '/_short_pwd/,/PROMPT_COMMAND/d' /root/.bashrc 2>/dev/null\n" +
+            "  sed -i '/short_pwd/d' /root/.bashrc 2>/dev/null\n" +
+            "fi\n" +
+            "if [ -f /bin/bash ]; then\n" +
             "  exec /bin/bash --login\n" +
             "else\n" +
             "  exec /bin/ash\n" +
