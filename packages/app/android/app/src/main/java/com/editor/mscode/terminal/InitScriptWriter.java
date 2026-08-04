@@ -9,7 +9,7 @@ import java.io.IOException;
  *
  * Each terminal session gets its own init script so:
  *   • Different sessions can start in different directories.
- *   • Scripts are cleaned up after the session exits.
+ *   • Scripts are cleaned up after the session exits
  */
 public class InitScriptWriter {
 
@@ -22,7 +22,7 @@ public class InitScriptWriter {
     /**
      * Writes a session init script to {@code outputPath}.
      *
-     * @param outputPath  Where to write the script (e.g. filesDir/init_tab1.sh).
+     * @param outputPath  Where to write the script (e.g. filesDir/init_tab1.sh)
      * @param projectCwd  Proot-accessible path to open on startup.
      *                    Falls back silently to /root if the dir doesn't exist inside proot.
      */
@@ -33,6 +33,11 @@ public class InitScriptWriter {
         String safeCwd = (projectCwd != null && !projectCwd.isEmpty())
             ? projectCwd.replace("'", "'\\''")
             : "/root";
+
+        // Escape single quotes in hostname for embedding in shell
+        String safeHost = hostname != null
+            ? hostname.replace("'", "'\\''")
+            : "localhost";
 
         String script =
             "#!/bin/sh\n" +
@@ -63,10 +68,41 @@ public class InitScriptWriter {
             "    echo -e \"\\e[31m[!] Path not found, opened /root\\e[0m\"\n" +
             "fi\n" +
             // Dynamic hostname (reads from file so setHostname() takes effect live)
-            "MSCODE_HOST=$(cat /etc/mscode_hostname 2>/dev/null || echo '" + hostname + "')\n" +
-            "export PS1='\\[\\e[1;32m\\]ide@'\"$MSCODE_HOST\"'\\[\\e[0m\\]:\\[\\e[1;34m\\]\\w\\[\\e[0m\\]$ '\n" +
-            // Use bash if available, ash otherwise
-            "if [ -f /bin/bash ]; then exec /bin/bash --login; else exec /bin/ash; fi\n";
+            "MSCODE_HOST=$(cat /etc/mscode_hostname 2>/dev/null || echo '" + safeHost + "')\n" +
+            // Short path: max last 2 components  →  ../0/Download
+            "_short_pwd() {\n" +
+            "  pwd | awk -F/ '{\n" +
+            "    if (NF <= 1) { print \"/\"; exit }\n" +
+            "    if (NF == 2) { print \"/\" $2; exit }\n" +
+            "    if (NF == 3) { print $(NF-1) \"/\" $NF; exit }\n" +
+            "    print \"../\" $(NF-1) \"/\" $NF\n" +
+            "  }'\n" +
+            "}\n" +
+            // Bash: refresh PS1 every prompt via PROMPT_COMMAND
+            // Ash: PS1 with $(_short_pwd) is expanded each time on busybox ash too
+            "export PROMPT_COMMAND='PS1=\"\\[\\e[1;32m\\]${MSCODE_HOST}\\[\\e[0m\\]:\\[\\e[1;34m\\]$(_short_pwd)\\[\\e[0m\\]\\$ \"'\n" +
+            "export PS1='\\[\\e[1;32m\\]'" + "\"$MSCODE_HOST\"" + "'\\[\\e[0m\\]:\\[\\e[1;34m\\]$(_short_pwd)\\[\\e[0m\\]\\$ '\n" +
+            // Persist into ~/.bashrc so `bash --login` does not wipe the short prompt
+            "if [ -f /bin/bash ]; then\n" +
+            "  # Idempotent: only inject once\n" +
+            "  if ! grep -q '_short_pwd' /root/.bashrc 2>/dev/null; then\n" +
+            "    cat >> /root/.bashrc << 'MSCODE_PROMPT'\n" +
+            "_short_pwd() {\n" +
+            "  pwd | awk -F/ '{\n" +
+            "    if (NF <= 1) { print \"/\"; exit }\n" +
+            "    if (NF == 2) { print \"/\" $2; exit }\n" +
+            "    if (NF == 3) { print $(NF-1) \"/\" $NF; exit }\n" +
+            "    print \"../\" $(NF-1) \"/\" $NF\n" +
+            "  }'\n" +
+            "}\n" +
+            "MSCODE_HOST=$(cat /etc/mscode_hostname 2>/dev/null || echo localhost)\n" +
+            "PROMPT_COMMAND='PS1=\"\\[\\e[1;32m\\]${MSCODE_HOST}\\[\\e[0m\\]:\\[\\e[1;34m\\]$(_short_pwd)\\[\\e[0m\\]\\$ \"'\n" +
+            "MSCODE_PROMPT\n" +
+            "  fi\n" +
+            "  exec /bin/bash --login\n" +
+            "else\n" +
+            "  exec /bin/ash\n" +
+            "fi\n";
 
         File f = new File(outputPath);
         f.getParentFile().mkdirs();

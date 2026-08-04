@@ -151,7 +151,7 @@ public class ProotCommandBuilder {
         env.add("HOME=/root");
         env.add("TERM=xterm-256color");
         env.add("LANG=C.UTF-8");
-        env.add("PS1=\\[\\e[1;32m\\]ide@mscode\\[\\e[0m\\]:\\[\\e[1;34m\\]$(pwd | awk -F/ '{if (NF>3) print \"../\"$(NF-1)\"/\"$NF; else print $0}')\\[\\e[0m\\] /~ $ ");
+        env.add("PS1=\\[\\e[1;32m\\]\\h\\[\\e[0m\\]:\\[\\e[1;34m\\]$(pwd | awk -F/ \'{if (NF>3) print \"../\"$(NF-1)\"/\"$NF; else if (NF>=2) print $(NF-1)\"/\"$NF; else print $0}\')\\[\\e[0m\\]\\$ ");
         env.add("TMPDIR=" + tmpPath);
         env.add("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
         env.add("LD_LIBRARY_PATH=" + filesDir + ":" + nativeLibDir);
