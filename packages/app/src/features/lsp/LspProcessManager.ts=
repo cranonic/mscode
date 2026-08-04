@@ -251,35 +251,11 @@ export class LspProcessManager {
         }
     }
 
-    /**
-     * Stops tracked LSP server(s).
-     * Always attempts a native killLsp so the proot/language-server process
-     * and listening WebSocket are torn down — not just the JS port map.
-     */
     public stopServer(language?: string): void {
-        const kill = (lang: string, port: number) => {
-            this.activePorts.delete(lang);
-            // Fire-and-forget native teardown
-            NativeTerminal.killLsp({ port }).catch((err: any) => {
-                console.warn(`[LSP] killLsp(${port}) for ${lang} failed:`, err);
-            });
-        };
-
         if (language) {
-            const port = this.activePorts.get(language);
-            if (port != null) kill(language, port);
-            else this.activePorts.delete(language);
+            this.activePorts.delete(language);
         } else {
-            // Snapshot then clear — kill every tracked server
-            const entries = [...this.activePorts.entries()];
             this.activePorts.clear();
-            for (const [lang, port] of entries) {
-                NativeTerminal.killLsp({ port }).catch((err: any) => {
-                    console.warn(`[LSP] killLsp(${port}) for ${lang} failed:`, err);
-                });
-            }
-            // Belt-and-suspenders: also ask native to wipe any orphans
-            NativeTerminal.killAllLsp?.().catch(() => {});
         }
     }
 
