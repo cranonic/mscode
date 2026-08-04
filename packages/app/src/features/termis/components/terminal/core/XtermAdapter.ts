@@ -14,7 +14,6 @@
 //   // later:
 //   adapter.dispose();
 
-
 import type { TerminalProcess } from './TerminalProcess';
 
 // ─── Theme Type ───────────────────────────────────────────────────────────────
@@ -67,7 +66,7 @@ export interface TerminalOptions {
   cursorStyle?: 'block' | 'underline' | 'bar';
   fontLigatures?: boolean;
   mouseWheelZoom?: boolean;
-  
+
   cursorBlink?: boolean;
   cursorWidth?: number;
   scrollback?: number;
@@ -150,7 +149,7 @@ export class XtermAdapter {
       macOptionIsMeta:       this.options.macOptionIsMeta,
       rightClickSelectsWord: this.options.rightClickSelectsWord,
       fastScrollModifier:    this.options.fastScrollModifier,
-      
+
       allowProposedApi:      true,
       allowTransparency:     false,
       convertEol:            true,
@@ -168,6 +167,7 @@ export class XtermAdapter {
     this._setupResizeObserver();
     this._setupMouseWheelZoom();
     this._setupTouchScrolling();
+    this._setupMobileSelection();
   }
 
   private async _loadAddons(): Promise<void> {
@@ -252,8 +252,8 @@ export class XtermAdapter {
     const doFit = () => {
       clearTimeout(this._fitTimer);
       this._fitTimer = setTimeout(() => {
-        try { 
-          this.fitAddon?.fit(); 
+        try {
+          this.fitAddon?.fit();
           if (this.xterm && this.xterm.cols && this.xterm.rows) {
             this.process.resize(this.xterm.cols, this.xterm.rows);
           }
@@ -268,21 +268,21 @@ export class XtermAdapter {
       doFit();
       setTimeout(doFit, 150);
       setTimeout(doFit, 300);
-      setTimeout(doFit, 500); 
+      setTimeout(doFit, 500);
     };
-    
+
     window.addEventListener('resize', onWindowResize);
     this.disposables.push({ dispose: () => window.removeEventListener('resize', onWindowResize) });
   }
 
   private _onWheel = (e: WheelEvent) => {
     if (!this.options.mouseWheelZoom) return;
-    
+
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       const currentSize = this.options.fontSize || 13;
       const newSize = e.deltaY > 0 ? Math.max(6, currentSize - 1) : Math.min(100, currentSize + 1);
-      
+
       this.updateSettings({ fontSize: newSize });
     }
   };
@@ -293,34 +293,34 @@ export class XtermAdapter {
       dispose: () => this.container.removeEventListener('wheel', this._onWheel)
     });
   }
-  
+
   // Programmatic Touch Scrolling for Web/Mobile
   private _setupTouchScrolling() {
     let lastY = 0;
+    let scrolling = false;
 
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 1) {
         lastY = e.touches[0].clientY;
+        scrolling = false;
       }
     };
 
     const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 1) {
-        // Preventing Browser Default "Pull-to-refresh" or Page Bounce 
-        e.preventDefault(); 
-        
+      if (e.touches.length === 1 && this.xterm) {
         const currentY = e.touches[0].clientY;
-        const deltaY = lastY - currentY; // Positive => Up Swipe
-        
+        const deltaY = lastY - currentY;
+
         const lineHeight = (this.options.fontSize || 14) * 1.2;
 
         if (Math.abs(deltaY) >= lineHeight) {
+          // Mark as scroll so long-press selection cancels
+          scrolling = true;
+          e.preventDefault();
+
           const linesToScroll = Math.trunc(deltaY / lineHeight);
-          
-          if (this.xterm) {
-            this.xterm.scrollLines(linesToScroll);
-          }
-          
+
+          this.xterm.scrollLines(linesToScroll);
           lastY -= (linesToScroll * lineHeight);
         }
       }
@@ -329,13 +329,119 @@ export class XtermAdapter {
     this.container.addEventListener('touchstart', onTouchStart, { passive: true });
     this.container.addEventListener('touchmove', onTouchMove, { passive: false });
 
-    // Memory Leak Prevent during Dispose 
     this.disposables.push({
       dispose: () => {
         this.container.removeEventListener('touchstart', onTouchStart);
         this.container.removeEventListener('touchmove', onTouchMove);
       }
     });
+
+    // Expose scrolling flag for mobile selection (shared via closure on instance)
+    (this as any)._touchScrolling = () => scrolling;
+    (this as any)._resetTouchScrolling = () => { scrolling = false; };
+  }
+
+  /**
+   * Long-press (~500ms) selects a word under the finger.
+   * Cancels if the finger moves more than ~10px (scroll / drag).
+   */
+  private _setupMobileSelection() {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let startX = 0;
+    let startY = 0;
+
+    const clearTimer = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1 || !this.xterm) return;
+      const t = e.touches[0];
+      startX = t.clientX;
+      startY = t.clientY;
+      (this as any)._resetTouchScrolling?.();
+
+      clearTimer();
+      timer = setTimeout(() => {
+        // If user was scrolling, don't select
+        if ((this as any)._touchScrolling?.()) return;
+
+        const rect = this.container.getBoundingClientRect();
+        const { cellW, cellH } = this._getCellSize();
+        if (cellW <= 0 || cellH <= 0) return;
+
+        const col = Math.max(0, Math.min(
+          this.xterm.cols - 1,
+          Math.floor((startX - rect.left) / cellW)
+        ));
+        const rowInViewport = Math.max(0, Math.min(
+          this.xterm.rows - 1,
+          Math.floor((startY - rect.top) / cellH)
+        ));
+        const bufferRow = rowInViewport + this.xterm.buffer.active.viewportY;
+
+        try {
+          // Select a short span; onSelectionChange in the hook will show the menu
+          this.xterm.select(Math.max(0, col - 1), bufferRow, 12);
+        } catch {
+          try {
+            this.xterm.select(col, bufferRow, 1);
+          } catch {}
+        }
+      }, 500);
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!timer || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      if (Math.abs(t.clientX - startX) > 12 || Math.abs(t.clientY - startY) > 12) {
+        clearTimer();
+      }
+    };
+
+    const onTouchEnd = () => clearTimer();
+
+    this.container.addEventListener('touchstart', onTouchStart, { passive: true });
+    this.container.addEventListener('touchmove', onTouchMove, { passive: true });
+    this.container.addEventListener('touchend', onTouchEnd);
+    this.container.addEventListener('touchcancel', onTouchEnd);
+
+    this.disposables.push({
+      dispose: () => {
+        clearTimer();
+        this.container.removeEventListener('touchstart', onTouchStart);
+        this.container.removeEventListener('touchmove', onTouchMove);
+        this.container.removeEventListener('touchend', onTouchEnd);
+        this.container.removeEventListener('touchcancel', onTouchEnd);
+      },
+    });
+  }
+
+  /** Shared cell size helper for selection metrics + mobile select. */
+  private _getCellSize(): { cellW: number; cellH: number } {
+    let cellW = 8;
+    let cellH = 16;
+    if (!this.xterm) return { cellW, cellH };
+
+    try {
+      const core = (this.xterm as any)._core;
+      const dim = core?._renderService?.dimensions;
+      if (dim?.css?.cell?.width && dim.css.cell.width > 0) {
+        cellW = dim.css.cell.width;
+        cellH = dim.css.cell.height;
+      } else if (dim?.actualCellWidth && dim.actualCellWidth > 0) {
+        cellW = dim.actualCellWidth;
+        cellH = dim.actualCellHeight;
+      } else if (this.container.clientWidth && this.xterm.cols) {
+        cellW = this.container.clientWidth / this.xterm.cols;
+        cellH = this.container.clientHeight / Math.max(1, this.xterm.rows);
+      }
+    } catch {}
+
+    return { cellW, cellH };
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -355,13 +461,32 @@ export class XtermAdapter {
     return this.searchAddon?.findPrevious(term) ?? false;
   }
 
+  /**
+   * Clears viewport AND scrollback buffer.
+   * xterm.clear() alone only clears the visible area — history remains on scroll-up.
+   */
   clear(): void {
-    this.xterm?.clear();
+    if (!this.xterm) return;
+    // CSI 2J = erase display, CSI 3J = erase scrollback, CSI H = cursor home
+    this.xterm.write('\x1b[2J\x1b[3J\x1b[H');
+    this.xterm.clear();
+    try {
+      this.xterm.scrollToBottom();
+    } catch {}
   }
 
   setTheme(theme: XtermTheme): void {
     this.theme = theme;
-    this.xterm?.options.setOption('theme', this._mapTheme());
+    if (this.xterm?.options) {
+      // xterm v5+ uses options.theme assignment
+      try {
+        this.xterm.options.theme = this._mapTheme();
+      } catch {
+        try {
+          this.xterm.options.setOption?.('theme', this._mapTheme());
+        } catch {}
+      }
+    }
   }
 
   // Update Settings Dynamically
@@ -370,7 +495,6 @@ export class XtermAdapter {
 
     this.options = { ...this.options, ...settings };
 
-    // Apply all settings directly to xterm.options
     if (settings.fontSize !== undefined) this.xterm.options.fontSize = settings.fontSize;
     if (settings.fontFamily !== undefined) this.xterm.options.fontFamily = settings.fontFamily;
     if (settings.fontWeight !== undefined) this.xterm.options.fontWeight = settings.fontWeight;
@@ -384,7 +508,6 @@ export class XtermAdapter {
     if (settings.rightClickSelectsWord !== undefined) this.xterm.options.rightClickSelectsWord = settings.rightClickSelectsWord;
     if (settings.fastScrollModifier !== undefined) this.xterm.options.fastScrollModifier = settings.fastScrollModifier;
 
-    // Font Ligatures toggle
     if (settings.fontLigatures !== undefined) {
       if (settings.fontLigatures) {
         await this._enableLigatures();
@@ -395,8 +518,6 @@ export class XtermAdapter {
 
     this.fit();
   }
-  
-  // Add these inside XtermAdapter class (Before dispose method)
 
   public get xtermInstance() {
     return this.xterm;
@@ -410,37 +531,54 @@ export class XtermAdapter {
     this.xterm?.clearSelection();
   }
 
-  // Safe Metric Calculation for WebGL & Canvas
+  /**
+   * Selection metrics in container-local CSS pixels (viewport-relative rows).
+   * Handles both xterm selection position shapes:
+   *   - { startColumn, startRow, endColumn, endRow }
+   *   - { start: {x,y}, end: {x,y} }
+   */
   public getSelectionMetrics() {
     if (!this.xterm) return null;
-    
-    const pos = this.xterm.getSelectionPosition();
+
+    const pos = this.xterm.getSelectionPosition?.();
     if (!pos) return null;
 
-    const core = (this.xterm as any)._core;
-    let cellW = 8;
-    let cellH = 16;
+    let startColumn: number;
+    let startRow: number;
+    let endColumn: number;
+    let endRow: number;
 
-    // Safety fallback: যদি WebGL অ্যাডন সেল ডাইমেনশন লুকিয়ে ফেলে, তবে কন্টেইনার থেকে ভাগ করে নেবে
-    try {
-      if (core?._renderService?.dimensions?.css?.cell?.width) {
-        cellW = core._renderService.dimensions.css.cell.width;
-        cellH = core._renderService.dimensions.css.cell.height;
-      } else if (this.container.clientWidth && this.xterm.cols) {
-        cellW = this.container.clientWidth / this.xterm.cols;
-        cellH = this.container.clientHeight / this.xterm.rows;
-      }
-    } catch(e) {}
+    if (pos.start && typeof pos.start === 'object') {
+      startColumn = pos.start.x;
+      startRow    = pos.start.y;
+      endColumn   = pos.end.x;
+      endRow      = pos.end.y;
+    } else {
+      startColumn = pos.startColumn;
+      startRow    = pos.startRow;
+      endColumn   = pos.endColumn;
+      endRow      = pos.endRow;
+    }
+
+    if (
+      startColumn == null || startRow == null ||
+      endColumn == null || endRow == null
+    ) {
+      return null;
+    }
+
+    const { cellW, cellH } = this._getCellSize();
+    if (cellW <= 0 || cellH <= 0) return null;
 
     const viewportY = this.xterm.buffer.active.viewportY;
 
     return {
-      startColumn: pos.startColumn,
-      startRow: pos.startRow - viewportY,
-      endColumn: pos.endColumn,
-      endRow: pos.endRow - viewportY,
+      startColumn,
+      startRow: startRow - viewportY,
+      endColumn,
+      endRow: endRow - viewportY,
       cellW,
-      cellH
+      cellH,
     };
   }
 
@@ -448,14 +586,14 @@ export class XtermAdapter {
     clearTimeout(this._fitTimer);
     this.resizeObserver?.disconnect();
     this.disposables.forEach(d => d.dispose());
-    
+
     this._disableLigatures();
     this.webglAddon?.dispose();
     this.searchAddon?.dispose();
     this.webLinksAddon?.dispose();
     this.fitAddon?.dispose();
     this.xterm?.dispose();
-    
+
     this.xterm = null;
   }
 

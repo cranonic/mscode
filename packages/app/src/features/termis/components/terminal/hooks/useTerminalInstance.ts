@@ -8,7 +8,6 @@ import { useSettingsStore } from '@/features/settings/store/settingsStore';
 import { terminalProcessRegistry } from '../core/TerminalRegistry';
 import { Clipboard } from '@capacitor/clipboard';
 
-
 interface UseTerminalInstanceOptions {
   terminalId: string;
 }
@@ -19,10 +18,16 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
   const adapterRef   = useRef<XtermAdapter | null>(null);
 
   // Selection State for Teardrops & Menu
-  const [selection, setSelection] = useState<{ text: string, startX: number, startY: number, endX: number, endY: number } | null>(null);
+  const [selection, setSelection] = useState<{
+    text: string;
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+  } | null>(null);
 
-  const { instances, updateInstance }  = useTerminalStore();
-  const settings                       = useSettingsStore(s => s.settings);
+  const { instances, updateInstance } = useTerminalStore();
+  const settings = useSettingsStore(s => s.settings);
 
   const instance = instances.find(t => t.id === terminalId);
 
@@ -32,6 +37,8 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
     if (!containerRef.current || !instance) return;
 
     let alive = true;
+    let selTimeout: ReturnType<typeof setTimeout> | undefined;
+    let selectionDisposable: { dispose(): void } | undefined;
 
     const boot = async () => {
       // 1. Spawn process
@@ -44,22 +51,23 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
       });
       processRef.current = proc;
       terminalProcessRegistry.register(instance.id, {
-        write: (data: string) => { 
-          proc.write(data).catch(() => {}); 
+        write: (data: string) => {
+          proc.write(data).catch(() => {});
         },
-        kill: () => { 
-          proc.kill(); 
+        kill: () => {
+          proc.kill();
         },
-        clear: () => { 
-          // Clear UI by (XtermAdapter)
-          adapterRef.current?.clear(); 
-        }
+        clear: () => {
+          // Clears viewport + scrollback via XtermAdapter.clear()
+          adapterRef.current?.clear();
+        },
       });
-      // 2. Determine theme from workbench setting
+
+      // 2. Theme
       const isLight = settings['workbench.theme'] === 'vs-light';
       const theme   = isLight ? LIGHT_XTERM_THEME : DARK_XTERM_THEME;
 
-      // 3. Create xterm adapter with all initial settings
+      // 3. Adapter
       const adapter = new XtermAdapter(
         containerRef.current!,
         proc,
@@ -73,7 +81,7 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
           tabStopWidth:    settings['terminal.integrated.tabStopWidth'] as number ?? 8,
           fontLigatures:   settings['terminal.integrated.fontLigatures'] as boolean ?? false,
           mouseWheelZoom:  settings['terminal.integrated.mouseWheelZoom'] as boolean ?? false,
-          
+
           cursorBlink:     settings['terminal.integrated.cursorBlink'] as boolean ?? true,
           cursorWidth:     settings['terminal.integrated.cursorWidth'] as number ?? 2,
           scrollback:      settings['terminal.integrated.scrollback'] as number ?? 10000,
@@ -92,34 +100,58 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
       // 5. Init xterm UI
       await adapter.init();
 
-      // Android Default Menu Block
+      // Block Android default context menu
       containerRef.current?.addEventListener('contextmenu', (e) => e.preventDefault());
 
-      // SELECTION HANDLER WITH DEBOUNCE (Double-Click Delay Fix)
-      let selTimeout: any;
-      adapter.xtermInstance?.onSelectionChange(() => {
-        clearTimeout(selTimeout);
-        
-        // 100ms wait for dbl click selection
-        selTimeout = setTimeout(() => {
-          const text = adapter.getSelection();
-          if (!text || text.trim() === '') {
-            setSelection(null);
-            return;
-          }
+      // ── Selection → teardrops + floating menu ────────────────────────────
+      const xterm = adapter.xtermInstance;
+      if (xterm?.onSelectionChange) {
+        selectionDisposable = xterm.onSelectionChange(() => {
+          clearTimeout(selTimeout);
 
-          const m = adapter.getSelectionMetrics();
-          if (!m || m.cellW === 0) return;
+          selTimeout = setTimeout(() => {
+            const text = adapter.getSelection();
+            if (!text || text.trim() === '') {
+              setSelection(null);
+              return;
+            }
 
-          const PADDING = 10;
-          const startX = (m.startColumn * m.cellW) + PADDING;
-          const startY = (m.startRow * m.cellH) + PADDING;
-          const endX   = (m.endColumn * m.cellW) + PADDING;
-          const endY   = ((m.endRow + 1) * m.cellH) + PADDING;
+            const m = adapter.getSelectionMetrics();
+            if (!m || m.cellW <= 0 || m.cellH <= 0) {
+              // Metrics unavailable — still show menu near top of terminal
+              setSelection({
+                text,
+                startX: 16,
+                startY: 16,
+                endX: 80,
+                endY: 40,
+              });
+              return;
+            }
 
-          setSelection({ text, startX, startY, endX, endY });
-        }, 100); 
-      });
+            // Viewport-relative pixel coords (overlay is position:absolute inset:0)
+            let startX = m.startColumn * m.cellW;
+            let startY = m.startRow * m.cellH;
+            let endX   = m.endColumn * m.cellW;
+            let endY   = (m.endRow + 1) * m.cellH;
+
+            // Selection scrolled out of view → hide handles, keep text for copy if needed
+            const viewH = containerRef.current?.clientHeight ?? 0;
+            if (endY < 0 || startY > viewH) {
+              setSelection(null);
+              return;
+            }
+
+            // Clamp into visible area so menu is never at weird negative coords
+            startX = Math.max(0, startX);
+            startY = Math.max(0, startY);
+            endX   = Math.max(startX + 4, endX);
+            endY   = Math.max(startY + 4, endY);
+
+            setSelection({ text, startX, startY, endX, endY });
+          }, 80);
+        });
+      }
 
       // 6. Track process events
       proc.on(event => {
@@ -138,16 +170,19 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
 
     return () => {
       alive = false;
+      clearTimeout(selTimeout);
+      selectionDisposable?.dispose();
       terminalProcessRegistry.unregister(instance.id);
       if (processRef.current) {
-         processRef.current.kill();
-         processRef.current = null;
+        processRef.current.kill();
+        processRef.current = null;
       }
       if (adapterRef.current) {
-         adapterRef.current = null;
+        adapterRef.current.dispose();
+        adapterRef.current = null;
       }
       if (containerRef.current) {
-         containerRef.current.innerHTML = '';
+        containerRef.current.innerHTML = '';
       }
     };
   }, []);
@@ -171,7 +206,7 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
         tabStopWidth:    settings['terminal.integrated.tabStopWidth'] as number,
         fontLigatures:   settings['terminal.integrated.fontLigatures'] as boolean,
         mouseWheelZoom:  settings['terminal.integrated.mouseWheelZoom'] as boolean,
-        
+
         cursorBlink:     settings['terminal.integrated.cursorBlink'] as boolean,
         cursorWidth:     settings['terminal.integrated.cursorWidth'] as number,
         scrollback:      settings['terminal.integrated.scrollback'] as number,
@@ -191,7 +226,7 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
     settings['terminal.integrated.tabStopWidth'],
     settings['terminal.integrated.fontLigatures'],
     settings['terminal.integrated.mouseWheelZoom'],
-    
+
     settings['terminal.integrated.cursorBlink'],
     settings['terminal.integrated.cursorWidth'],
     settings['terminal.integrated.scrollback'],
@@ -200,26 +235,27 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
     settings['terminal.integrated.fastScrollModifier']
   ]);
 
-  // Copy/Paste Actions ───────────────────────────────────────────────
+  // Copy / Paste ───────────────────────────────────────────────────────────
   const handleCopy = useCallback(async () => {
-  if (selection?.text) {
-    await Clipboard.write({ string: selection.text });
-    adapterRef.current?.clearSelection();
-    setSelection(null);
-  }
-}, [selection]);
-
-// Paste Action
-const handlePaste = useCallback(async () => {
-  try {
-    const { value } = await Clipboard.read();
-    if (value && processRef.current) {
-      processRef.current.write(value);
+    if (selection?.text) {
+      await Clipboard.write({ string: selection.text });
+      adapterRef.current?.clearSelection();
+      setSelection(null);
     }
-  } catch (err) {
-    console.error("Paste failed", err);
-  }
-}, []);
+  }, [selection]);
+
+  const handlePaste = useCallback(async () => {
+    try {
+      const { value } = await Clipboard.read();
+      if (value && processRef.current) {
+        processRef.current.write(value);
+      }
+      setSelection(null);
+      adapterRef.current?.clearSelection();
+    } catch (err) {
+      console.error('Paste failed', err);
+    }
+  }, []);
 
   // ── Public ────────────────────────────────────────────────────────────────
 
@@ -230,5 +266,15 @@ const handlePaste = useCallback(async () => {
   const findNext     = useCallback((t: string) => adapterRef.current?.findNext(t)     ?? false, []);
   const findPrevious = useCallback((t: string) => adapterRef.current?.findPrevious(t) ?? false, []);
 
-  return { containerRef, focus, clear, fit, findNext, findPrevious, selection, handleCopy, handlePaste };
+  return {
+    containerRef,
+    focus,
+    clear,
+    fit,
+    findNext,
+    findPrevious,
+    selection,
+    handleCopy,
+    handlePaste,
+  };
 }
