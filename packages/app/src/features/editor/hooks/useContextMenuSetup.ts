@@ -88,6 +88,8 @@ export function useContextMenuSetup({
     };
 
     const getMenuItems = () => [
+      // Core clipboard / edit only — LSP & Format items come from
+      // registerEditorMenu('editor/code/context') to avoid duplicates.
       { 
         id: 'copy', label: 'Copy', icon: 'files', shortcut: 'Ctrl+C', order: 10,
         onClick: async () => {
@@ -130,43 +132,13 @@ export function useContextMenuSetup({
       },
       { 
         id: 'selectAll', label: 'Select All', icon: 'clear-all', shortcut: 'Ctrl+A', order: 20,
-        onClick: () => commands.executeCommand('editor.action.selectAll') 
+        onClick: () => {
+          // Always target THIS editor instance (not getEditors()[0])
+          editor.focus();
+          editor.trigger('keyboard', 'editor.action.selectAll', null);
+        }
       },
       { type: 'separator', id: 'sep-edit', order: 40 },
-      // LSP actions (also registered via registerEditorMenu for extension merge)
-      {
-        id: 'gotoDefinition', label: 'Go to Definition', icon: 'go-to-file', order: 50,
-        onClick: () => {
-          editor.focus();
-          editor.trigger('menu', 'editor.action.revealDefinition', null);
-        },
-      },
-      {
-        id: 'renameSymbol', label: 'Rename Symbol', icon: 'edit', shortcut: 'F2', order: 60,
-        onClick: () => {
-          editor.focus();
-          editor.trigger('menu', 'editor.action.rename', null);
-        },
-      },
-      {
-        id: 'format', label: 'Format Document', icon: 'check', order: 70,
-        onClick: () => {
-          editor.focus();
-          editor.trigger('menu', 'editor.action.formatDocument', null);
-        },
-      },
-      {
-        id: 'formatSelection', label: 'Format Selection', icon: 'check', order: 71,
-        onClick: () => {
-          editor.focus();
-          editor.trigger('menu', 'editor.action.formatSelection', null);
-        },
-      },
-      { type: 'separator', id: 'sep2', order: 80 },
-      {
-        id: 'renameFile', label: 'Rename File…', icon: 'file', order: 90,
-        onClick: () => commands.executeCommand('workbench.action.renameActiveFile'),
-      },
       { 
         id: 'commandPalette', label: 'Command Palette', icon: 'search', order: 100,
         shortcut: getShortcut('workbench.action.showCommands'),

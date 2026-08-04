@@ -146,10 +146,14 @@ commands.registerCommand('workbench.action.selectIconTheme', () => {
 
 /** Selects all text in the active Monaco editor. */
 commands.registerCommand('editor.action.selectAll', () => {
-  const activeEditor = monaco.editor.getEditors()[0];
-  if (activeEditor) {
-    activeEditor.trigger('keyboard', 'editor.action.selectAll', null);
-    activeEditor.focus();
+  // Prefer focused editor; fall back to the one tracked by command registry
+  const editor =
+    monaco.editor.getEditors().find(e => e.hasTextFocus()) ??
+    commands.getActiveEditor?.() ??
+    monaco.editor.getEditors()[0];
+  if (editor) {
+    editor.focus();
+    editor.trigger('keyboard', 'editor.action.selectAll', null);
   }
 });
 
