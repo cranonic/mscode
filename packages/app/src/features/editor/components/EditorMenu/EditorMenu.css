@@ -65,11 +65,16 @@
   margin: 0 4px;
 }
 
-/* ── Overflow Context Submenus ── */
+/* ── Overflow Context Submenus (⋮ dropdown) ──
+ * Default sits below the bar, right-aligned.
+ * EditorMenu.tsx overrides top/left/bottom/maxHeight via inline style
+ * after measuring so the panel never leaves the viewport.
+ */
 .ms-android-dropdown {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
+  left: auto;
   min-width: 150px;
   background-color: var(--ms-bg-side);
   border: 1px solid var(--ms-menu-border);
@@ -78,6 +83,7 @@
   padding: 4px 0;
   max-height: 250px;
   overflow-y: auto;
+  z-index: 1001;
 }
 
 /* ── Overflow Scroll Axis Configurations ── */
@@ -143,9 +149,16 @@
   flex: 1; 
 }
 
-/* ── Boundary Collision Adapters ── */
-/* Inverts the projection direction of overflow elements when colliding with bottom viewport limits */
+/* ── Boundary Collision Adapters ──
+ * Fallback when JS has not yet set inline bottom/top.
+ * Inline styles from EditorMenu win when present.
+ */
 .dropdown-up {
-  top: auto !important;
-  bottom: calc(100% + 4px) !important;
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
+/* Vertical menu may receive maxHeight from JS when near screen edges */
+.ms-vertical-menu {
+  box-sizing: border-box;
 }

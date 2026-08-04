@@ -17,7 +17,7 @@ export const menuProperties: IConfigurationSection['properties'] = {
   'editor.androidMenuOverflowLimit': {
     title: 'Android Menu Overflow Limit',
     type: 'number',
-    defaultValue: 4,
+    defaultValue: 5,
     minimum: 1,
     maximum: 10,
     order: 151,
