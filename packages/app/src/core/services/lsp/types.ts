@@ -41,6 +41,30 @@ export interface LspOptions {
   completion?: boolean;
   linting?: boolean;
   signatureHelp?: boolean;
+  /** Find All References / Peek References */
+  references?: boolean;
+  /** Lightbulb quick-fix / code actions */
+  codeActions?: boolean;
+  /** Same-symbol highlight under cursor */
+  documentHighlight?: boolean;
+  /** Outline / Go to Symbol in File */
+  documentSymbol?: boolean;
+  /** Semantic folding ranges */
+  foldingRange?: boolean;
+  /** CodeLens above lines */
+  codeLens?: boolean;
+  /** Document links (imports, URLs) */
+  documentLink?: boolean;
+  /** Smart select expand/shrink */
+  selectionRange?: boolean;
+  /** LSP document colours (CSS etc.) */
+  colorProvider?: boolean;
+  /** Format on type (; } etc.) */
+  onTypeFormatting?: boolean;
+  /** Semantic tokens highlighting */
+  semanticTokens?: boolean;
+  /** Parameter / type inlay hints */
+  inlayHints?: boolean;
   rootUri?: string;
   fileUri?: string;
 }

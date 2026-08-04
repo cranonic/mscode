@@ -40,6 +40,9 @@ export function registerProviders(state: LspState, options: LspOptions): void {
   if (options.hover         !== false) registerHover(state);
   if (options.signatureHelp !== false) registerSignatureHelp(state);
   registerDefinition(state);
+  // Format / Rename — always on when server is connected (no separate option flags yet)
+  registerDocumentFormatting(state);
+  registerRename(state);
   bindModelTracking(state);
 }
 
@@ -426,6 +429,225 @@ function bindModelTracking(state: LspState): void {
       if (state.initialized && model.getLanguageId() === state.languageId) {
         notifyDocumentOpen(state, model);
       }
+    })
+  );
+}
+
+
+
+// §7  Document Formatting  –  textDocument/formatting
+
+/**
+ * Registers an LSP-backed document formatting provider.
+ * Monaco's built-in `editor.action.formatDocument` will call this.
+ */
+function registerDocumentFormatting(state: LspState): void {
+  state.disposables.push(
+    monaco.languages.registerDocumentFormattingEditProvider(state.languageId, {
+      provideDocumentFormattingEdits: async (model, options) => {
+        if (!state.initialized) return [];
+
+        try {
+          // Push latest content so the server formats what the user actually sees
+          sendNotify(state, 'textDocument/didChange', {
+            textDocument:   { uri: getDocUri(model, state), version: model.getVersionId() },
+            contentChanges: [{ text: model.getValue() }],
+          });
+
+          const result: any = await sendRequest(state, 'textDocument/formatting', {
+            textDocument: { uri: getDocUri(model, state) },
+            options: {
+              tabSize:      options.tabSize,
+              insertSpaces: options.insertSpaces,
+            },
+          });
+
+          if (!Array.isArray(result) || result.length === 0) return [];
+
+          return result.map((edit: any) => ({
+            range: {
+              startLineNumber: (edit.range?.start?.line      ?? 0) + 1,
+              startColumn:     (edit.range?.start?.character ?? 0) + 1,
+              endLineNumber:   (edit.range?.end?.line        ?? 0) + 1,
+              endColumn:       (edit.range?.end?.character   ?? 0) + 1,
+            },
+            text: edit.newText ?? '',
+          }));
+        } catch (e) {
+          console.warn('[LSP] formatting failed:', e);
+          return [];
+        }
+      },
+    })
+  );
+
+  // Optional: format selection / range
+  state.disposables.push(
+    monaco.languages.registerDocumentRangeFormattingEditProvider(state.languageId, {
+      provideDocumentRangeFormattingEdits: async (model, range, options) => {
+        if (!state.initialized) return [];
+
+        try {
+          sendNotify(state, 'textDocument/didChange', {
+            textDocument:   { uri: getDocUri(model, state), version: model.getVersionId() },
+            contentChanges: [{ text: model.getValue() }],
+          });
+
+          const result: any = await sendRequest(state, 'textDocument/rangeFormatting', {
+            textDocument: { uri: getDocUri(model, state) },
+            range: {
+              start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
+              end:   { line: range.endLineNumber   - 1, character: range.endColumn   - 1 },
+            },
+            options: {
+              tabSize:      options.tabSize,
+              insertSpaces: options.insertSpaces,
+            },
+          });
+
+          if (!Array.isArray(result) || result.length === 0) return [];
+
+          return result.map((edit: any) => ({
+            range: {
+              startLineNumber: (edit.range?.start?.line      ?? 0) + 1,
+              startColumn:     (edit.range?.start?.character ?? 0) + 1,
+              endLineNumber:   (edit.range?.end?.line        ?? 0) + 1,
+              endColumn:       (edit.range?.end?.character   ?? 0) + 1,
+            },
+            text: edit.newText ?? '',
+          }));
+        } catch {
+          return [];
+        }
+      },
+    })
+  );
+}
+
+
+// §8  Rename Symbol  –  textDocument/rename (+ prepareRename)
+
+/**
+ * Registers an LSP-backed rename provider.
+ * Monaco's built-in rename widget (`editor.action.rename` / F2 on symbol)
+ * calls this — no custom modal required.
+ */
+function registerRename(state: LspState): void {
+  state.disposables.push(
+    monaco.languages.registerRenameProvider(state.languageId, {
+      // Optional: validate the symbol under the cursor before showing the input
+      resolveRenameLocation: async (model, position) => {
+        if (!state.initialized) return null;
+        try {
+          const result: any = await sendRequest(state, 'textDocument/prepareRename', {
+            textDocument: { uri: getDocUri(model, state) },
+            position:     { line: position.lineNumber - 1, character: position.column - 1 },
+          });
+
+          if (!result) return null;
+
+          // Server may return Range or { range, placeholder }
+          const r = result.range ?? result;
+          if (r?.start == null) return null;
+
+          return {
+            range: {
+              startLineNumber: r.start.line + 1,
+              startColumn:     r.start.character + 1,
+              endLineNumber:   r.end.line + 1,
+              endColumn:       r.end.character + 1,
+            },
+            text: result.placeholder
+              ?? model.getValueInRange({
+                   startLineNumber: r.start.line + 1,
+                   startColumn:     r.start.character + 1,
+                   endLineNumber:   r.end.line + 1,
+                   endColumn:       r.end.character + 1,
+                 }),
+          };
+        } catch {
+          // prepareRename not supported — Monaco falls back to word-at-position
+          return null;
+        }
+      },
+
+      provideRenameEdits: async (model, position, newName) => {
+        if (!state.initialized) {
+          return { edits: [], rejectReason: 'LSP not ready' };
+        }
+
+        try {
+          sendNotify(state, 'textDocument/didChange', {
+            textDocument:   { uri: getDocUri(model, state), version: model.getVersionId() },
+            contentChanges: [{ text: model.getValue() }],
+          });
+
+          const result: any = await sendRequest(state, 'textDocument/rename', {
+            textDocument: { uri: getDocUri(model, state) },
+            position:     { line: position.lineNumber - 1, character: position.column - 1 },
+            newName,
+          });
+
+          if (!result) {
+            return { edits: [], rejectReason: 'No rename edits returned' };
+          }
+
+          // WorkspaceEdit → Monaco WorkspaceEdit
+          const edits: monaco.languages.IWorkspaceTextEdit[] = [];
+
+          // documentChanges form (preferred)
+          if (Array.isArray(result.documentChanges)) {
+            for (const change of result.documentChanges) {
+              if (!change?.edits || !change?.textDocument?.uri) continue;
+              const resource = monaco.Uri.parse(fromLspUri(change.textDocument.uri));
+              for (const e of change.edits) {
+                edits.push({
+                  resource,
+                  versionId: undefined,
+                  textEdit: {
+                    range: {
+                      startLineNumber: (e.range?.start?.line      ?? 0) + 1,
+                      startColumn:     (e.range?.start?.character ?? 0) + 1,
+                      endLineNumber:   (e.range?.end?.line        ?? 0) + 1,
+                      endColumn:       (e.range?.end?.character   ?? 0) + 1,
+                    },
+                    text: e.newText ?? '',
+                  },
+                });
+              }
+            }
+          }
+          // changes form: { [uri]: TextEdit[] }
+          else if (result.changes && typeof result.changes === 'object') {
+            for (const [uri, textEdits] of Object.entries(result.changes as Record<string, any[]>)) {
+              const resource = monaco.Uri.parse(fromLspUri(uri));
+              for (const e of textEdits) {
+                edits.push({
+                  resource,
+                  versionId: undefined,
+                  textEdit: {
+                    range: {
+                      startLineNumber: (e.range?.start?.line      ?? 0) + 1,
+                      startColumn:     (e.range?.start?.character ?? 0) + 1,
+                      endLineNumber:   (e.range?.end?.line        ?? 0) + 1,
+                      endColumn:       (e.range?.end?.character   ?? 0) + 1,
+                    },
+                    text: e.newText ?? '',
+                  },
+                });
+              }
+            }
+          }
+
+          if (edits.length === 0) {
+            return { edits: [], rejectReason: 'Nothing to rename' };
+          }
+
+          return { edits };
+        } catch (e: any) {
+          return { edits: [], rejectReason: e?.message ?? 'Rename failed' };
+        }
+      },
     })
   );
 }

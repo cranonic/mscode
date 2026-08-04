@@ -217,17 +217,18 @@ export function useLspSync(editorInstance: any, tabId: string) {
     // ══════════════════════════════════════════════════════════════════════
 
     const dynamicConfig = (activeProcessManager as any).dynamicConfigs?.[langId];
+    const currentLang = activeProcessManager.getActiveLanguage?.() ?? null;
+
     if (!dynamicConfig || !isEnabled) {
       if (activeLspService.isConnected) {
         activeLspService.disconnect();
-        activeProcessManager.stopServer();
+        activeProcessManager.stopServer(currentLang ?? undefined);
       }
       useStatusBarStore.getState().updateItem('lsp-status', {
         label: 'LSP: Off', icon: 'check', color: 'inherit',
       });
       return;
     }
-    const currentLang = activeProcessManager.getActiveLanguage?.() ?? null;
 
   
     // ══════════════════════════════════════════════════════════════════════
@@ -266,7 +267,8 @@ export function useLspSync(editorInstance: any, tabId: string) {
     // DIFFERENT language OR server not running → full boot
     if (currentLang && currentLang !== langId) {
       activeLspService.disconnect();
-      activeProcessManager.stopServer();
+      // Kill the previous language's native process + WS server
+      activeProcessManager.stopServer(currentLang);
     }
 
     // Output channel for this language server's logs
@@ -284,7 +286,7 @@ export function useLspSync(editorInstance: any, tabId: string) {
 
     useOutputStore.getState().registerKillHandler(channelName, () => {
       activeLspService.disconnect();
-      activeProcessManager.stopServer();
+      activeProcessManager.stopServer(langId);
       useStatusBarStore.getState().updateItem('lsp-status', {
         label: 'LSP: Killed', icon: 'close', color: 'var(--ms-error)',
       });

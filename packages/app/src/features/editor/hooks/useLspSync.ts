@@ -326,9 +326,19 @@ export function useLspSync(editorInstance: any, tabId: string) {
         })();
 
         let lspOptions: Record<string, any> = {
-          hover:      settings[`lsp.${langId}.hover`]      ?? true,
-          completion: settings[`lsp.${langId}.completion`] ?? true,
-          linting:    settings[`lsp.${langId}.linting`]    ?? true,
+          hover:               settings[`lsp.${langId}.hover`]               ?? true,
+          completion:          settings[`lsp.${langId}.completion`]          ?? true,
+          linting:             settings[`lsp.${langId}.linting`]             ?? true,
+          references:          settings[`lsp.${langId}.references`]          ?? true,
+          documentHighlight:   settings[`lsp.${langId}.documentHighlight`]   ?? true,
+          documentSymbol:      settings[`lsp.${langId}.documentSymbol`]      ?? true,
+          codeActions:         settings[`lsp.${langId}.codeActions`]         ?? true,
+          codeLens:            settings[`lsp.${langId}.codeLens`]            ?? false,
+          foldingRange:        settings[`lsp.${langId}.foldingRange`]        ?? true,
+          inlayHints:          settings[`lsp.${langId}.inlayHints`]          ?? false,
+          semanticTokens:      settings[`lsp.${langId}.semanticHighlighting`] ?? true,
+          onTypeFormatting:    settings[`lsp.${langId}.formatOnType`]        ?? false,
+          colorProvider:       true,
           rootUri,
           // fileUri not passed here — per-model URIs are registered via
           //    registerModelUri() above, before boot() is called.

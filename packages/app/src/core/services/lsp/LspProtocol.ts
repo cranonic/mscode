@@ -52,7 +52,64 @@ const CLIENT_CAPABILITIES = {
     rangeFormatting: {
       dynamicRegistration: true,
     },
+    onTypeFormatting: {
+      dynamicRegistration: true,
+    },
+    references: {
+      dynamicRegistration: true,
+    },
+    documentHighlight: {
+      dynamicRegistration: true,
+    },
+    documentSymbol: {
+      dynamicRegistration: true,
+      hierarchicalDocumentSymbolSupport: true,
+    },
+    codeAction: {
+      dynamicRegistration: true,
+      codeActionLiteralSupport: {
+        codeActionKind: {
+          valueSet: [
+            'quickfix',
+            'refactor',
+            'refactor.extract',
+            'refactor.inline',
+            'refactor.rewrite',
+            'source',
+            'source.organizeImports',
+          ],
+        },
+      },
+      resolveSupport: { properties: ['edit'] },
+    },
+    codeLens: {
+      dynamicRegistration: true,
+    },
+    documentLink: {
+      dynamicRegistration: true,
+    },
+    foldingRange: {
+      dynamicRegistration: true,
+      rangeLimit: 5000,
+      lineFoldingOnly: false,
+    },
+    selectionRange: {
+      dynamicRegistration: true,
+    },
+    colorProvider: {
+      dynamicRegistration: true,
+    },
     publishDiagnostics: { relatedInformation: true },
+    semanticTokens: {
+      dynamicRegistration: true,
+      requests: { full: true, range: true },
+      multilineTokenSupport: true,
+      overlappingTokenSupport: false,
+    },
+    inlayHint: {
+      dynamicRegistration: true,
+      resolveSupport: { properties: ['tooltip', 'textEdits'] },
+    },
   },
   workspace: {
     didChangeConfiguration: { dynamicRegistration: true },
