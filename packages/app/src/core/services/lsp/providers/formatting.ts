@@ -2,7 +2,7 @@
 import * as monaco from 'monaco-editor';
 import type { LspState } from '../types';
 import { sendRequest, sendNotify } from '../LspTransport';
-import { getDocUri, fromLspUri } from '../utils/uriHelpers';
+import { getDocUri } from '../utils/uriHelpers';
 export function registerDocumentFormatting(state: LspState): void {
   state.disposables.push(
     monaco.languages.registerDocumentFormattingEditProvider(state.languageId, {

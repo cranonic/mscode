@@ -1,7 +1,7 @@
 // Auto-split from LspProviders.ts
 import * as monaco from 'monaco-editor';
 import type { LspState } from '../types';
-import { sendRequest, sendNotify } from '../LspTransport';
+import { sendRequest } from '../LspTransport';
 import { getDocUri, fromLspUri } from '../utils/uriHelpers';
 export function registerDefinition(state: LspState): void {
   state.disposables.push(

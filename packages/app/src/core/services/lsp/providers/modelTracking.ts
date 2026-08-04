@@ -1,9 +1,16 @@
-// Auto-split from LspProviders.ts
+// Model change tracking – debounced textDocument/didChange + didOpen on new models
 import * as monaco from 'monaco-editor';
 import type { LspState } from '../types';
-import { sendRequest, sendNotify } from '../LspTransport';
-import { getDocUri, fromLspUri } from '../utils/uriHelpers';
+import { sendNotify } from '../LspTransport';
+import { getDocUri } from '../utils/uriHelpers';
+import { notifyDocumentOpen } from '../LspDocumentManager';
 import { debounce } from './helpers';
+
+/**
+ * Watches Monaco models for the active language:
+ *  - debounced `textDocument/didChange` on content edits
+ *  - `textDocument/didOpen` when a new matching model is created after init
+ */
 export function bindModelTracking(state: LspState): void {
   const bindModel = (model: monaco.editor.ITextModel): void => {
     if (model.getLanguageId() !== state.languageId) return;
@@ -21,7 +28,7 @@ export function bindModelTracking(state: LspState): void {
       model.onDidChangeContent(() => {
         if (!state.initialized) return;
         sendDidChange();
-      })
+      }),
     );
   };
 
@@ -35,6 +42,6 @@ export function bindModelTracking(state: LspState): void {
       if (state.initialized && model.getLanguageId() === state.languageId) {
         notifyDocumentOpen(state, model);
       }
-    })
+    }),
   );
 }

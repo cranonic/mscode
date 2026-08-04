@@ -1,8 +1,8 @@
 // Auto-split from LspProviders.ts
 import * as monaco from 'monaco-editor';
 import type { LspState } from '../types';
-import { sendRequest, sendNotify } from '../LspTransport';
-import { getDocUri, fromLspUri } from '../utils/uriHelpers';
+import { sendRequest } from '../LspTransport';
+import { getDocUri } from '../utils/uriHelpers';
 import { toMonacoRange, toLspPosition } from './helpers';
 export function registerSelectionRange(state: LspState): void {
   state.disposables.push(

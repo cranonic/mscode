@@ -2,7 +2,7 @@
 import * as monaco from 'monaco-editor';
 import type { LspState } from '../types';
 import { sendRequest, sendNotify } from '../LspTransport';
-import { getDocUri, fromLspUri } from '../utils/uriHelpers';
+import { getDocUri } from '../utils/uriHelpers';
 import { completionKind } from './helpers';
 export function registerCompletion(state: LspState): void {
   state.disposables.push(
