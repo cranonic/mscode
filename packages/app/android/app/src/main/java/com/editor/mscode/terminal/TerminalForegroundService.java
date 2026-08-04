@@ -46,6 +46,11 @@ import java.util.concurrent.ConcurrentHashMap;
  *  The plugin binds to this service via the LocalBinder and calls methods
  *  directly (same process → no IPC overhead). Events (onData, onExit) are
  *  delivered back through the EventCallback interface.
+ *
+ * ─── targetSdk > 28 ───────────────────────────────────────────────────────
+ *  proot is executed from nativeLibraryDir/libproot.so (never from filesDir).
+ *  ensureSetup / startSession call rootfs.refreshTallocSymlink() so
+ *  libtalloc.so.2 stays valid after app updates.
  */
 public class TerminalForegroundService extends Service {
 
@@ -93,8 +98,7 @@ public class TerminalForegroundService extends Service {
         Log.d(TAG, msg);
         if (eventCallback != null) eventCallback.onLog(msg);
     }
-    
-    
+
     // ─── Background Terminal Pre-Setup ────────────────────────────────
 
     public boolean isRootfsReady() {
@@ -102,9 +106,9 @@ public class TerminalForegroundService extends Service {
     }
 
     public void ensureSetup(String arch) throws Exception {
-        // এই লকটা নিশ্চিত করবে যে একই সাথে একাধিক সেটআপ রান করবে না
         synchronized (rootfsLock) {
             rootfs.ensureBinaries(arch);
+            rootfs.refreshTallocSymlink();
             rootfs.ensureRootfs(arch);
             rootfs.ensureTmpDir();
         }
@@ -182,9 +186,16 @@ public class TerminalForegroundService extends Service {
         if (sessions.containsKey(sessionId))
             throw new IllegalStateException("Session '" + sessionId + "' already exists");
 
+        if (builder == null) {
+            throw new IllegalStateException(
+                "ProotCommandBuilder not initialised — call initBuilder(nativeLibDir) first"
+            );
+        }
+
         // Alpine setup (serialized across concurrent starts)
         synchronized (rootfsLock) {
             rootfs.ensureBinaries(arch);
+            rootfs.refreshTallocSymlink(); // keep libtalloc.so.2 valid after app updates
             rootfs.ensureRootfs(arch);
             rootfs.ensureTmpDir();
         }
@@ -200,8 +211,9 @@ public class TerminalForegroundService extends Service {
         String[] cmd = builder.buildSessionCommand(initPath);
         String[] env = builder.buildSessionEnv();
 
-        emitLog("🚀 Starting [" + sessionId + "] " + type
+        emitLog("Starting [" + sessionId + "] " + type
                 + (prootCwd.equals("/root") ? "" : " → " + prootCwd));
+        emitLog("   proot=" + rootfs.getProotPath());
 
         TerminalSession session = new TerminalSession(sessionId);
         session.type = type;
@@ -214,7 +226,10 @@ public class TerminalForegroundService extends Service {
         if (session.ptyFd < 0) {
             sessions.remove(sessionId);
             scriptWriter.cleanup(initPath);
-            throw new RuntimeException("PTY subprocess creation failed");
+            throw new RuntimeException(
+                "PTY subprocess creation failed. " +
+                "Check that libproot.so exists at: " + rootfs.getProotPath()
+            );
         }
 
         session.childPid = pids[0];
@@ -312,7 +327,14 @@ public class TerminalForegroundService extends Service {
      */
     public BackgroundResult backgroundExecute(String command) throws Exception {
         if (!rootfs.isRootfsReady())
-            throw new IllegalStateException("Alpine rootfs not ready — call startSession() first");
+            throw new IllegalStateException("Alpine rootfs not ready — call startSession() or ensureSetup() first");
+
+        if (builder == null) {
+            throw new IllegalStateException("ProotCommandBuilder not initialised");
+        }
+
+        // Keep talloc symlink fresh for background runs too
+        rootfs.refreshTallocSymlink();
 
         String[] cmd = builder.buildBackgroundCommand(command);
 
@@ -321,8 +343,8 @@ public class TerminalForegroundService extends Service {
         pb.environment().putAll(builder.buildBackgroundEnvMap());
         pb.redirectErrorStream(true);
 
-        Process proc    = pb.start();
-        byte[]  output  = readAll(proc.getInputStream());
+        Process proc     = pb.start();
+        byte[]  output   = readAll(proc.getInputStream());
         int     exitCode = proc.waitFor();
 
         return new BackgroundResult(new String(output, "UTF-8"), exitCode);
@@ -337,7 +359,7 @@ public class TerminalForegroundService extends Service {
             this.exitCode = exitCode;
         }
     }
-    
+
     // ─── Streaming Background Execute ─────────────────────────────────
 
     public interface BackgroundStreamListener {
@@ -357,16 +379,18 @@ public class TerminalForegroundService extends Service {
 
     // Injecting Proot Environment
     public void streamBackgroundExecute(
-            String sessionId, String[] cmd, 
-            Map<String, String> env, String cwd, 
+            String sessionId, String[] cmd,
+            Map<String, String> env, String cwd,
             BackgroundProcessListener listener
     ) {
         new Thread(() -> {
             try {
+                rootfs.refreshTallocSymlink();
+
                 ProcessBuilder pb = new ProcessBuilder(cmd);
                 pb.environment().clear();
                 if (env != null) pb.environment().putAll(env); // ← PROOT_LOADER Inject
-                
+
                 if (cwd != null && !cwd.isEmpty()) pb.directory(new File(cwd));
                 pb.redirectErrorStream(true);
 
@@ -378,11 +402,11 @@ public class TerminalForegroundService extends Service {
                 while ((len = in.read(buf)) != -1) {
                     if (listener != null) listener.onData(new String(buf, 0, len));
                 }
-                
+
                 int exitCode = process.waitFor();
                 backgroundProcesses.remove(sessionId);
                 if (listener != null) listener.onExit(exitCode);
-                
+
             } catch (Exception e) {
                 if (listener != null) {
                     listener.onData("\n[Service Error] " + e.getMessage() + "\n");
@@ -396,9 +420,8 @@ public class TerminalForegroundService extends Service {
     public void killBackgroundProcess(String sessionId) {
         Process p = backgroundProcesses.remove(sessionId);
         if (p != null) p.destroy();
-    }    
-    
- 
+    }
+
     // ─── LSP / ProcessServer ─────────────────────────────────────────────────
 
     /**
@@ -407,16 +430,20 @@ public class TerminalForegroundService extends Service {
      *
      * Blocks until the port is bound (guaranteed ready when this returns).
      *
-     * @param cmd  Full command to run (proot + language server).
+     * @param alpineCommand  Shell command to run inside Alpine (e.g. "pyright-langserver --stdio").
      */
-
-    // Alpine command full proot command wrap -> env 
     public int spawnProcessServer(String alpineCommand) throws Exception {
-        // builder.buildBackgroundCommand() whole proot invocation creation
-        // যেমন: ["/data/data/.../proot", "--link2symlink", ..., "/bin/sh", "-c", "pyright-langserver --stdio"]
-        String[] cmd    = builder.buildBackgroundCommand(alpineCommand);
-        java.util.Map<String, String> envMap = builder.buildBackgroundEnvMap();
-    
+        if (builder == null) {
+            throw new IllegalStateException("ProotCommandBuilder not initialised");
+        }
+
+        rootfs.refreshTallocSymlink();
+
+        // builder.buildBackgroundCommand() builds full proot invocation
+        // e.g.: [nativeLibDir/libproot.so, "--link2symlink", ..., "sh", "-c", "pyright-langserver --stdio"]
+        String[] cmd = builder.buildBackgroundCommand(alpineCommand);
+        Map<String, String> envMap = builder.buildBackgroundEnvMap();
+
         int port = ProcessServer.findFreePort();
         ProcessServer server = new ProcessServer(port, cmd, envMap);
         server.startAndAwait();
@@ -431,17 +458,7 @@ public class TerminalForegroundService extends Service {
      */
     public void setHostname(String name) throws IOException {
         rootfs.saveHostname(name);
-        
-        // IT CAUSE OTHER TERMINAL UNWANTED PUSH
-        // String ps1 = "export PS1='\\[\\e[1;32m\\]ide@" + name
-        //     + "\\[\\e[0m\\]:\\[\\e[1;34m\\]\\w\\[\\e[0m\\]$ '\n";
-        // for (TerminalSession s : sessions.values()) {
-        //     if (s.running && s.out != null) {
-        //         try { s.out.write(ps1.getBytes("UTF-8")); s.out.flush(); }
-        //         catch (IOException ignored) {}
-        //     }
-        // }
-        
+        // Live PS1 push disabled — caused unwanted output in other terminals
     }
 
     // ─── WakeLock ─────────────────────────────────────────────────────────────

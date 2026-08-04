@@ -14,7 +14,7 @@ android {
 
         aaptOptions {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
-            // ✅ Prevent gradle from compressing/stripping binary assets.
+            // Prevent gradle from compressing/stripping binary assets.
             // .zip wraps the alpine tar.gz so gradle doesn't touch the inner tar.gz.
             // .so & so.2 files for proot-loader are stored uncompressed for direct mmap.
             noCompress "gz", "tar", "tar.gz", "tgz", "zip", "so", "so.2"
@@ -28,13 +28,13 @@ android {
         }
 
         ndk {
-            // ✅ Only arm64 for now — matches jniLibs structure.
+            // Only arm64 for now — matches jniLibs structure.
             // Add "x86_64" here AND in jniLibs/x86_64 when you need emulator support.
             abiFilters "arm64-v8a"
         }
     }
 
-    // ✅ Assets directory — put alpine-aarch64.zip here.
+    // Assets directory — put alpine-aarch64.zip here.
     // The zip contains: alpine-minirootfs-3.23.3-aarch64.tar.gz
     sourceSets {
         main {

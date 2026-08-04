@@ -30,8 +30,6 @@ import { iconThemeService }      from '@/core/theme/service/iconThemeService';
 import { useNotificationStore }  from '@/store/notificationStore';
 import { fs }                    from '@/core/fileSystem';
 
-import { msEvents }              from '@/core/extensionAPI/events/EventManager';
-
 export function bootstrapAction() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-level state
@@ -284,8 +282,6 @@ commands.registerCommand(
         }
         setTabDirty(activeTabId, false);
         
-        // ─── EMIT EVENT (UNTITLED FILE SAVED) ───
-        msEvents.emit('onDidSaveTextDocument', { filePath: newPath });
       }
       return;
     }
@@ -298,9 +294,6 @@ commands.registerCommand(
       const saveAction = editor.getAction('editor.action.save');
       if (saveAction) {
         await saveAction.run();
-        
-        // ─── EMIT EVENT (NORMAL FILE SAVED VIA EDITOR) ───
-        msEvents.emit('onDidSaveTextDocument', { filePath: activeTab.filePath });
         return;
       }
     }
@@ -310,9 +303,6 @@ commands.registerCommand(
     if (content !== undefined) {
       await fs.writeFile(activeTab.filePath, content);
       setTabDirty(activeTabId, false);
-      
-      // ─── EMIT EVENT (FALLBACK FILE SAVED) ───
-      msEvents.emit('onDidSaveTextDocument', { filePath: activeTab.filePath });
     }
   },
   { title: 'Save File', category: 'File', icon: 'save', shortcut: 'Ctrl+S' },

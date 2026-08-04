@@ -1,4 +1,4 @@
-// pty_helper.c — Native PTY engine for MS Code IDE Terminal
+// /android/app/src/main/jni/pty_helper.c — Native PTY engine for MS Code IDE Terminal
 // Handles: PTY creation, fork/exec with controlling terminal, resize, signals
 
 #include <jni.h>
@@ -96,9 +96,13 @@ static void free_c_array(char **arr) {
 /**
  * Creates a child subprocess connected to a real PTY.
  *
- * @param cmd      Full command + args array (e.g. {"/system/bin/linker64", "proot", ...})
+ * cmd[0] should be an executable path — typically
+ * nativeLibraryDir/libproot.so (NOT a path under getFilesDir()).
+ * Android allows execve of extracted native libs when extractNativeLibs=true.
+ *
+ * @param cmd      Full command + args (e.g. {libproot.so, flags..., "sh", init.sh})
  * @param envVars  Environment as {"KEY=VALUE", ...}
- * @param cwd      Working directory inside proot (e.g. "/root")
+ * @param cwd      Working directory for the child (usually filesDir; proot -w sets guest cwd)
  * @param pids     int[1] — filled with child PID on success
  * @param rows     Initial terminal rows
  * @param cols     Initial terminal columns
@@ -128,6 +132,15 @@ Java_com_editor_mscode_NativeTerminalPlugin_nativeCreateSubprocess(
     char **argv = jarray_to_c(env, cmd);
     char **envp = jarray_to_c(env, envVars);
 
+    if (!argv || !argv[0] || argv[0][0] == '\0') {
+        LOGE("empty command array");
+        free_c_array(argv);
+        free_c_array(envp);
+        close(master_fd);
+        close(slave_fd);
+        return -1;
+    }
+
     const char *cwd_str = NULL;
     if (cwd) cwd_str = (*env)->GetStringUTFChars(env, cwd, NULL);
 
@@ -146,7 +159,7 @@ Java_com_editor_mscode_NativeTerminalPlugin_nativeCreateSubprocess(
         // 2. Slave becomes controlling terminal of this session
         if (ioctl(slave_fd, TIOCSCTTY, 0) < 0) {
             LOGE("[child] TIOCSCTTY failed: %s (continuing anyway)", strerror(errno));
-            // Not fatal — some kernels allow it even without this
+            // Not fatal on some kernels
         }
 
         // 3. Wire stdio to slave PTY
@@ -155,7 +168,7 @@ Java_com_editor_mscode_NativeTerminalPlugin_nativeCreateSubprocess(
         dup2(slave_fd, STDERR_FILENO);
         if (slave_fd > STDERR_FILENO) close(slave_fd);
 
-        // 4. Change directory
+        // 4. Change directory (host path — usually filesDir)
         if (cwd_str) {
             if (chdir(cwd_str) != 0) {
                 LOGE("[child] chdir(%s) failed: %s", cwd_str, strerror(errno));
@@ -170,7 +183,7 @@ Java_com_editor_mscode_NativeTerminalPlugin_nativeCreateSubprocess(
         signal(SIGTTOU, SIG_DFL);
         signal(SIGCHLD, SIG_DFL);
 
-        // 6. Execute
+        // 6. Execute — argv[0] is typically nativeLibraryDir/libproot.so
         if (envp) {
             execve(argv[0], argv, envp);
         } else {
@@ -202,7 +215,7 @@ Java_com_editor_mscode_NativeTerminalPlugin_nativeCreateSubprocess(
         (*env)->ReleaseIntArrayElements(env, pids, p, 0);
     }
 
-    LOGI("Subprocess started: pid=%d master_fd=%d", pid, master_fd);
+    LOGI("Subprocess started: pid=%d master_fd=%d", (int)pid, master_fd);
     return (jint)master_fd;
 }
 
@@ -230,9 +243,10 @@ Java_com_editor_mscode_NativeTerminalPlugin_nativeSendSignal(
         JNIEnv *env, jobject thiz,
         jint pid, jint signum)
 {
-    if (pid <= 0) return;
+    // Allow negative pid = process group (Ctrl+C from Java uses -childPid)
+    if (pid == 0) return;
     if (kill((pid_t)pid, signum) < 0) {
-        LOGE("kill(%d, %d) failed: %s", pid, signum, strerror(errno));
+        LOGE("kill(%d, %d) failed: %s", (int)pid, (int)signum, strerror(errno));
     }
 }
 
@@ -244,6 +258,16 @@ Java_com_editor_mscode_NativeTerminalPlugin_nativeWaitForChild(
 {
     if (pid <= 0) return -1;
     int status = 0;
-    waitpid((pid_t)pid, &status, WNOHANG);
+    // Block until the child exits (read-thread needs the real exit code)
+    if (waitpid((pid_t)pid, &status, 0) < 0) {
+        LOGE("waitpid(%d) failed: %s", (int)pid, strerror(errno));
+        return -1;
+    }
+    if (WIFEXITED(status)) {
+        return (jint)WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status)) {
+        return (jint)(-WTERMSIG(status));
+    }
     return (jint)status;
 }

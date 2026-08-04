@@ -1,5 +1,6 @@
 // src/features/editor/components/CodeEditor/hooks/useEditorSave.ts
 import { useCallback, useRef, useEffect } from 'react';
+import { msEvents } from '@/core/extensionAPI/events/EventManager';
 
 import { deleteFileBackup }             from '@/core/services/storageService';
 import { fs }                           from '@/core/fileSystem';
@@ -77,6 +78,7 @@ export function useEditorSave({
       // Remove hot-exit backup after a successful real save
       const workspacePath = useTabStore.getState().currentWorkspacePath;
       await deleteFileBackup(workspacePath, filePath);
+      msEvents.emit('onDidSaveTextDocument', { filePath: filePath });
     } catch (err) {
       console.error('Failed to save file:', err);
     }

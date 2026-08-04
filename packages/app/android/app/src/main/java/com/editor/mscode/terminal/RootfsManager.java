@@ -1,6 +1,7 @@
 package com.editor.mscode.terminal;
 
 import android.content.Context;
+import android.os.Build;
 import android.util.Log;
 
 import java.io.File;
@@ -11,6 +12,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -19,8 +22,11 @@ import java.util.zip.ZipInputStream;
  *
  * ─── Setup priority ───────────────────────────────────────────────────────
  *  Binaries (proot + libtalloc):
- *    1. Copy from nativeLibraryDir (jniLibs) — fastest, no network.
- *    2. Download from GitHub — fallback if jniLibs not bundled.
+ *    • proot is ALWAYS taken from nativeLibraryDir (jniLibs) as libproot.so.
+ *      Never copied to filesDir — Android blocks execute-from-writable-storage
+ *      when targetSdkVersion > 28.
+ *    • libtalloc.so is symlinked (or copied) into filesDir as libtalloc.so.2
+ *      for LD_LIBRARY_PATH only (it is a library, not an executable).
  *
  *  Alpine rootfs:
  *    1. Already extracted → skip.
@@ -48,8 +54,15 @@ public class RootfsManager {
 
     public String getFilesDir()     { return filesDir; }
     public String getRootfsPath()   { return filesDir + "/alpine_core"; }
-    public String getProotPath()    { return filesDir + "/proot"; }
     public String getTmpPath()      { return getRootfsPath() + "/tmp"; }
+
+    /**
+     * Always points at the native library copy of proot.
+     * NEVER returns a path under filesDir — that breaks on targetSdk > 28.
+     */
+    public String getProotPath() {
+        return nativeLibDir + "/libproot.so";
+    }
 
     /** Returns true if Alpine is fully extracted. */
     public boolean isRootfsReady() {
@@ -57,43 +70,71 @@ public class RootfsManager {
     }
 
     /**
-     * Ensures proot + libtalloc.so.2 are in filesDir.
-     * Copies from nativeLibraryDir (jniLibs/libproot.so → filesDir/proot).
-     * Falls back to network download if not bundled.
+     * Ensures proot is present in nativeLibraryDir and libtalloc.so.2
+     * is available under filesDir for LD_LIBRARY_PATH.
      *
-     * @param arch  "aarch64" or "x86_64"
+     * proot is never copied into filesDir.
+     *
+     * @param arch  "aarch64" or "x86_64" (kept for API compatibility)
      */
     public void ensureBinaries(String arch) throws IOException {
-        File prootDest  = new File(filesDir, "proot");
-        File tallocDest = new File(filesDir, "libtalloc.so.2");
-
-        // Try jniLibs first (libproot.so → proot, libtalloc.so → libtalloc.so.2)
         File prootLib  = new File(nativeLibDir, "libproot.so");
         File tallocLib = new File(nativeLibDir, "libtalloc.so");
 
-        if (!prootDest.exists()) {
-            if (prootLib.exists()) {
-                Log.i(TAG, "Copying proot from jniLibs...");
-                copyFile(prootLib, prootDest);
-            } else {
-                Log.i(TAG, "Downloading proot for " + arch + "...");
-                String base = "https://github.com/Sou6900/termis/raw/refs/heads/main/jniLibs/"
-                              + arch + "/";
-                downloadFile(base + "proot", prootDest);
+        if (!prootLib.exists()) {
+            throw new IOException(
+                "libproot.so missing from nativeLibraryDir (" + nativeLibDir + "). " +
+                "Bundle it under jniLibs/arm64-v8a/libproot.so (and other ABIs as needed)."
+            );
+        }
+        Log.i(TAG, "Using proot from nativeLibraryDir: " + prootLib.getAbsolutePath());
+
+        // libtalloc is only needed on LD_LIBRARY_PATH — symlink preferred
+        File tallocDest = new File(filesDir, "libtalloc.so.2");
+        if (!tallocDest.exists() && tallocLib.exists()) {
+            refreshTallocSymlink();
+        } else if (!tallocLib.exists()) {
+            Log.w(TAG, "libtalloc.so not found in nativeLibraryDir — some proot features may fail");
+        }
+    }
+
+    /**
+     * Ensures $filesDir/libtalloc.so.2 → nativeLibraryDir/libtalloc.so.
+     * Safe to call repeatedly (idempotent).
+     */
+    public void refreshTallocSymlink() {
+        File tallocLib = new File(nativeLibDir, "libtalloc.so");
+        if (!tallocLib.exists()) return;
+
+        File tallocDest = new File(filesDir, "libtalloc.so.2");
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                Path dest = tallocDest.toPath();
+                Path src  = tallocLib.toPath();
+
+                if (Files.isSymbolicLink(dest)) {
+                    Path current = Files.readSymbolicLink(dest);
+                    if (current.equals(src)) return;
+                }
+
+                Files.deleteIfExists(dest);
+                Files.createSymbolicLink(dest, src);
+                Log.i(TAG, "Created talloc symlink: " + dest + " → " + src);
+                return;
+            } catch (Exception e) {
+                Log.w(TAG, "Symlink failed, falling back to copy", e);
             }
-            prootDest.setExecutable(true, false);
         }
 
-        if (!tallocDest.exists()) {
-            if (tallocLib.exists()) {
-                Log.i(TAG, "Copying libtalloc from jniLibs...");
+        // Pre-O or symlink failed → copy
+        try {
+            if (!tallocDest.exists()) {
                 copyFile(tallocLib, tallocDest);
-            } else {
-                Log.i(TAG, "Downloading libtalloc for " + arch + "...");
-                String base = "https://github.com/Sou6900/termis/raw/refs/heads/main/jniLibs/"
-                              + arch + "/";
-                downloadFile(base + "libtalloc.so.2", tallocDest);
+                Log.i(TAG, "Copied libtalloc.so → libtalloc.so.2");
             }
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to install libtalloc.so.2", e);
         }
     }
 
@@ -106,7 +147,7 @@ public class RootfsManager {
     public void ensureRootfs(String arch) throws IOException {
         String rootfsPath = getRootfsPath();
 
-        if (isRootfsReady()) return; // ✅ already done
+        if (isRootfsReady()) return;
 
         // Try bundled zip asset
         String assetName = "alpine-" + arch + ".zip";
