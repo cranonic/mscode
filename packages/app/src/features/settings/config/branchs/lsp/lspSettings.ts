@@ -10,10 +10,10 @@ export const lspSection: IConfigurationSection = {
   order: 15,
   properties: {
     // Monaco built-in language services (no external server)
-    ...jsLspProperties,
-    ...tsLspProperties,
-    ...htmlLspProperties,
-    ...cssLspProperties,
-    ...jsonLspProperties,
+    // ...jsLspProperties,
+    // ...tsLspProperties,
+    // ...htmlLspProperties,
+    // ...cssLspProperties,
+    // ...jsonLspProperties,
   },
 };
