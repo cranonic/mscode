@@ -131,49 +131,5 @@ export const registerCoreMenus = (): void => {
 export const registerEditorMenu = (): void => {
   if (editorMenuRegistered) return;
   editorMenuRegistered = true;
-
-  const { registerMenuItems } = useMenuStore.getState();
-
-  // ── editor/code/context  (opened by useContextMenuSetup) ──────────────────
-  // These merge with the default Copy/Paste/Cut/SelectAll items from the hook.
-  registerMenuItems('editor/code/context', [
-    {
-      id:      'lsp-goto-definition',
-      label:   'Go to Definition',
-      icon:    'go-to-file',
-      order:   50,
-      onClick: () => commands.executeCommand('editor.action.revealDefinition'),
-    },
-    {
-      id:      'lsp-rename-symbol',
-      label:   'Rename Symbol',
-      icon:    'edit',
-      order:   60,
-      shortcut: 'F2',
-      onClick: () => commands.executeCommand('editor.action.rename'),
-    },
-    {
-      id:      'lsp-format-document',
-      label:   'Format Document',
-      icon:    'check',
-      order:   70,
-      shortcut: 'Shift+Alt+F',
-      onClick: () => commands.executeCommand('editor.action.formatDocument'),
-    },
-    {
-      id:      'lsp-format-selection',
-      label:   'Format Selection',
-      icon:    'check',
-      order:   71,
-      onClick: () => commands.executeCommand('editor.action.formatSelection'),
-    },
-    { id: 'sep-lsp', type: 'separator', order: 79 },
-    {
-      id:      'file-rename',
-      label:   'Rename File…',
-      icon:    'file',
-      order:   90,
-      onClick: () => commands.executeCommand('workbench.action.renameActiveFile'),
-    },
-  ]);
+  // Add extension context-menu items here.
 };

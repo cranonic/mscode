@@ -38,6 +38,20 @@ const CLIENT_CAPABILITIES = {
         parameterInformation: { labelOffsetSupport: true },
       },
     },
+    definition: {
+      dynamicRegistration: true,
+      linkSupport: true,
+    },
+    rename: {
+      dynamicRegistration: true,
+      prepareSupport: true,
+    },
+    formatting: {
+      dynamicRegistration: true,
+    },
+    rangeFormatting: {
+      dynamicRegistration: true,
+    },
     publishDiagnostics: { relatedInformation: true },
   },
   workspace: {

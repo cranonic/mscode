@@ -89,19 +89,21 @@ export function useContextMenuSetup({
 
     const getMenuItems = () => [
       { 
-        id: 'copy', label: 'Copy', icon: 'files', shortcut: 'Ctrl+C', order: 10,
+        id: 'copy', label: 'Copy', icon: 'files', shortcut: 'Ctrl+C',
         onClick: async () => {
           const sel = editor.getSelection();
           if (sel && !sel.isEmpty()) {
             const text = editor.getModel()?.getValueInRange(sel);
+            // Native Clipboard Write
             if (text) await Clipboard.write({ string: text });
           }
         } 
       },
       { 
-        id: 'paste', label: 'Paste', icon: 'file', shortcut: 'Ctrl+V', order: 11,
+        id: 'paste', label: 'Paste', icon: 'file', shortcut: 'Ctrl+V',
         onClick: async () => {
           try {
+            // Native Clipboard Read
             const { value } = await Clipboard.read();
             if (value) {
               editor.executeEdits('clipboard', [{ range: editor.getSelection(), text: value, forceMoveMarkers: true }]);
@@ -112,13 +114,14 @@ export function useContextMenuSetup({
         } 
       },
       { 
-        id: 'cut', label: 'Cut', icon: 'close', shortcut: 'Ctrl+X', order: 12,
+        id: 'cut', label: 'Cut', icon: 'close', shortcut: 'Ctrl+X',
         onClick: async () => {
           try {
             const sel = editor.getSelection();
             if (sel && !sel.isEmpty()) {
               const text = editor.getModel()?.getValueInRange(sel);
               if (text) {
+                // Native Clipboard Write
                 await Clipboard.write({ string: text });
                 editor.executeEdits('clipboard', [{ range: sel, text: '', forceMoveMarkers: true }]);
               }
@@ -128,47 +131,18 @@ export function useContextMenuSetup({
           }
         } 
       },
+      // { type: 'separator', id: 'sep1' },
       { 
-        id: 'selectAll', label: 'Select All', icon: 'clear-all', shortcut: 'Ctrl+A', order: 20,
+        id: 'selectAll', label: 'Select All', icon: 'clear-all', shortcut: 'Ctrl+A',
         onClick: () => commands.executeCommand('editor.action.selectAll') 
       },
-      { type: 'separator', id: 'sep-edit', order: 40 },
-      // LSP actions (also registered via registerEditorMenu for extension merge)
       {
-        id: 'gotoDefinition', label: 'Go to Definition', icon: 'go-to-file', order: 50,
-        onClick: () => {
-          editor.focus();
-          editor.trigger('menu', 'editor.action.revealDefinition', null);
-        },
+        id: 'format', label: 'Format Document', icon: 'check', 
+        onClick: () => commands.executeCommand('editor.action.formatDocument') 
       },
-      {
-        id: 'renameSymbol', label: 'Rename Symbol', icon: 'edit', shortcut: 'F2', order: 60,
-        onClick: () => {
-          editor.focus();
-          editor.trigger('menu', 'editor.action.rename', null);
-        },
-      },
-      {
-        id: 'format', label: 'Format Document', icon: 'check', order: 70,
-        onClick: () => {
-          editor.focus();
-          editor.trigger('menu', 'editor.action.formatDocument', null);
-        },
-      },
-      {
-        id: 'formatSelection', label: 'Format Selection', icon: 'check', order: 71,
-        onClick: () => {
-          editor.focus();
-          editor.trigger('menu', 'editor.action.formatSelection', null);
-        },
-      },
-      { type: 'separator', id: 'sep2', order: 80 },
-      {
-        id: 'renameFile', label: 'Rename File…', icon: 'file', order: 90,
-        onClick: () => commands.executeCommand('workbench.action.renameActiveFile'),
-      },
+      { type: 'separator', id: 'sep2' },
       { 
-        id: 'commandPalette', label: 'Command Palette', icon: 'search', order: 100,
+        id: 'commandPalette', label: 'Command Palette', icon: 'search', 
         shortcut: getShortcut('workbench.action.showCommands'),
         onClick: () => commands.executeCommand('workbench.action.showCommands') 
       },
