@@ -77,6 +77,19 @@ public class RootfsManager {
      *
      * @param arch  "aarch64" or "x86_64" (kept for API compatibility)
      */
+    /**
+     * Ensures proot is present in nativeLibraryDir and installs
+     * {@code $filesDir/libtalloc.so.2} for the dynamic linker.
+     *
+     * <p>proot's ELF {@code DT_NEEDED} entry is {@code libtalloc.so.2}, but
+     * Android jniLibs can only ship {@code libtalloc.so}. We therefore
+     * <b>always copy</b> (not merely symlink) the library into filesDir under
+     * the versioned soname. Symlinks alone are unreliable on some OEM SELinux
+     * policies after a fresh install.
+     *
+     * <p>LD_LIBRARY_PATH / LD_PRELOAD (set by {@link ProotCommandBuilder}) then
+     * point at filesDir so the linker finds {@code libtalloc.so.2}.
+     */
     public void ensureBinaries(String arch) throws IOException {
         File prootLib  = new File(nativeLibDir, "libproot.so");
         File tallocLib = new File(nativeLibDir, "libtalloc.so");
@@ -84,57 +97,71 @@ public class RootfsManager {
         if (!prootLib.exists()) {
             throw new IOException(
                 "libproot.so missing from nativeLibraryDir (" + nativeLibDir + "). " +
-                "Bundle it under jniLibs/arm64-v8a/libproot.so (and other ABIs as needed)."
+                "Bundle it under jniLibs/<abi>/libproot.so"
             );
         }
         Log.i(TAG, "Using proot from nativeLibraryDir: " + prootLib.getAbsolutePath());
 
-        // libtalloc is only needed on LD_LIBRARY_PATH — symlink preferred
-        File tallocDest = new File(filesDir, "libtalloc.so.2");
-        if (!tallocDest.exists() && tallocLib.exists()) {
-            refreshTallocSymlink();
-        } else if (!tallocLib.exists()) {
-            Log.w(TAG, "libtalloc.so not found in nativeLibraryDir — some proot features may fail");
+        if (!tallocLib.exists()) {
+            // Also accept already-versioned name if someone packaged it that way
+            File tallocVersioned = new File(nativeLibDir, "libtalloc.so.2");
+            if (tallocVersioned.exists()) {
+                tallocLib = tallocVersioned;
+            } else {
+                throw new IOException(
+                    "libtalloc.so missing from nativeLibraryDir (" + nativeLibDir + "). " +
+                    "Bundle jniLibs/<abi>/libtalloc.so — proot requires it as libtalloc.so.2 " +
+                    "(installed into filesDir at runtime)."
+                );
+            }
         }
+
+        installTallocLibrary(tallocLib);
     }
 
     /**
-     * Ensures $filesDir/libtalloc.so.2 → nativeLibraryDir/libtalloc.so.
-     * Safe to call repeatedly (idempotent).
+     * Installs {@code libtalloc.so.2} into filesDir by copying from the
+     * packaged native library. Always prefers a real file over a symlink so
+     * the linker can open it after a clean install.
      */
-    public void refreshTallocSymlink() {
-        File tallocLib = new File(nativeLibDir, "libtalloc.so");
-        if (!tallocLib.exists()) return;
-
+    public void installTallocLibrary(File tallocSrc) throws IOException {
         File tallocDest = new File(filesDir, "libtalloc.so.2");
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                Path dest = tallocDest.toPath();
-                Path src  = tallocLib.toPath();
+        // Re-copy if missing, not a regular file, or size mismatch (upgrade)
+        boolean needCopy = !tallocDest.exists()
+            || !tallocDest.isFile()
+            || tallocDest.length() != tallocSrc.length();
 
-                if (Files.isSymbolicLink(dest)) {
-                    Path current = Files.readSymbolicLink(dest);
-                    if (current.equals(src)) return;
-                }
-
-                Files.deleteIfExists(dest);
-                Files.createSymbolicLink(dest, src);
-                Log.i(TAG, "Created talloc symlink: " + dest + " → " + src);
-                return;
-            } catch (Exception e) {
-                Log.w(TAG, "Symlink failed, falling back to copy", e);
-            }
+        if (!needCopy) {
+            Log.i(TAG, "libtalloc.so.2 already installed: " + tallocDest.getAbsolutePath());
+            return;
         }
 
-        // Pre-O or symlink failed → copy
+        // Remove stale symlink / partial file
+        if (tallocDest.exists() && !tallocDest.delete()) {
+            Log.w(TAG, "Could not delete stale " + tallocDest);
+        }
+
+        copyFile(tallocSrc, tallocDest);
+        // Ensure world-readable so the linker can map it
+        //noinspection ResultOfMethodCallIgnored
+        tallocDest.setReadable(true, false);
+
+        if (!tallocDest.exists() || tallocDest.length() == 0) {
+            throw new IOException("Failed to install libtalloc.so.2 into " + filesDir);
+        }
+        Log.i(TAG, "Installed libtalloc.so.2 (" + tallocDest.length() + " bytes) → " + tallocDest);
+    }
+
+    /** @deprecated Use {@link #installTallocLibrary(File)} via {@link #ensureBinaries(String)}. */
+    public void refreshTallocSymlink() {
+        File tallocLib = new File(nativeLibDir, "libtalloc.so");
+        if (!tallocLib.exists()) tallocLib = new File(nativeLibDir, "libtalloc.so.2");
+        if (!tallocLib.exists()) return;
         try {
-            if (!tallocDest.exists()) {
-                copyFile(tallocLib, tallocDest);
-                Log.i(TAG, "Copied libtalloc.so → libtalloc.so.2");
-            }
+            installTallocLibrary(tallocLib);
         } catch (IOException e) {
-            Log.e(TAG, "Failed to install libtalloc.so.2", e);
+            Log.e(TAG, "refreshTallocSymlink failed", e);
         }
     }
 
@@ -147,7 +174,7 @@ public class RootfsManager {
     public void ensureRootfs(String arch) throws IOException {
         String rootfsPath = getRootfsPath();
 
-        if (isRootfsReady()) return;
+        if (isRootfsReady()) return; // already done
 
         // Try bundled zip asset
         String assetName = "alpine-" + arch + ".zip";

@@ -98,8 +98,10 @@ public class ProotCommandBuilder {
         map.put("TERM",            "xterm-256color");
         map.put("LANG",            "C.UTF-8");
         map.put("PATH",            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
-        // filesDir for libtalloc.so.2 symlink; nativeLibDir for other .so files
+        // proot DT_NEEDED = libtalloc.so.2 → installed under filesDir by RootfsManager
+        String talloc = filesDir + "/libtalloc.so.2";
         map.put("LD_LIBRARY_PATH", filesDir + ":" + nativeLibDir);
+        map.put("LD_PRELOAD",      talloc);
         return map;
     }
 
@@ -155,5 +157,6 @@ public class ProotCommandBuilder {
         env.add("TMPDIR=" + tmpPath);
         env.add("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
         env.add("LD_LIBRARY_PATH=" + filesDir + ":" + nativeLibDir);
+        env.add("LD_PRELOAD=" + filesDir + "/libtalloc.so.2");
     }
 }
