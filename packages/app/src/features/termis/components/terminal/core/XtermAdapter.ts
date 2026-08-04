@@ -422,7 +422,6 @@ export class XtermAdapter {
 
   /**
    * Cell size + render padding inside the xterm screen element.
-   * Padding is why handles looked ~6–8px inset from the blue selection.
    */
   private _getCellSize(): { cellW: number; cellH: number; padX: number; padY: number } {
     let cellW = 8;
@@ -494,18 +493,24 @@ export class XtermAdapter {
     const sel = core?._selectionService || core?.selectionService;
 
     try {
-      if (sel) {
-        // Clear then set model — this is the reliable multi-line path
+      if (sel?._model) {
+        // Clear then set model — this is the reliable multi-line path.
+        //
+        // IMPORTANT: we do NOT also call sel.setSelection(sc, sr, ec, er) here.
+        // SelectionService#setSelection is actually a single-row API with the
+        // signature (col, row, length) — it's what Terminal#select() calls
+        // internally. Calling it with 4 args doesn't throw (JS ignores extra
+        // args), but it silently reinterprets `ec` as a cell-count `length`,
+        // completely ignores `er`, and internally calls clearSelection() —
+        // wiping out the multi-row selectionStart/selectionEnd we just set
+        // above and collapsing everything back to one row. That's what was
+        // causing multi-line drag to visually stay on a single line.
         if (typeof sel.clearSelection === 'function') sel.clearSelection();
-        if (sel._model) {
-          sel._model.selectionStart = [sc, sr];
-          sel._model.selectionEnd = [ec, er];
-          // hasSelection flag on some versions
-          if ('hasSelection' in sel._model) sel._model.hasSelection = true;
-        }
-        if (typeof sel.setSelection === 'function') {
-          sel.setSelection(sc, sr, ec, er);
-        }
+        sel._model.selectionStart = [sc, sr];
+        sel._model.selectionEnd = [ec, er];
+        // hasSelection flag on some versions
+        if ('hasSelection' in sel._model) sel._model.hasSelection = true;
+
         // Force redraw
         if (typeof sel.refresh === 'function') sel.refresh();
         else if (typeof sel._refreshSelection === 'function') sel._refreshSelection();
@@ -564,7 +569,7 @@ export class XtermAdapter {
   setTheme(theme: XtermTheme): void {
     this.theme = theme;
     if (this.xterm?.options) {
-      // xterm v5+ uses options.theme assignment
+      // xterm v5+ : options.theme assignment
       try {
         this.xterm.options.theme = this._mapTheme();
       } catch {
