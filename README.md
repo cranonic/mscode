@@ -23,6 +23,12 @@ Mono Studio is an advanced, cross-platform code editor designed to bring desktop
 
 ![Title Image Description](packages/app/public/title_image.png)
 
+<center>
+  
+![Plugins_Mono_Studio_IDE](https://i.postimg.cc/vHhSDK7V/Screenshot-2026-07-30-17-18-30-83-6c6e2fc27b4df03aef2a9154790f7eee.jpg)
+
+</center>
+
 ## Key Features
 
 Based on a strictly typed, modular architecture, Mono Studio offers the following core capabilities:
