@@ -1,9 +1,10 @@
-// Auto-split from LspProviders.ts
+// On-Type Formatting – textDocument/onTypeFormatting
 import * as monaco from 'monaco-editor';
 import type { LspState } from '../types';
-import { sendRequest, sendNotify } from '../LspTransport';
-import { getDocUri, fromLspUri } from '../utils/uriHelpers';
+import { sendRequest } from '../LspTransport';
+import { getDocUri } from '../utils/uriHelpers';
 import { toMonacoRange, toLspPosition } from './helpers';
+
 export function registerOnTypeFormatting(state: LspState): void {
   state.disposables.push(
     monaco.languages.registerOnTypeFormattingEditProvider(state.languageId, {
@@ -29,4 +30,6 @@ export function registerOnTypeFormatting(state: LspState): void {
           return [];
         }
       },
-    })
+    }),
+  );
+}
