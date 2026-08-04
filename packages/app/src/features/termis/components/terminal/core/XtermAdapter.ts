@@ -420,11 +420,16 @@ export class XtermAdapter {
     });
   }
 
-  /** Shared cell size helper for selection metrics + mobile select. */
-  private _getCellSize(): { cellW: number; cellH: number } {
+  /**
+   * Cell size + render padding inside the xterm screen element.
+   * Padding is why handles looked ~6–8px inset from the blue selection.
+   */
+  private _getCellSize(): { cellW: number; cellH: number; padX: number; padY: number } {
     let cellW = 8;
     let cellH = 16;
-    if (!this.xterm) return { cellW, cellH };
+    let padX = 0;
+    let padY = 0;
+    if (!this.xterm) return { cellW, cellH, padX, padY };
 
     try {
       const core = (this.xterm as any)._core;
@@ -439,9 +444,90 @@ export class XtermAdapter {
         cellW = this.container.clientWidth / this.xterm.cols;
         cellH = this.container.clientHeight / Math.max(1, this.xterm.rows);
       }
+
+      // xterm screen padding (canvas is inset inside the container)
+      if (dim?.css?.pad) {
+        padX = dim.css.pad.left || 0;
+        padY = dim.css.pad.top || 0;
+      } else if (dim?.css?.padding) {
+        padX = dim.css.padding.left || dim.css.padding || 0;
+        padY = dim.css.padding.top || dim.css.padding || 0;
+      } else {
+        // Fallback: measure .xterm-screen or canvas offset within container
+        const screen = this.container.querySelector('.xterm-screen, canvas') as HTMLElement | null;
+        if (screen) {
+          const cr = this.container.getBoundingClientRect();
+          const sr = screen.getBoundingClientRect();
+          padX = Math.max(0, sr.left - cr.left);
+          padY = Math.max(0, sr.top - cr.top);
+        }
+      }
     } catch {}
 
-    return { cellW, cellH };
+    return { cellW, cellH, padX, padY };
+  }
+
+  /**
+   * Set an exact buffer-range selection (works for multi-line).
+   * Prefer SelectionService model; fall back to public select APIs.
+   */
+  public setSelectionRange(
+    startCol: number,
+    startRow: number,
+    endCol: number,
+    endRow: number,
+  ): void {
+    if (!this.xterm) return;
+
+    let sc = startCol, sr = startRow, ec = endCol, er = endRow;
+    if (sr > er || (sr === er && sc > ec)) {
+      sc = endCol; sr = endRow;
+      ec = startCol; er = startRow;
+    }
+
+    sc = Math.max(0, Math.min(this.xterm.cols - 1, sc));
+    ec = Math.max(0, Math.min(this.xterm.cols, ec));
+    sr = Math.max(0, sr);
+    er = Math.max(0, er);
+
+    const core = (this.xterm as any)._core;
+    const sel = core?._selectionService || core?.selectionService;
+
+    try {
+      if (sel) {
+        // Clear then set model — this is the reliable multi-line path
+        if (typeof sel.clearSelection === 'function') sel.clearSelection();
+        if (sel._model) {
+          sel._model.selectionStart = [sc, sr];
+          sel._model.selectionEnd = [ec, er];
+          // hasSelection flag on some versions
+          if ('hasSelection' in sel._model) sel._model.hasSelection = true;
+        }
+        if (typeof sel.setSelection === 'function') {
+          sel.setSelection(sc, sr, ec, er);
+        }
+        // Force redraw
+        if (typeof sel.refresh === 'function') sel.refresh();
+        else if (typeof sel._refreshSelection === 'function') sel._refreshSelection();
+        else if (typeof sel.refreshSelection === 'function') sel.refreshSelection();
+        // Notify listeners
+        try { (this.xterm as any)._onSelectionChange?.fire?.(); } catch {}
+        return;
+      }
+
+      // Public API fallback
+      if (sr === er) {
+        this.xterm.select(sc, sr, Math.max(1, ec - sc));
+      } else {
+        this.xterm.selectLines(sr, er);
+      }
+    } catch (e) {
+      console.warn('[XtermAdapter] setSelectionRange failed', e);
+      try {
+        if (sr === er) this.xterm.select(sc, sr, Math.max(1, ec - sc));
+        else this.xterm.selectLines(sr, er);
+      } catch {}
+    }
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -567,7 +653,7 @@ export class XtermAdapter {
       return null;
     }
 
-    const { cellW, cellH } = this._getCellSize();
+    const { cellW, cellH, padX, padY } = this._getCellSize();
     if (cellW <= 0 || cellH <= 0) return null;
 
     const viewportY = this.xterm.buffer.active.viewportY;
@@ -579,7 +665,14 @@ export class XtermAdapter {
       endRow: endRow - viewportY,
       cellW,
       cellH,
+      padX,
+      padY,
     };
+  }
+
+  /** Public cell metrics for drag math outside the adapter. */
+  public getCellMetrics() {
+    return this._getCellSize();
   }
 
   dispose(): void {

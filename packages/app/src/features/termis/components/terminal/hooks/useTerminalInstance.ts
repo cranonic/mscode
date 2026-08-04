@@ -58,13 +58,15 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
     if (!adapter?.xtermInstance) return null;
 
     const xterm = adapter.xtermInstance;
-    const m = adapter.getSelectionMetrics();
-    const cellW = m?.cellW || (containerRef.current
+    const cell = adapter.getCellMetrics?.() || adapter.getSelectionMetrics();
+    const cellW = cell?.cellW || (containerRef.current
       ? containerRef.current.clientWidth / Math.max(1, xterm.cols)
       : 8);
-    const cellH = m?.cellH || (containerRef.current
+    const cellH = cell?.cellH || (containerRef.current
       ? containerRef.current.clientHeight / Math.max(1, xterm.rows)
       : 16);
+    const padX = (cell as any)?.padX ?? 0;
+    const padY = (cell as any)?.padY ?? 0;
 
     const viewportY = xterm.buffer.active.viewportY;
 
@@ -77,11 +79,13 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
     const startRowVP = sr - viewportY;
     const endRowVP   = er - viewportY;
 
-    // Handles sit at the BOTTOM of the cell (native mobile style)
-    const startX = sc * cellW;
-    const startY = (startRowVP + 1) * cellH;
-    const endX   = ec * cellW;
-    const endY   = (endRowVP + 1) * cellH;
+    // Handles at the exact edges of the blue selection:
+    // start = left edge of first cell, end = left edge of end column (exclusive)
+    // + padX/padY so we align with xterm's screen canvas, not the outer container
+    const startX = padX + sc * cellW;
+    const startY = padY + (startRowVP + 1) * cellH;
+    const endX   = padX + ec * cellW;
+    const endY   = padY + (endRowVP + 1) * cellH;
 
     const viewH = containerRef.current?.clientHeight ?? 0;
     if (endY < 0 || startY - cellH > viewH) return null;
@@ -103,7 +107,7 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
   ) => {
     const adapter = adapterRef.current;
     const xterm = adapter?.xtermInstance;
-    if (!xterm) return;
+    if (!xterm || !adapter) return;
 
     let sc = startCol, sr = startRow, ec = endCol, er = endRow;
     if (sr > er || (sr === er && sc > ec)) {
@@ -116,52 +120,51 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
     sr = Math.max(0, sr);
     er = Math.max(0, er);
 
-    try {
-      if (sr === er) {
-        const len = Math.max(1, ec - sc);
-        xterm.select(sc, sr, len);
-      } else {
-        xterm.selectLines(sr, er);
-        const core = (xterm as any)._core;
-        const sel = core?._selectionService || core?.selectionService;
-        if (sel?.setSelection) {
-          sel.setSelection(sc, sr, ec, er);
-        } else if (sel?._model) {
-          sel._model.selectionStart = [sc, sr];
-          sel._model.selectionEnd = [ec, er];
-          sel.refresh?.();
-        }
+    // Always use setSelectionRange — handles single + multi-line via SelectionService
+    if (typeof (adapter as any).setSelectionRange === 'function') {
+      (adapter as any).setSelectionRange(sc, sr, ec, er);
+    } else {
+      try {
+        if (sr === er) xterm.select(sc, sr, Math.max(1, ec - sc));
+        else xterm.selectLines(sr, er);
+      } catch (e) {
+        console.warn('[terminal] applyBufferSelection failed', e);
       }
-    } catch (e) {
-      console.warn('[terminal] applyBufferSelection failed', e);
     }
 
     anchorRef.current = { startCol: sc, startRow: sr, endCol: ec, endRow: er };
 
-    const text = adapter?.getSelection() || '';
-    const ui = metricsToUI(text, sc, sr, ec, er);
+    // Read text after selection is applied
+    const selectedText = adapter.getSelection() || '';
+    const ui = metricsToUI(selectedText, sc, sr, ec, er);
     if (ui) setSelection(ui);
-    else setSelection(text ? { text, startX: 16, startY: 16, endX: 80, endY: 40 } : null);
+    else setSelection(selectedText ? { text: selectedText, startX: 16, startY: 16, endX: 80, endY: 40 } : null);
   }, [metricsToUI]);
 
   const clientToBuffer = useCallback((clientX: number, clientY: number) => {
     const adapter = adapterRef.current;
     const xterm = adapter?.xtermInstance;
     const el = containerRef.current;
-    if (!xterm || !el) return null;
+    if (!xterm || !el || !adapter) return null;
 
     const rect = el.getBoundingClientRect();
-    const m = adapter.getSelectionMetrics();
-    const cellW = m?.cellW || el.clientWidth / Math.max(1, xterm.cols);
-    const cellH = m?.cellH || el.clientHeight / Math.max(1, xterm.rows);
+    const cell = adapter.getCellMetrics?.() || { cellW: 8, cellH: 16, padX: 0, padY: 0 };
+    const cellW = cell.cellW || el.clientWidth / Math.max(1, xterm.cols);
+    const cellH = cell.cellH || el.clientHeight / Math.max(1, xterm.rows);
+    const padX = (cell as any).padX || 0;
+    const padY = (cell as any).padY || 0;
+
+    // Subtract screen padding so coords match cell grid
+    const localX = clientX - rect.left - padX;
+    const localY = clientY - rect.top - padY;
 
     const col = Math.max(0, Math.min(
       xterm.cols,
-      Math.round((clientX - rect.left) / cellW)
+      Math.floor(localX / cellW)
     ));
     const rowVP = Math.max(0, Math.min(
       xterm.rows - 1,
-      Math.floor((clientY - rect.top) / cellH)
+      Math.floor(localY / cellH)
     ));
     const row = rowVP + xterm.buffer.active.viewportY;
 
@@ -286,11 +289,13 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
               endRow: m.endRow + viewportY,
             };
 
-            // Handles at BOTTOM of start/end cells
-            const startX = m.startColumn * m.cellW;
-            const startY = (m.startRow + 1) * m.cellH;
-            const endX   = m.endColumn * m.cellW;
-            const endY   = (m.endRow + 1) * m.cellH;
+            // Handles at exact edges + render padding
+            const padX = (m as any).padX || 0;
+            const padY = (m as any).padY || 0;
+            const startX = padX + m.startColumn * m.cellW;
+            const startY = padY + (m.startRow + 1) * m.cellH;
+            const endX   = padX + m.endColumn * m.cellW;
+            const endY   = padY + (m.endRow + 1) * m.cellH;
 
             const viewH = containerRef.current?.clientHeight ?? 0;
             if (endY < 0 || startY - m.cellH > viewH) {
