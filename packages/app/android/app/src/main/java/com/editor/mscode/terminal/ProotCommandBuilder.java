@@ -64,15 +64,20 @@ public class ProotCommandBuilder {
     }
 
     /**
-     * Native: libbusybox.so ash -c 'source init; exec ash -i'
+     * Native session command.
+     *
+     * IMPORTANT: libbusybox.so is a multi-call binary. Busybox decides the
+     * applet from argv[0]'s basename. When the file is named "libbusybox.so",
+     * it looks for an applet called "libbusybox.so" → "applet not found".
+     *
+     * Fix: start with /system/bin/sh (always present on Android). Busybox
+     * stays available via $BUSYBOX / PATH for individual applets
+     * (e.g. $BUSYBOX ls, $BUSYBOX tar).
      */
     public String[] buildNativeSessionCommand(String initScriptPath) {
         List<String> cmd = new ArrayList<>();
-        cmd.add(busyboxPath);
-        cmd.add("ash");
-        cmd.add("-c");
-        // source the init script then drop into interactive ash
-        cmd.add(". '" + initScriptPath.replace("'", "'\\''") + "'; exec " + busyboxPath + " ash -i");
+        cmd.add("/system/bin/sh");
+        cmd.add(initScriptPath);
         return cmd.toArray(new String[0]);
     }
 
@@ -99,8 +104,8 @@ public class ProotCommandBuilder {
 
     public String[] buildNativeBackgroundCommand(String shellCommand) {
         List<String> cmd = new ArrayList<>();
-        cmd.add(busyboxPath);
-        cmd.add("ash");
+        // Same reason as session: cannot use libbusybox.so as argv[0] applet name
+        cmd.add("/system/bin/sh");
         cmd.add("-c");
         cmd.add(shellCommand);
         return cmd.toArray(new String[0]);

@@ -72,5 +72,5 @@ jobs:
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: MSCode-Release-APK
+        name: MSCode-Native-APK
         path: packages/app/android/app/build/outputs/apk/release/app-release.apk

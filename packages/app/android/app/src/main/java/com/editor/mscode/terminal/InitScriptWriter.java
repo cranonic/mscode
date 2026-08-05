@@ -5,11 +5,14 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 
 /**
- * Writes per-session init shell scripts for native busybox (or legacy Alpine).
+ * Writes per-session init shell scripts for native mode.
  *
- * Each terminal session gets its own init script so:
- *   • Different sessions can start in different directories.
- *   • Scripts are cleaned up after the session exits.
+ * Entry point is always /system/bin/sh (not libbusybox.so).
+ * Reason: busybox multi-call uses argv[0] basename as the applet name.
+ * When the binary is named "libbusybox.so", it looks for applet
+ * "libbusybox.so" → "applet not found".
+ *
+ * Busybox applets remain available via $BUSYBOX or the bb() helper.
  */
 public class InitScriptWriter {
 
@@ -21,8 +24,6 @@ public class InitScriptWriter {
 
     /**
      * Writes a session init script to {@code outputPath}.
-     *
-     * Native mode: simple HOME/PATH/cd/PS1 — no apk, no /etc/profile.
      *
      * @param outputPath  Where to write the script (e.g. filesDir/init_tab1.sh).
      * @param projectCwd  Android path to open on startup (or empty → $HOME).
@@ -47,7 +48,6 @@ public class InitScriptWriter {
         String safeLib  = libDir.replace("'", "'\\''");
         String safeBb   = busybox.replace("'", "'\\''");
 
-        // Native busybox ash init — no Alpine, no apk, no /etc
         String script =
             "#!/system/bin/sh\n" +
             "# MS Code native session init\n" +
@@ -55,25 +55,22 @@ public class InitScriptWriter {
             "export TMPDIR='" + safeTmp + "'\n" +
             "export TERM=xterm-256color\n" +
             "export LANG=C.UTF-8\n" +
-            "export PATH='" + safeLib + "':/system/bin:/system/xbin\n" +
+            "export PATH=/system/bin:/system/xbin:'" + safeLib + "'\n" +
             "export BUSYBOX='" + safeBb + "'\n" +
-            // Make busybox applets available as plain commands if not already in PATH
-            // (busybox itself is multi-call; user can run `busybox ls` or we symlink later)
+            // Helper: bb ls, bb tar, ...
+            "bb() { \"$BUSYBOX\" \"$@\"; }\n" +
             "cd '" + safeHome + "' 2>/dev/null || true\n" +
-            // Hostname for prompt
             "MSCODE_HOST='" + safeHost + "'\n" +
-            // Ash-friendly short prompt (last 2 path components)
-            "export PS1='\\[\\e[1;32m\\]'" + "\"$MSCODE_HOST\"" +
-                "'\\[\\e[0m\\]:\\[\\e[1;34m\\]$(pwd | awk -F/ '\\''{if (NF>3) print \"../\"$(NF-1)\"/\"$NF; else if (NF>=2) print $(NF-1)\"/\"$NF; else print $0}'\\'')\\[\\e[0m\\]\\$ '\n" +
-            // cd to project dir if it exists
+            "export PS1='[$MSCODE_HOST:\\w]\\$ '\n" +
             "if [ -d '" + safeCwd + "' ]; then\n" +
             "    cd '" + safeCwd + "'\n" +
-            "    echo -e \"\\e[33m[+] Opened: $PWD\\e[0m\"\n" +
+            "    echo \"[+] Opened: $PWD\"\n" +
             "else\n" +
             "    cd '" + safeHome + "'\n" +
-            "    echo -e \"\\e[33m[+] Opened: $HOME\\e[0m\"\n" +
+            "    echo \"[+] Opened: $HOME\"\n" +
             "fi\n" +
-            "echo -e \"\\e[1;32m[+] Native shell ready (busybox)\\e[0m\"\n";
+            "echo \"[+] Native shell ready  |  tools: bb <applet>  or  $BUSYBOX <applet>\"\n" +
+            "exec /system/bin/sh -i\n";
 
         File f = new File(outputPath);
         f.getParentFile().mkdirs();
