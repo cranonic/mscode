@@ -98,10 +98,9 @@ public class ProotCommandBuilder {
         map.put("TERM",            "xterm-256color");
         map.put("LANG",            "C.UTF-8");
         map.put("PATH",            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
-        // proot DT_NEEDED = libtalloc.so.2 → installed under filesDir by RootfsManager
-        String talloc = filesDir + "/libtalloc.so.2";
-        map.put("LD_LIBRARY_PATH", filesDir + ":" + nativeLibDir);
-        map.put("LD_PRELOAD",      talloc);
+        // ONLY nativeLibraryDir. Android will NOT load .so from filesDir.
+        // libproot.so must DT_NEEDED "libtalloc.so" (patch with patch-proot-talloc.sh).
+        map.put("LD_LIBRARY_PATH", nativeLibDir);
         return map;
     }
 
@@ -156,7 +155,6 @@ public class ProotCommandBuilder {
         env.add("PS1=\\[\\e[1;32m\\]\\h\\[\\e[0m\\]:\\[\\e[1;34m\\]$(pwd | awk -F/ \'{if (NF>3) print \"../\"$(NF-1)\"/\"$NF; else if (NF>=2) print $(NF-1)\"/\"$NF; else print $0}\')\\[\\e[0m\\]\\$ ");
         env.add("TMPDIR=" + tmpPath);
         env.add("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
-        env.add("LD_LIBRARY_PATH=" + filesDir + ":" + nativeLibDir);
-        env.add("LD_PRELOAD=" + filesDir + "/libtalloc.so.2");
+        env.add("LD_LIBRARY_PATH=" + nativeLibDir);
     }
 }
