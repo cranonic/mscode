@@ -64,20 +64,14 @@ public class ProotCommandBuilder {
     }
 
     /**
-     * Native session command.
-     *
-     * IMPORTANT: libbusybox.so is a multi-call binary. Busybox decides the
-     * applet from argv[0]'s basename. When the file is named "libbusybox.so",
-     * it looks for an applet called "libbusybox.so" → "applet not found".
-     *
-     * Fix: start with /system/bin/sh (always present on Android). Busybox
-     * stays available via $BUSYBOX / PATH for individual applets
-     * (e.g. $BUSYBOX ls, $BUSYBOX tar).
+     * Native session: /system/bin/sh -i
+     * Init script is sourced via ENV= (see buildNativeSessionEnv).
+     * Busybox applets: bb ls  (uses exec -a to fix argv[0]).
      */
     public String[] buildNativeSessionCommand(String initScriptPath) {
         List<String> cmd = new ArrayList<>();
         cmd.add("/system/bin/sh");
-        cmd.add(initScriptPath);
+        cmd.add("-i");
         return cmd.toArray(new String[0]);
     }
 
@@ -132,21 +126,35 @@ public class ProotCommandBuilder {
      * Environment for PTY sessions (full set).
      */
     public String[] buildSessionEnv() {
+        return buildSessionEnv(null);
+    }
+
+    public String[] buildSessionEnv(String initScriptPath) {
         if (useNative) {
-            return buildNativeSessionEnv();
+            return buildNativeSessionEnv(initScriptPath);
         }
         return buildProotSessionEnv();
     }
 
     public String[] buildNativeSessionEnv() {
+        return buildNativeSessionEnv(null);
+    }
+
+    /**
+     * @param initScriptPath  if non-null, set ENV= so interactive sh sources it
+     */
+    public String[] buildNativeSessionEnv(String initScriptPath) {
         List<String> env = new ArrayList<>();
         env.add("HOME=" + homePath);
         env.add("TMPDIR=" + tmpPath);
         env.add("TERM=xterm-256color");
         env.add("LANG=C.UTF-8");
-        env.add("PATH=" + nativeLibDir + ":/system/bin:/system/xbin");
-        // Busybox multi-call: so applets resolve via busybox itself when needed
+        env.add("PATH=/system/bin:/system/xbin:" + nativeLibDir);
         env.add("BUSYBOX=" + busyboxPath);
+        if (initScriptPath != null && !initScriptPath.isEmpty()) {
+            // mksh (Android /system/bin/sh) sources $ENV for interactive shells
+            env.add("ENV=" + initScriptPath);
+        }
         return env.toArray(new String[0]);
     }
 

@@ -178,7 +178,8 @@ public class TerminalForegroundService extends Service {
         scriptWriter.write(initPath, cwd);
 
         String[] cmd = builder.buildSessionCommand(initPath);
-        String[] env = builder.buildSessionEnv();
+        // ENV=initPath so interactive sh sources bb()/aliases
+        String[] env = builder.buildSessionEnv(initPath);
 
         emitLog("🚀 Starting [" + sessionId + "] native " + type
                 + " → " + cwd);
