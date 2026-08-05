@@ -30,7 +30,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Android Foreground Service that owns all terminal sessions and background processes.
  *
- * Native mode (default): uses libbusybox.so — no proot, no Alpine rootfs.
+ * Native mode (default): libbusybox.so + optional Termux-style $PREFIX bootstrap.
+ * No proot, no Alpine rootfs required.
  * PTY / JNI / notification / WakeLock logic is unchanged.
  */
 public class TerminalForegroundService extends Service {
@@ -83,14 +84,47 @@ public class TerminalForegroundService extends Service {
         return rootfs.isRootfsReady();
     }
 
+    public boolean isBootstrapReady() {
+        return rootfs.isBootstrapReady();
+    }
+
+    public String getPrefixPath() {
+        return rootfs.getPrefixPath();
+    }
+
     /**
-     * Native setup: ensure busybox + home/tmp only.
-     * (Alpine extract is intentionally skipped.)
+     * Native + Termux bootstrap setup.
+     * Ensures busybox, home/tmp, then downloads/extracts $PREFIX (filesDir/usr).
+     * Alpine / proot are intentionally skipped.
      */
     public void ensureSetup(String arch) throws Exception {
         synchronized (rootfsLock) {
             rootfs.ensureNativeBinaries();
+            rootfs.ensureBootstrap(arch);
         }
+    }
+
+    /**
+     * Install Termux packages into $PREFIX (online).
+     * Bootstrap must already be ready.
+     *
+     * @param packages  e.g. ["git", "curl"]
+     * @param arch      device ABI (aarch64 / arm / x86_64)
+     * @return summary text
+     */
+    public String pkgInstall(java.util.List<String> packages, String arch) throws Exception {
+        synchronized (rootfsLock) {
+            if (!rootfs.isBootstrapReady()) {
+                rootfs.ensureBootstrap(arch);
+            }
+        }
+        PkgInstaller installer = new PkgInstaller(rootfs, arch);
+        return installer.install(packages, msg -> emitLog("[pkg] " + msg));
+    }
+
+    public java.util.List<String> pkgListInstalled() {
+        PkgInstaller installer = new PkgInstaller(rootfs, "aarch64");
+        return installer.listInstalled();
     }
 
     // ─── State ────────────────────────────────────────────────────────────────
@@ -116,7 +150,7 @@ public class TerminalForegroundService extends Service {
         scriptWriter  = new InitScriptWriter(rootfs);
         createNotificationChannel();
         startForeground(NOTIF_ID, buildNotification("Terminal ready"));
-        emitLog("TerminalForegroundService started (native busybox mode)");
+        emitLog("TerminalForegroundService started (native + Termux bootstrap mode)");
     }
 
     @Override
@@ -144,12 +178,12 @@ public class TerminalForegroundService extends Service {
     }
 
     /**
-     * Starts a new PTY terminal session (native busybox).
+     * Starts a new PTY terminal session (native busybox + Termux $PREFIX).
      *
      * @param sessionId   Unique ID.
      * @param projectPath Android path to open in the terminal.
      * @param type        "local" | "server".
-     * @param arch        Device ABI (kept for API compatibility).
+     * @param arch        Device ABI (used for bootstrap if needed).
      * @param rows        Initial terminal rows.
      * @param cols        Initial terminal columns.
      */
@@ -163,9 +197,18 @@ public class TerminalForegroundService extends Service {
         if (builder == null)
             throw new IllegalStateException("Builder not initialised — call initBuilder() first");
 
-        // Native setup only (no Alpine extract)
+        // Native + bootstrap (no Alpine / proot)
         synchronized (rootfsLock) {
             rootfs.ensureNativeBinaries();
+            // Bootstrap is best-effort on session start — full install via initSetup()
+            try {
+                if (!rootfs.isBootstrapReady()) {
+                    rootfs.ensureBootstrap(arch);
+                }
+            } catch (Exception e) {
+                emitLog("Bootstrap not ready yet: " + e.getMessage()
+                        + " (shell still works with busybox)");
+            }
         }
 
         // Cwd: use Android path directly (no proot mapping)
@@ -178,10 +221,11 @@ public class TerminalForegroundService extends Service {
         scriptWriter.write(initPath, cwd);
 
         String[] cmd = builder.buildSessionCommand(initPath);
-        // ENV=initPath so interactive sh sources bb()/aliases
+        // ENV=initPath so interactive sh sources bb()/aliases + PREFIX
         String[] env = builder.buildSessionEnv(initPath);
 
         emitLog("🚀 Starting [" + sessionId + "] native " + type
+                + " PREFIX=" + rootfs.getPrefixPath()
                 + " → " + cwd);
 
         TerminalSession session = new TerminalSession(sessionId);

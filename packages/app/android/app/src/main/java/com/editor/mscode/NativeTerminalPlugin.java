@@ -138,6 +138,8 @@ public class NativeTerminalPlugin extends Plugin {
         if (!checkService(call)) return;
         JSObject ret = new JSObject();
         ret.put("isReady", terminalService.isRootfsReady());
+        ret.put("bootstrapReady", terminalService.isBootstrapReady());
+        ret.put("prefix", terminalService.getPrefixPath());
         call.resolve(ret);
     }
 
@@ -161,12 +163,73 @@ public class NativeTerminalPlugin extends Plugin {
         }, "term-setup").start();
     }
 
+    /**
+     * pkgInstall({ packages: ["git", "curl"] })
+     * Downloads .deb from Termux main repo and extracts into $PREFIX.
+     */
+    @PluginMethod
+    public void pkgInstall(PluginCall call) {
+        if (!checkService(call)) return;
+        String arch = getArch();
+        if (arch == null) {
+            call.reject("Unsupported ABI");
+            return;
+        }
+
+        JSArray arr = call.getArray("packages");
+        if (arr == null || arr.length() == 0) {
+            String single = call.getString("package", null);
+            if (single == null || single.isEmpty()) {
+                call.reject("packages[] required");
+                return;
+            }
+            arr = new JSArray();
+            arr.put(single);
+        }
+
+        final java.util.List<String> pkgs = new java.util.ArrayList<>();
+        try {
+            for (int i = 0; i < arr.length(); i++) {
+                pkgs.add(arr.getString(i));
+            }
+        } catch (Exception e) {
+            call.reject("Invalid packages array");
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                String summary = terminalService.pkgInstall(pkgs, arch);
+                JSObject ret = new JSObject();
+                ret.put("summary", summary);
+                ret.put("prefix", terminalService.getPrefixPath());
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("pkg install failed: " + e.getMessage());
+            }
+        }, "pkg-install").start();
+    }
+
+    /** pkgListInstalled() → { packages: string[] } */
+    @PluginMethod
+    public void pkgListInstalled(PluginCall call) {
+        if (!checkService(call)) return;
+        java.util.List<String> list = terminalService.pkgListInstalled();
+        JSObject ret = new JSObject();
+        JSArray arr = new JSArray();
+        for (String p : list) arr.put(p);
+        ret.put("packages", arr);
+        call.resolve(ret);
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private String getArch() {
         String abi = Build.SUPPORTED_ABIS[0];
         if (abi.contains("arm64") || abi.contains("aarch64")) return "aarch64";
         if (abi.contains("x86_64"))                           return "x86_64";
+        if (abi.contains("armeabi") || abi.contains("armv7") || abi.equals("arm"))
+            return "arm";
         return null;
     }
 

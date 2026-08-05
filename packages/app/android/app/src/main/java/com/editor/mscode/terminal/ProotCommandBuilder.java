@@ -10,13 +10,15 @@ import java.util.Map;
  * or a one-shot background execution.
  *
  * Supports two modes:
- *   • Native (default) — libbusybox.so ash, no proot, no Alpine rootfs
+ *   • Native (default) — libbusybox.so + optional Termux $PREFIX, no proot
  *   • Legacy proot     — kept for reference / optional fallback
  *
  * ─── targetSdk > 28 note ──────────────────────────────────────────────────
  *  Binary path always comes from nativeLibraryDir (libbusybox.so / libproot.so).
  *  Never point at a binary under getFilesDir() — Android blocks execution
  *  from writable app storage when targetSdkVersion is higher than 28.
+ *  $PREFIX/bin is on PATH for packages that were made executable via the
+ *  bootstrap / package installer path (linker or nativeLibraryDir copy).
  */
 public class ProotCommandBuilder {
 
@@ -27,8 +29,9 @@ public class ProotCommandBuilder {
     private final String filesDir;
     private final String homePath;
     private final String tmpPath;
+    private final String prefixPath;
 
-    /** Prefer native busybox over proot. */
+    /** Prefer native busybox + bootstrap over proot. */
     private boolean useNative = true;
 
     public ProotCommandBuilder(RootfsManager mgr, String nativeLibDir) {
@@ -39,6 +42,7 @@ public class ProotCommandBuilder {
         this.nativeLibDir = nativeLibDir;
         this.homePath     = mgr.getHomePath();
         this.tmpPath      = mgr.getTmpPath();
+        this.prefixPath   = mgr.getPrefixPath();
     }
 
     public void setUseNative(boolean nativeMode) {
@@ -67,6 +71,7 @@ public class ProotCommandBuilder {
      * Native session: /system/bin/sh -i
      * Init script is sourced via ENV= (see buildNativeSessionEnv).
      * Busybox applets: bb ls  (uses exec -a to fix argv[0]).
+     * $PREFIX/bin is on PATH when bootstrap is installed.
      */
     public String[] buildNativeSessionCommand(String initScriptPath) {
         List<String> cmd = new ArrayList<>();
@@ -147,10 +152,17 @@ public class ProotCommandBuilder {
         List<String> env = new ArrayList<>();
         env.add("HOME=" + homePath);
         env.add("TMPDIR=" + tmpPath);
+        env.add("PREFIX=" + prefixPath);
         env.add("TERM=xterm-256color");
         env.add("LANG=C.UTF-8");
-        env.add("PATH=/system/bin:/system/xbin:" + nativeLibDir);
+        // $PREFIX/bin first so installed packages win over system tools
+        env.add("PATH=" + prefixPath + "/bin:" + prefixPath + "/bin/applets:"
+                + nativeLibDir + ":/system/bin:/system/xbin");
+        env.add("LD_LIBRARY_PATH=" + prefixPath + "/lib:" + nativeLibDir);
         env.add("BUSYBOX=" + busyboxPath);
+        // Termux compatibility aliases
+        env.add("TERMUX_PREFIX=" + prefixPath);
+        env.add("TERMUX_VERSION=mscode");
         if (initScriptPath != null && !initScriptPath.isEmpty()) {
             // mksh (Android /system/bin/sh) sources $ENV for interactive shells
             env.add("ENV=" + initScriptPath);
@@ -177,12 +189,17 @@ public class ProotCommandBuilder {
 
     public Map<String, String> buildNativeEnvMap() {
         Map<String, String> map = new java.util.LinkedHashMap<>();
-        map.put("HOME",    homePath);
-        map.put("TMPDIR",  tmpPath);
-        map.put("TERM",    "xterm-256color");
-        map.put("LANG",    "C.UTF-8");
-        map.put("PATH",    nativeLibDir + ":/system/bin:/system/xbin");
-        map.put("BUSYBOX", busyboxPath);
+        map.put("HOME",            homePath);
+        map.put("TMPDIR",          tmpPath);
+        map.put("PREFIX",          prefixPath);
+        map.put("TERM",            "xterm-256color");
+        map.put("LANG",            "C.UTF-8");
+        map.put("PATH",            prefixPath + "/bin:" + prefixPath + "/bin/applets:"
+                                   + nativeLibDir + ":/system/bin:/system/xbin");
+        map.put("LD_LIBRARY_PATH", prefixPath + "/lib:" + nativeLibDir);
+        map.put("BUSYBOX",         busyboxPath);
+        map.put("TERMUX_PREFIX",   prefixPath);
+        map.put("TERMUX_VERSION",  "mscode");
         return map;
     }
 
