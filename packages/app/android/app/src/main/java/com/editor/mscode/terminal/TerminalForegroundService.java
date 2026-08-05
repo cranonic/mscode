@@ -30,22 +30,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Android Foreground Service that owns all terminal sessions and background processes.
  *
- * ─── Why a Service? ───────────────────────────────────────────────────────
- *  Android kills background threads when the app is minimised or the screen
- *  turns off ("Phantom Process" killing on Android 12+). A Foreground Service
- *  with a visible notification is protected from this — the OS will not kill
- *  it while the notification is showing.
- *
- * ─── WakeLock ─────────────────────────────────────────────────────────────
- *  When running LSP servers (pyright, clangd) or long compilations, we need
- *  the CPU to stay active even with the screen off. acquireWakeLock() is
- *  called automatically when at least one session is running; released when
- *  the last session closes.
- *
- * ─── IPC with NativeTerminalPlugin ────────────────────────────────────────
- *  The plugin binds to this service via the LocalBinder and calls methods
- *  directly (same process → no IPC overhead). Events (onData, onExit) are
- *  delivered back through the EventCallback interface.
+ * Native mode (default): uses libbusybox.so — no proot, no Alpine rootfs.
+ * PTY / JNI / notification / WakeLock logic is unchanged.
  */
 public class TerminalForegroundService extends Service {
 
@@ -53,10 +39,8 @@ public class TerminalForegroundService extends Service {
     private static final String CHANNEL_ID  = "mscode_terminal";
     private static final int    NOTIF_ID    = 1001;
 
-    // ─── Actions ─────────────────────────────────────────────────────────────
     public static final String ACTION_STOP = "com.editor.mscode.terminal.STOP";
 
-    // ─── Binder (same-process binding) ───────────────────────────────────────
     public class LocalBinder extends Binder {
         public TerminalForegroundService getService() {
             return TerminalForegroundService.this;
@@ -70,7 +54,6 @@ public class TerminalForegroundService extends Service {
 
     // ─── Event callback ───────────────────────────────────────────────────────
 
-    /** NativeTerminalPlugin implements this to receive PTY output events. */
     public interface EventCallback {
         void onData(String sessionId, String data);
         void onExit(String sessionId, int exitCode);
@@ -93,20 +76,20 @@ public class TerminalForegroundService extends Service {
         Log.d(TAG, msg);
         if (eventCallback != null) eventCallback.onLog(msg);
     }
-    
-    
-    // ─── Background Terminal Pre-Setup ────────────────────────────────
+
+    // ─── Setup ────────────────────────────────────────────────────────────────
 
     public boolean isRootfsReady() {
         return rootfs.isRootfsReady();
     }
 
+    /**
+     * Native setup: ensure busybox + home/tmp only.
+     * (Alpine extract is intentionally skipped.)
+     */
     public void ensureSetup(String arch) throws Exception {
-        // এই লকটা নিশ্চিত করবে যে একই সাথে একাধিক সেটআপ রান করবে না
         synchronized (rootfsLock) {
-            rootfs.ensureBinaries(arch);
-            rootfs.ensureRootfs(arch);
-            rootfs.ensureTmpDir();
+            rootfs.ensureNativeBinaries();
         }
     }
 
@@ -115,7 +98,6 @@ public class TerminalForegroundService extends Service {
     private final ConcurrentHashMap<String, TerminalSession> sessions
         = new ConcurrentHashMap<>();
 
-    // Shared Alpine setup — serialize with this lock
     private final Object rootfsLock = new Object();
 
     private RootfsManager    rootfs;
@@ -134,7 +116,7 @@ public class TerminalForegroundService extends Service {
         scriptWriter  = new InitScriptWriter(rootfs);
         createNotificationChannel();
         startForeground(NOTIF_ID, buildNotification("Terminal ready"));
-        emitLog("TerminalForegroundService started");
+        emitLog("TerminalForegroundService started (native busybox mode)");
     }
 
     @Override
@@ -142,38 +124,34 @@ public class TerminalForegroundService extends Service {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
             stopSelf();
         }
-        return START_STICKY; // restart if killed
+        return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
-        // Kill all sessions cleanly
         for (TerminalSession s : sessions.values()) cleanupSession(s);
         sessions.clear();
         releaseWakeLock();
         super.onDestroy();
     }
 
-    // ─── Public API (called by NativeTerminalPlugin) ──────────────────────────
+    // ─── Public API ───────────────────────────────────────────────────────────
 
-    /**
-     * Initialises the builder with the plugin's native library dir.
-     * Must be called once after binding before any session is started.
-     */
     public void initBuilder(String nativeLibDir) {
         this.builder = new ProotCommandBuilder(rootfs, nativeLibDir);
+        // Default: native mode (no proot)
+        this.builder.setUseNative(true);
     }
 
     /**
-     * Starts a new PTY terminal session.
+     * Starts a new PTY terminal session (native busybox).
      *
      * @param sessionId   Unique ID.
-     * @param projectPath Android path to open in the terminal (mapped to proot).
+     * @param projectPath Android path to open in the terminal.
      * @param type        "local" | "server".
-     * @param arch        Device ABI: "aarch64" or "x86_64".
+     * @param arch        Device ABI (kept for API compatibility).
      * @param rows        Initial terminal rows.
      * @param cols        Initial terminal columns.
-     * @throws Exception  On rootfs/proot setup failure or PTY creation failure.
      */
     public void startSession(String sessionId, String projectPath,
                              String type, String arch,
@@ -182,34 +160,37 @@ public class TerminalForegroundService extends Service {
         if (sessions.containsKey(sessionId))
             throw new IllegalStateException("Session '" + sessionId + "' already exists");
 
-        // Alpine setup (serialized across concurrent starts)
+        if (builder == null)
+            throw new IllegalStateException("Builder not initialised — call initBuilder() first");
+
+        // Native setup only (no Alpine extract)
         synchronized (rootfsLock) {
-            rootfs.ensureBinaries(arch);
-            rootfs.ensureRootfs(arch);
-            rootfs.ensureTmpDir();
+            rootfs.ensureNativeBinaries();
         }
 
-        // Map project path → proot-accessible path
-        String prootCwd = (projectPath != null && new File(projectPath).isDirectory())
-            ? projectPath : "/root";
+        // Cwd: use Android path directly (no proot mapping)
+        String cwd = (projectPath != null && new File(projectPath).isDirectory())
+            ? projectPath
+            : rootfs.getHomePath();
 
         // Write per-session init script
         String initPath = rootfs.getFilesDir() + "/init_" + sessionId + ".sh";
-        scriptWriter.write(initPath, prootCwd);
+        scriptWriter.write(initPath, cwd);
 
         String[] cmd = builder.buildSessionCommand(initPath);
         String[] env = builder.buildSessionEnv();
 
-        emitLog("🚀 Starting [" + sessionId + "] " + type
-                + (prootCwd.equals("/root") ? "" : " → " + prootCwd));
+        emitLog("🚀 Starting [" + sessionId + "] native " + type
+                + " → " + cwd);
 
         TerminalSession session = new TerminalSession(sessionId);
         session.type = type;
         sessions.put(sessionId, session);
 
         int[] pids = new int[1];
+        // Working directory = home (init script will cd to project)
         session.ptyFd = PtyEngine.createSubprocess(cmd, env,
-                                                    rootfs.getFilesDir(),
+                                                    rootfs.getHomePath(),
                                                     pids, rows, cols);
         if (session.ptyFd < 0) {
             sessions.remove(sessionId);
@@ -227,7 +208,6 @@ public class TerminalForegroundService extends Service {
         updateNotification(sessions.size() + " session(s) running");
         acquireWakeLock();
 
-        // Read loop
         final String sid = sessionId;
         session.readThread = new Thread(() -> {
             try {
@@ -254,7 +234,6 @@ public class TerminalForegroundService extends Service {
         session.readThread.start();
     }
 
-    /** Writes raw bytes to a session's PTY stdin. */
     public void write(String sessionId, String data) throws IOException {
         TerminalSession s = sessions.get(sessionId);
         if (s == null || !s.running) return;
@@ -262,24 +241,20 @@ public class TerminalForegroundService extends Service {
         s.out.flush();
     }
 
-    /** Sends command + newline to a running session. */
     public void execute(String sessionId, String command) throws IOException {
         write(sessionId, command + "\n");
     }
 
-    /** Updates the PTY window size. */
     public void resize(String sessionId, int rows, int cols) {
         TerminalSession s = sessions.get(sessionId);
         if (s != null && s.ptyFd >= 0) PtyEngine.resizePty(s.ptyFd, rows, cols);
     }
 
-    /** Sends SIGINT to the session's process group (Ctrl+C). */
     public void sendInterrupt(String sessionId) {
         TerminalSession s = sessions.get(sessionId);
         if (s != null && s.childPid > 0) PtyEngine.sendSignal(-s.childPid, 2);
     }
 
-    /** Kills a session and frees all resources. */
     public void closeSession(String sessionId) {
         cleanupSession(sessions.remove(sessionId));
         if (sessions.isEmpty()) {
@@ -306,29 +281,32 @@ public class TerminalForegroundService extends Service {
     // ─── Background execute (no PTY) ─────────────────────────────────────────
 
     /**
-     * Runs a command inside Alpine proot WITHOUT a PTY.
-     * Captures combined stdout+stderr and returns them.
-     * Blocks the calling thread — run on a background thread.
+     * Runs a command with native busybox ash -c (no PTY).
      */
     public BackgroundResult backgroundExecute(String command) throws Exception {
-        if (!rootfs.isRootfsReady())
-            throw new IllegalStateException("Alpine rootfs not ready — call startSession() first");
+        if (builder == null)
+            throw new IllegalStateException("Builder not initialised");
+
+        // Ensure dirs exist
+        synchronized (rootfsLock) {
+            rootfs.ensureNativeBinaries();
+        }
 
         String[] cmd = builder.buildBackgroundCommand(command);
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.environment().clear();
         pb.environment().putAll(builder.buildBackgroundEnvMap());
+        pb.directory(new File(rootfs.getHomePath()));
         pb.redirectErrorStream(true);
 
-        Process proc    = pb.start();
-        byte[]  output  = readAll(proc.getInputStream());
+        Process proc     = pb.start();
+        byte[]  output   = readAll(proc.getInputStream());
         int     exitCode = proc.waitFor();
 
         return new BackgroundResult(new String(output, "UTF-8"), exitCode);
     }
 
-    /** Result of backgroundExecute(). */
     public static class BackgroundResult {
         public final String output;
         public final int    exitCode;
@@ -337,20 +315,15 @@ public class TerminalForegroundService extends Service {
             this.exitCode = exitCode;
         }
     }
-    
-    // ─── Streaming Background Execute ─────────────────────────────────
+
+    // ─── Streaming Background Execute ─────────────────────────────────────────
 
     public interface BackgroundStreamListener {
         void onData(String data);
     }
 
-    /**
-     * Runs a command in background and streams the terminal output in real-time.
-     */
-    // Track background processes to allow killing
     private final Map<String, Process> backgroundProcesses = new ConcurrentHashMap<>();
 
-    /** Active LSP WebSocket bridges: port → ProcessServer. */
     private final ConcurrentHashMap<Integer, ProcessServer> processServers
         = new ConcurrentHashMap<>();
 
@@ -359,19 +332,19 @@ public class TerminalForegroundService extends Service {
         void onExit(int exitCode);
     }
 
-    // Injecting Proot Environment
     public void streamBackgroundExecute(
-            String sessionId, String[] cmd, 
-            Map<String, String> env, String cwd, 
+            String sessionId, String[] cmd,
+            Map<String, String> env, String cwd,
             BackgroundProcessListener listener
     ) {
         new Thread(() -> {
             try {
                 ProcessBuilder pb = new ProcessBuilder(cmd);
                 pb.environment().clear();
-                if (env != null) pb.environment().putAll(env); // ← PROOT_LOADER Inject
-                
+                if (env != null) pb.environment().putAll(env);
+
                 if (cwd != null && !cwd.isEmpty()) pb.directory(new File(cwd));
+                else pb.directory(new File(rootfs.getHomePath()));
                 pb.redirectErrorStream(true);
 
                 Process process = pb.start();
@@ -382,11 +355,11 @@ public class TerminalForegroundService extends Service {
                 while ((len = in.read(buf)) != -1) {
                     if (listener != null) listener.onData(new String(buf, 0, len));
                 }
-                
+
                 int exitCode = process.waitFor();
                 backgroundProcesses.remove(sessionId);
                 if (listener != null) listener.onExit(exitCode);
-                
+
             } catch (Exception e) {
                 if (listener != null) {
                     listener.onData("\n[Service Error] " + e.getMessage() + "\n");
@@ -400,27 +373,23 @@ public class TerminalForegroundService extends Service {
     public void killBackgroundProcess(String sessionId) {
         Process p = backgroundProcesses.remove(sessionId);
         if (p != null) p.destroy();
-    }    
-    
- 
+    }
+
     // ─── LSP / ProcessServer ─────────────────────────────────────────────────
 
     /**
-     * Starts a Java WebSocket server that bridges a language server's stdio.
-     * Returns the port number — connect to ws://127.0.0.1:{port}.
-     *
-     * Blocks until the port is bound (guaranteed ready when this returns).
-     *
-     * @param cmd  Full command to run (proot + language server).
+     * Starts a WebSocket↔stdio bridge.
+     * Command runs under native busybox ash -c.
      */
+    public int spawnProcessServer(String shellCommand) throws Exception {
+        if (builder == null)
+            throw new IllegalStateException("Builder not initialised");
 
-    /**
-     * Starts a WebSocket↔stdio bridge for an Alpine language server.
-     * Tracks the ProcessServer so {@link #stopProcessServer(int)} can kill it
-     * on language switch (even if no client connected yet).
-     */
-    public int spawnProcessServer(String alpineCommand) throws Exception {
-        String[] cmd = builder.buildBackgroundCommand(alpineCommand);
+        synchronized (rootfsLock) {
+            rootfs.ensureNativeBinaries();
+        }
+
+        String[] cmd = builder.buildBackgroundCommand(shellCommand);
         java.util.Map<String, String> envMap = builder.buildBackgroundEnvMap();
 
         int port = ProcessServer.findFreePort();
@@ -431,12 +400,6 @@ public class TerminalForegroundService extends Service {
         return port;
     }
 
-    /**
-     * Force-stops the ProcessServer on {@code port}: kills the language-server
-     * process (if any) and closes the listening socket.
-     *
-     * @return true if a server was found and stopped
-     */
     public boolean stopProcessServer(int port) {
         ProcessServer server = processServers.remove(port);
         if (server == null) {
@@ -448,7 +411,6 @@ public class TerminalForegroundService extends Service {
         return true;
     }
 
-    /** Force-stops every tracked ProcessServer (app teardown / hard reset). */
     public void stopAllProcessServers() {
         for (Integer port : processServers.keySet().toArray(new Integer[0])) {
             stopProcessServer(port);
@@ -457,30 +419,12 @@ public class TerminalForegroundService extends Service {
 
     // ─── Hostname ─────────────────────────────────────────────────────────────
 
-    /**
-     * Persists a new hostname and live-updates PS1 in all running sessions.
-     */
     public void setHostname(String name) throws IOException {
         rootfs.saveHostname(name);
-        
-        // IT CAUSE OTHER TERMINAL UNWANTED PUSH
-        // String ps1 = "export PS1='\\[\\e[1;32m\\]ide@" + name
-        //     + "\\[\\e[0m\\]:\\[\\e[1;34m\\]\\w\\[\\e[0m\\]$ '\n";
-        // for (TerminalSession s : sessions.values()) {
-        //     if (s.running && s.out != null) {
-        //         try { s.out.write(ps1.getBytes("UTF-8")); s.out.flush(); }
-        //         catch (IOException ignored) {}
-        //     }
-        // }
-        
     }
 
     // ─── WakeLock ─────────────────────────────────────────────────────────────
 
-    /**
-     * Acquires a PARTIAL_WAKE_LOCK so the CPU keeps running when the screen
-     * turns off (needed for LSP servers and long compilations).
-     */
     public void acquireWakeLock() {
         if (wakeLockHeld) return;
         if (wakeLock == null) {

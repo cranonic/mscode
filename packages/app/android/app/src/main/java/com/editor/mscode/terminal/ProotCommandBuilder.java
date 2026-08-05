@@ -6,42 +6,77 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Builds the proot command array and environment for a terminal session
+ * Builds the command array and environment for a terminal session
  * or a one-shot background execution.
  *
- * Separated from the plugin/service so it can be tested independently
- * and reused by both PTY sessions and backgroundExecute().
+ * Supports two modes:
+ *   • Native (default) — libbusybox.so ash, no proot, no Alpine rootfs
+ *   • Legacy proot     — kept for reference / optional fallback
  *
  * ─── targetSdk > 28 note ──────────────────────────────────────────────────
- *  prootPath always comes from nativeLibraryDir/libproot.so (via RootfsManager).
+ *  Binary path always comes from nativeLibraryDir (libbusybox.so / libproot.so).
  *  Never point at a binary under getFilesDir() — Android blocks execution
  *  from writable app storage when targetSdkVersion is higher than 28.
  */
 public class ProotCommandBuilder {
 
+    private final String busyboxPath;
     private final String prootPath;
     private final String rootfsPath;
     private final String nativeLibDir;
     private final String filesDir;
+    private final String homePath;
     private final String tmpPath;
 
+    /** Prefer native busybox over proot. */
+    private boolean useNative = true;
+
     public ProotCommandBuilder(RootfsManager mgr, String nativeLibDir) {
-        // mgr.getProotPath() → nativeLibraryDir/libproot.so  (NOT filesDir)
+        this.busyboxPath  = mgr.getBusyboxPath();
         this.prootPath    = mgr.getProotPath();
         this.rootfsPath   = mgr.getRootfsPath();
         this.filesDir     = mgr.getFilesDir();
         this.nativeLibDir = nativeLibDir;
+        this.homePath     = mgr.getHomePath();
         this.tmpPath      = mgr.getTmpPath();
+    }
+
+    public void setUseNative(boolean nativeMode) {
+        this.useNative = nativeMode;
+    }
+
+    public boolean isNative() {
+        return useNative;
     }
 
     // ─── Terminal session command ─────────────────────────────────────────────
 
     /**
-     * Full proot command for an interactive PTY session.
+     * Full command for an interactive PTY session.
      *
      * @param initScriptPath  Per-session init shell script (sets PS1, cd, etc.)
      */
     public String[] buildSessionCommand(String initScriptPath) {
+        if (useNative) {
+            return buildNativeSessionCommand(initScriptPath);
+        }
+        return buildProotSessionCommand(initScriptPath);
+    }
+
+    /**
+     * Native: libbusybox.so ash -c 'source init; exec ash -i'
+     */
+    public String[] buildNativeSessionCommand(String initScriptPath) {
+        List<String> cmd = new ArrayList<>();
+        cmd.add(busyboxPath);
+        cmd.add("ash");
+        cmd.add("-c");
+        // source the init script then drop into interactive ash
+        cmd.add(". '" + initScriptPath.replace("'", "'\\''") + "'; exec " + busyboxPath + " ash -i");
+        return cmd.toArray(new String[0]);
+    }
+
+    private String[] buildProotSessionCommand(String initScriptPath) {
         List<String> cmd = new ArrayList<>();
         cmd.add(prootPath);
         addCommonProotFlags(cmd);
@@ -51,11 +86,27 @@ public class ProotCommandBuilder {
     }
 
     /**
-     * Full proot command for backgroundExecute() — no PTY, no init script.
+     * Full command for backgroundExecute() — no PTY, no init script.
      *
-     * @param shellCommand  The sh -c command to run inside Alpine.
+     * @param shellCommand  The sh -c command to run.
      */
     public String[] buildBackgroundCommand(String shellCommand) {
+        if (useNative) {
+            return buildNativeBackgroundCommand(shellCommand);
+        }
+        return buildProotBackgroundCommand(shellCommand);
+    }
+
+    public String[] buildNativeBackgroundCommand(String shellCommand) {
+        List<String> cmd = new ArrayList<>();
+        cmd.add(busyboxPath);
+        cmd.add("ash");
+        cmd.add("-c");
+        cmd.add(shellCommand);
+        return cmd.toArray(new String[0]);
+    }
+
+    private String[] buildProotBackgroundCommand(String shellCommand) {
         List<String> cmd = new ArrayList<>();
         cmd.add(prootPath);
         addCommonProotFlags(cmd);
@@ -65,7 +116,7 @@ public class ProotCommandBuilder {
         return cmd.toArray(new String[0]);
     }
 
-    /** Expose PROOT environment variables for ProcessBuilder / streamBackgroundExecute. */
+    /** Expose environment variables for ProcessBuilder / streamBackgroundExecute. */
     public Map<String, String> getProotEnv() {
         return buildBackgroundEnvMap();
     }
@@ -76,8 +127,27 @@ public class ProotCommandBuilder {
      * Environment for PTY sessions (full set).
      */
     public String[] buildSessionEnv() {
+        if (useNative) {
+            return buildNativeSessionEnv();
+        }
+        return buildProotSessionEnv();
+    }
+
+    public String[] buildNativeSessionEnv() {
         List<String> env = new ArrayList<>();
-        addCommonEnv(env);
+        env.add("HOME=" + homePath);
+        env.add("TMPDIR=" + tmpPath);
+        env.add("TERM=xterm-256color");
+        env.add("LANG=C.UTF-8");
+        env.add("PATH=" + nativeLibDir + ":/system/bin:/system/xbin");
+        // Busybox multi-call: so applets resolve via busybox itself when needed
+        env.add("BUSYBOX=" + busyboxPath);
+        return env.toArray(new String[0]);
+    }
+
+    private String[] buildProotSessionEnv() {
+        List<String> env = new ArrayList<>();
+        addCommonProotEnv(env);
         return env.toArray(new String[0]);
     }
 
@@ -86,6 +156,24 @@ public class ProotCommandBuilder {
      * Call pb.environment().clear() first, then putAll(this).
      */
     public Map<String, String> buildBackgroundEnvMap() {
+        if (useNative) {
+            return buildNativeEnvMap();
+        }
+        return buildProotEnvMap();
+    }
+
+    public Map<String, String> buildNativeEnvMap() {
+        Map<String, String> map = new java.util.LinkedHashMap<>();
+        map.put("HOME",    homePath);
+        map.put("TMPDIR",  tmpPath);
+        map.put("TERM",    "xterm-256color");
+        map.put("LANG",    "C.UTF-8");
+        map.put("PATH",    nativeLibDir + ":/system/bin:/system/xbin");
+        map.put("BUSYBOX", busyboxPath);
+        return map;
+    }
+
+    private Map<String, String> buildProotEnvMap() {
         Map<String, String> map = new java.util.LinkedHashMap<>();
         map.put("PROOT_LOADER",    nativeLibDir + "/libproot-loader.so");
         File l32 = new File(nativeLibDir, "libproot-loader32.so");
@@ -98,24 +186,21 @@ public class ProotCommandBuilder {
         map.put("TERM",            "xterm-256color");
         map.put("LANG",            "C.UTF-8");
         map.put("PATH",            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
-        // ONLY nativeLibraryDir. Android will NOT load .so from filesDir.
-        // libproot.so must DT_NEEDED "libtalloc.so" (patch with patch-proot-talloc.sh).
         map.put("LD_LIBRARY_PATH", nativeLibDir);
         return map;
     }
 
-    // ─── Helpers ─────────────────────────────────────────────────────────────
+    // ─── Proot helpers (legacy) ───────────────────────────────────────────────
 
     private void addCommonProotFlags(List<String> cmd) {
-        cmd.add("--link2symlink");  // symlink support for apk
+        cmd.add("--link2symlink");
         cmd.add("--sysvipc");
-        cmd.add("-L");              // ignore non-fatal mount errors
-        cmd.add("--kill-on-exit");  // kill child tree when proot exits
-        cmd.add("-0");              // fake root inside Alpine
+        cmd.add("-L");
+        cmd.add("--kill-on-exit");
+        cmd.add("-0");
         cmd.add("-r"); cmd.add(rootfsPath);
         cmd.add("-w"); cmd.add("/");
 
-        // Android system partitions — needed for libproot-loader.so ELF resolution
         for (String mnt : new String[]{
                 "/apex", "/odm", "/product", "/system", "/system_ext", "/vendor",
                 "/linkerconfig/ld.config.txt",
@@ -142,7 +227,7 @@ public class ProotCommandBuilder {
         cmd.add("-b"); cmd.add(tmpPath + ":/dev/shm");
     }
 
-    private void addCommonEnv(List<String> env) {
+    private void addCommonProotEnv(List<String> env) {
         env.add("PROOT_LOADER=" + nativeLibDir + "/libproot-loader.so");
         File l32 = new File(nativeLibDir, "libproot-loader32.so");
         if (l32.exists()) {
