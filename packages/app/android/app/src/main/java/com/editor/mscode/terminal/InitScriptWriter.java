@@ -94,7 +94,8 @@ public class InitScriptWriter {
         sb.append("fi\n");
         sb.append("export BUSYBOX='").append(safeBb).append("'\n");
         sb.append("export MSCODE_HOST='").append(safeHost).append("'\n");
-        sb.append("export PS1='[$MSCODE_HOST:\\w]\\$ '\n");
+        // mksh (Android /system/bin/sh) does not expand \w — use $PWD
+        sb.append("export PS1='[$MSCODE_HOST:$PWD]\\$ '\n");
         // Bionic expects these (tzdata warnings otherwise)
         sb.append("export ANDROID_DATA=/data\n");
         sb.append("export ANDROID_ROOT=/system\n");
