@@ -226,7 +226,9 @@ public class InitScriptWriter {
         sb.append("    case \"$_n\" in\n");
         sb.append("      elf|bb|pkg|mscode_wrap|export|exec|if|fi|then|else|while|do|done|case|esac|function|return|shift|cd|command) continue ;;\n");
         sb.append("    esac\n");
-        sb.append("    eval \"$_n() { elf \\\"$_f\\\" \\\"$@\\\"; }\"\n");
+        // IMPORTANT: must be \$@ so eval keeps literal "$@" inside the function body.
+        // Using plain $@ here expands at wrap-time (empty) and breaks python --version etc.
+        sb.append("    eval \"$_n() { elf \\\"$_f\\\" \\\"\\\$@\\\"; }\"\n");
         sb.append("    _wc=$((_wc+1))\n");
         sb.append("  done\n");
         sb.append("  return 0\n");
@@ -252,7 +254,7 @@ public class InitScriptWriter {
         sb.append("    echo 'bb() { [ $# -lt 1 ] && return 1; local a=\"$1\"; shift; ( exec -a \"$a\" \"$BUSYBOX\" \"$@\" ); }'\n");
         // busybox applets as bash functions
         sb.append("    for a in ls cat cp mv rm mkdir grep find tar head tail wc uname clear chmod sed sort awk cut tr uniq basename dirname pwd date touch ln readlink stat which xargs tee ps kill id env seq true false test; do\n");
-        sb.append("      echo \"$a() { bb $a \\\"$@\\\"; }\"\n");
+        sb.append("      echo \"$a() { bb $a \\\"\\\$@\\\"; }\"\n");
         sb.append("    done\n");
         sb.append("    echo 'elf() { local b=\"$1\"; shift; [ -f \"$b\" ] || return 127; if [ -n \"$MSCODE_LINKER\" ]; then \"$MSCODE_LINKER\" \"$b\" \"$@\"; else \"$b\" \"$@\"; fi; }'\n");
         sb.append("    for _f in \"$PREFIX\"/bin/*; do\n");
@@ -260,7 +262,7 @@ public class InitScriptWriter {
         sb.append("      _n=${_f##*/}\n");
         sb.append("      case \"$_n\" in ''|*[!a-zA-Z0-9_]*|[0-9]*) continue ;; esac\n");
         sb.append("      case \" $_MSCODE_BB_SKIP \" in *\" $_n \"*) continue ;; esac\n");
-        sb.append("      echo \"$_n() { elf '$_f' \\\"$@\\\"; }\"\n");
+        sb.append("      echo \"$_n() { elf '$_f' \\\"\\\$@\\\"; }\"\n");
         sb.append("    done\n");
         sb.append("  } > \"$PREFIX/etc/mscode_bash_env.sh\"\n");
         sb.append("}\n");
@@ -292,10 +294,13 @@ public class InitScriptWriter {
         sb.append("  fi\n");
         sb.append("  if [ \"$_need\" = 1 ]; then\n");
         sb.append("    echo \"[pkg] fetching index ($_arch)…\"\n");
-        sb.append("    _curl_ca=\n");
-        sb.append("    [ -n \"$CURL_CA_BUNDLE\" ] && _curl_ca=\"--cacert $CURL_CA_BUNDLE\"\n");
-        sb.append("    curl -fsSL $_curl_ca -o \"$_pkg_cache/Packages.gz\" \\\n");
-        sb.append("      \"$_pkg_repo/dists/stable/main/binary-$_arch/Packages.gz\" || return 1\n");
+        sb.append("    if [ -n \"$CURL_CA_BUNDLE\" ] && [ -f \"$CURL_CA_BUNDLE\" ]; then\n");
+        sb.append("      curl -fsSL --cacert \"$CURL_CA_BUNDLE\" -o \"$_pkg_cache/Packages.gz\" \\\n");
+        sb.append("        \"$_pkg_repo/dists/stable/main/binary-$_arch/Packages.gz\" || return 1\n");
+        sb.append("    else\n");
+        sb.append("      curl -fsSL -o \"$_pkg_cache/Packages.gz\" \\\n");
+        sb.append("        \"$_pkg_repo/dists/stable/main/binary-$_arch/Packages.gz\" || return 1\n");
+        sb.append("    fi\n");
         sb.append("    bb gunzip -c \"$_pkg_cache/Packages.gz\" > \"$_idx\" || return 1\n");
         sb.append("  fi\n");
         sb.append("}\n");
@@ -450,9 +455,11 @@ public class InitScriptWriter {
         sb.append("  _deb=\"$_pkg_cache/$(basename \"$_path\")\"\n");
         sb.append("  if [ ! -f \"$_deb\" ]; then\n");
         sb.append("    echo \"[pkg] downloading $_path\"\n");
-        sb.append("    _curl_ca=\n");
-        sb.append("    [ -n \"$CURL_CA_BUNDLE\" ] && _curl_ca=\"--cacert $CURL_CA_BUNDLE\"\n");
-        sb.append("    curl -fsSL $_curl_ca -o \"$_deb\" \"$_pkg_repo/$_path\" || return 1\n");
+        sb.append("    if [ -n \"$CURL_CA_BUNDLE\" ] && [ -f \"$CURL_CA_BUNDLE\" ]; then\n");
+        sb.append("      curl -fsSL --cacert \"$CURL_CA_BUNDLE\" -o \"$_deb\" \"$_pkg_repo/$_path\" || return 1\n");
+        sb.append("    else\n");
+        sb.append("      curl -fsSL -o \"$_deb\" \"$_pkg_repo/$_path\" || return 1\n");
+        sb.append("    fi\n");
         sb.append("  else\n");
         sb.append("    echo \"[pkg] cached $(basename \"$_deb\")\"\n");
         sb.append("  fi\n");
@@ -577,3 +584,4 @@ public class InitScriptWriter {
         }
     }
 }
+!
