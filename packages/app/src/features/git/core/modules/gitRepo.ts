@@ -1,63 +1,94 @@
-// src/features/git/core/gitRepo.ts
-//
-// Repository lifecycle operations.
-// Handles the /sdcard → separate-git-dir workaround required on Android:
-// git cannot store the .git folder inside /storage/emulated/0 due to
-// filesystem restrictions, so we redirect it to an internal path.
-
-
 // src/features/git/core/modules/gitRepo.ts
+//
+// Repository lifecycle: prefer normal .git on disk.
+// On shared-storage permission failure → ask user → optional virtual gitdir.
 
 import { taskManager } from '@/core/extensionAPI/tasks/taskManager';
-import { run, runVisible } from './gitRunner';
+import {
+  run,
+  runVisible,
+  isSharedStorage,
+  askVirtualGitConsent,
+  enableVirtualGit,
+  GIT_REPOS_BASE,
+} from './gitRunner';
 
-// MSCode root directory
-const LINUX_BASE_DIR = '/root/.mscode_git_repos';
-
-async function mkdirGitRepos(): Promise<void> {
-  await new Promise<void>(res => {
-    taskManager
-      .execute(`mkdir -p "${LINUX_BASE_DIR}"`, '/', () => {})
-      .result.then(() => res()).catch(() => res());
-  });
-}
-
-export async function init(cwd: string, defaultBranch = 'main'): Promise<void> {
-  const normalized = cwd.replace('/storage/emulated/0', '/sdcard');
-
-  if (normalized.startsWith('/sdcard')) {
-    await mkdirGitRepos();
-    const uniqueHash = `repo_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    const internalGitDir = `${LINUX_BASE_DIR}/${uniqueHash}`;
-    
-    await runVisible(`init -b ${defaultBranch} --separate-git-dir="${internalGitDir}"`, cwd);
-  } else {
-    await runVisible(`init -b ${defaultBranch}`, cwd);
-  }
-
+async function applyCoreConfig(cwd: string): Promise<void> {
   await run('config core.fileMode false', cwd, true);
   await run('config core.symlinks false', cwd, true);
   await run('config core.ignorecase true', cwd, true);
 }
 
-export async function clone(url: string, parentDir: string): Promise<void> {
-  let targetName = url.split('/').pop()?.replace('.git', '') || 'repo';
-  const normalizedParent = parentDir.replace('/storage/emulated/0', '/sdcard');
+function isPermissionError(msg: string): boolean {
+  const m = (msg || '').toLowerCase();
+  return (
+    m.includes('permission denied') ||
+    m.includes('operation not permitted') ||
+    m.includes('read-only file system') ||
+    m.includes('unable to create') ||
+    m.includes('invalid path') ||
+    m.includes('failed to create')
+  );
+}
 
-  if (normalizedParent.startsWith('/sdcard')) {
-    await mkdirGitRepos();
+/**
+ * git init — always try a normal repo first.
+ * If sdcard rejects .git, prompt for virtual separate-git-dir.
+ */
+export async function init(cwd: string, defaultBranch = 'main'): Promise<void> {
+  try {
+    await runVisible(`init -b ${defaultBranch}`, cwd);
+    await applyCoreConfig(cwd);
+    return;
+  } catch (e: any) {
+    const msg = e?.message || String(e);
+    if (!isSharedStorage(cwd) || !isPermissionError(msg)) {
+      throw e;
+    }
+
+    const ok = await askVirtualGitConsent(
+      cwd,
+      'Cannot create .git on this shared folder. Use a virtual git directory inside app storage?',
+    );
+    if (!ok) throw e;
+
+    await enableVirtualGit(cwd, { initBranch: defaultBranch });
+    await applyCoreConfig(cwd);
+  }
+}
+
+/**
+ * git clone — try normal; on permission failure offer virtual separate-git-dir.
+ */
+export async function clone(url: string, parentDir: string): Promise<void> {
+  const targetName = url.split('/').pop()?.replace('.git', '') || 'repo';
+
+  try {
+    await runVisible(`clone "${url}" "${targetName}"`, parentDir);
+  } catch (e: any) {
+    const msg = e?.message || String(e);
+    if (!isSharedStorage(parentDir) || !isPermissionError(msg)) {
+      throw e;
+    }
+
+    const ok = await askVirtualGitConsent(
+      parentDir,
+      'Clone failed writing .git on shared storage. Retry with a virtual git directory?',
+    );
+    if (!ok) throw e;
+
+    await taskManager.execute(`mkdir -p "${GIT_REPOS_BASE}"`, '/', () => {}).result;
     const uniqueHash = `repo_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    const internalGitDir = `${LINUX_BASE_DIR}/${uniqueHash}`;
-    
-    await runVisible(`clone --separate-git-dir="${internalGitDir}" "${url}" "${targetName}"`, parentDir);
-  } else {
-    await runVisible(`clone "${url}"`, parentDir);
+    const internalGitDir = `${GIT_REPOS_BASE}/${uniqueHash}`;
+
+    await runVisible(
+      `clone --separate-git-dir="${internalGitDir}" "${url}" "${targetName}"`,
+      parentDir,
+    );
   }
 
   const repoCwd = `${parentDir}/${targetName}`;
-  await run('config core.fileMode false',  repoCwd, true);
-  await run('config core.symlinks false',  repoCwd, true);
-  await run('config core.ignorecase true', repoCwd, true);
+  await applyCoreConfig(repoCwd);
 }
 
 export async function createGithubRepo(name: string, isPrivate: boolean, token: string): Promise<string> {

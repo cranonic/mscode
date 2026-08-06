@@ -15,25 +15,37 @@ let isGitVerified  = false;
 let installPromise: Promise<void> | null = null;
 
 /**
- * App-private store for --separate-git-dir.
- * NOT /root (missing on unrooted Android).
- * Matches RootfsManager filesDir: /data/data/<package>/files
+ * App-private store for --separate-git-dir (fallback when sdcard blocks .git).
+ * NOT /root — missing on unrooted Android.
  */
-const GIT_REPOS_BASE = '/data/data/com.editor.mscode/files/.mscode_git_repos';
+export const GIT_REPOS_BASE = '/data/data/com.editor.mscode/files/.mscode_git_repos';
 
-/** Virtual-git migration only for shared storage (FAT/FUSE limits on .git). */
-function isSharedStorage(path: string): boolean {
+/** Workspaces where the user already approved virtual-git. */
+const virtualApproved = new Set<string>();
+
+/** Workspaces where the user declined virtual-git (don't spam). */
+const virtualDeclined = new Set<string>();
+
+export function isSharedStorage(path: string): boolean {
   const n = path.replace('/storage/emulated/0', '/sdcard');
   return n.startsWith('/sdcard') || n.startsWith('/storage/');
 }
 
-/**
- * Ensures that the Git binary is installed within the underlying environment.
- * If Git is missing, it automatically creates a background installation task using PKG, 
- * provisions a dedicated output channel, and handles global UI state updates.
- * * @returns {Promise<void>} Resolves when Git is verified or successfully provisioned.
- * @throws {Error} Rejects if background package installation fails.
- */
+function isPermissionError(msg: string): boolean {
+  const m = (msg || '').toLowerCase();
+  return (
+    m.includes('permission denied') ||
+    m.includes('operation not permitted') ||
+    m.includes('read-only file system') ||
+    m.includes('read only file system') ||
+    m.includes('unable to create') ||
+    m.includes('cannot mkdir') ||
+    m.includes('failed to create') ||
+    m.includes('invalid path') ||
+    m.includes('not a directory') && m.includes('.git')
+  );
+}
+
 async function ensureGitInstalled(): Promise<void> {
   if (isGitVerified)  return;
   if (installPromise) return installPromise;
@@ -57,12 +69,11 @@ async function ensureGitInstalled(): Promise<void> {
       useTermisStore.getState().setActiveView('output');
 
       const tasks   = createTasksModule('system');
-      // mscode_env.sh is sourced by native background runner (pkg = shell function)
       const install = tasks.runInBackground(
         'pkg update; pkg install git; command -v git >/dev/null || ls "$PREFIX/bin/git"',
         { cwd: '/', outputChannel: 'Git Setup' },
       );
-      
+
       const { exitCode: code } = await install.result;
       if (code === 0) {
         isGitVerified = true;
@@ -88,20 +99,13 @@ async function ensureGitInstalled(): Promise<void> {
   return installPromise;
 }
 
-// ─── Virtual Git Security (The Brains) ──────────────────────────────────────
+// ─── Virtual Git (opt-in fallback) ───────────────────────────────────────────
 
 /**
- * Sanitizes and establishes the "Virtual Git" layer for a given workspace.
- * Resolves critical Android Shared Storage/SDCard permission issues by migrating standard 
- * physical `.git` folders to an app-private storage (`filesDir/.mscode_git_repos`), 
- * leaving behind a standard Git reference pointer (`gitdir: <path>`).
- * * @param {string} cwd The current absolute directory path of the active project.
- * @returns {Promise<void>}
+ * Only validates existing gitdir: links — does NOT auto-migrate.
+ * Real .git on sdcard is preferred until permission fails + user confirms.
  */
-async function setupVirtualGit(cwd: string): Promise<void> {
-  // Only needed on shared storage (/sdcard) — app-private dirs can keep a real .git
-  if (!isSharedStorage(cwd)) return;
-
+async function validateVirtualGitLinks(cwd: string): Promise<void> {
   const gitFilePath = `${cwd}/.git`;
 
   let existsOut = '';
@@ -110,51 +114,108 @@ async function setupVirtualGit(cwd: string): Promise<void> {
 
   let dirOut = '';
   await taskManager.execute(`[ -d "${gitFilePath}" ] && echo "dir" || echo "file"`, '/', (data) => { dirOut += data; }).result;
-  const isDir = dirOut.trim() === 'dir';
+  if (dirOut.trim() === 'dir') return; // real .git — leave alone
 
-  const linuxRepoBase = GIT_REPOS_BASE;
+  let contentOut = '';
+  await taskManager.execute(`cat "${gitFilePath}"`, '/', (data) => { contentOut += data; }).result;
+  const content = contentOut.trim();
 
-  if (isDir) {
-    await taskManager.execute(`mkdir -p "${linuxRepoBase}"`, '/', () => {}).result;
-    const uniqueHash = `repo_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    const linuxRepoPath = `${linuxRepoBase}/${uniqueHash}`;
+  if (!content.startsWith('gitdir: ')) return;
 
-    await taskManager.execute(`mv "${gitFilePath}" "${linuxRepoPath}"`, '/', () => {}).result;
-    await taskManager.execute(`echo "gitdir: ${linuxRepoPath}" > "${gitFilePath}"`, '/', () => {}).result;
-    logGit('Virtual Git', `Migrated real .git → ${linuxRepoPath}`);
+  const targetPath = content.replace('gitdir: ', '').trim();
+  let targetExistsOut = '';
+  await taskManager.execute(`[ -d "${targetPath}" ] && echo "yes" || echo "no"`, '/', (data) => { targetExistsOut += data; }).result;
+
+  if (targetExistsOut.trim() === 'no') {
+    await taskManager.execute(`rm -f "${gitFilePath}"`, '/', () => {}).result;
+    logGit('Virtual Git', `Removed broken virtual link → ${targetPath}`);
+    virtualApproved.delete(cwd);
   } else {
-    let contentOut = '';
-    await taskManager.execute(`cat "${gitFilePath}"`, '/', (data) => { contentOut += data; }).result;
-    const content = contentOut.trim();
-    
-    if (content.startsWith('gitdir: ')) {
-      const targetPath = content.replace('gitdir: ', '').trim();
-      
-      let targetExistsOut = '';
-      await taskManager.execute(`[ -d "${targetPath}" ] && echo "yes" || echo "no"`, '/', (data) => { targetExistsOut += data; }).result;
-      
-      if (targetExistsOut.trim() === 'no') {
-        // If the target folder is deleted, wipe the broken virtual file to restore default directory state
-        await taskManager.execute(`rm -f "${gitFilePath}"`, '/', () => {}).result;
-        logGit('Virtual Git', `Removed broken virtual link pointing to missing folder: ${targetPath}`);
-      }
-    }
+    // Already virtual — treat as approved so we don't re-prompt
+    virtualApproved.add(cwd);
   }
 }
 
 /**
- * Handles error recovery for disconnected, missing, or corrupted virtual Git repositories.
- * Prompts the user via an active UI notification with interactive choices to force 
- * re-initialization of the backend separate git directory, or gracefully cancel.
- * * @param {string} cwd The current project directory working path.
- * @param {string} failedCommand The original raw Git command that threw the error.
- * @param {boolean} hideLog Disables terminal stream logger redirection if true.
- * @returns {Promise<string>} Resolves with the executed command output string upon successful recovery.
+ * Ask user (notification actions) whether to use virtual gitdir on app storage.
+ * Returns true if user taps "Use Virtual Git".
  */
+export function askVirtualGitConsent(cwd: string, reason?: string): Promise<boolean> {
+  if (virtualApproved.has(cwd)) return Promise.resolve(true);
+  if (virtualDeclined.has(cwd)) return Promise.resolve(false);
+
+  return new Promise((resolve) => {
+    const notif = useNotificationStore.getState();
+    const id = notif.addNotification({
+      type: 'warning',
+      title: 'Storage Permission',
+      source: 'Git',
+      message:
+        reason ||
+        'Git cannot write .git on this shared storage path. Use a virtual git directory inside app storage instead?',
+      actions: [
+        {
+          label: 'Use Virtual Git',
+          variant: 'type1',
+          onClick: () => {
+            notif.removeNotification(id);
+            virtualApproved.add(cwd);
+            virtualDeclined.delete(cwd);
+            resolve(true);
+          },
+        },
+        {
+          label: 'Not Now',
+          variant: 'type2',
+          onClick: () => {
+            notif.removeNotification(id);
+            virtualDeclined.add(cwd);
+            resolve(false);
+          },
+        },
+      ],
+    });
+  });
+}
+
+/**
+ * Migrate real .git directory → filesDir/.mscode_git_repos + gitdir: pointer.
+ * Or create separate-git-dir for a fresh repo.
+ */
+export async function enableVirtualGit(cwd: string, opts?: { initBranch?: string }): Promise<string> {
+  const gitFilePath = `${cwd}/.git`;
+  const uniqueHash = `repo_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const linuxRepoPath = `${GIT_REPOS_BASE}/${uniqueHash}`;
+
+  await taskManager.execute(`mkdir -p "${GIT_REPOS_BASE}"`, '/', () => {}).result;
+
+  let isDirOut = '';
+  await taskManager.execute(`[ -d "${gitFilePath}" ] && echo "dir" || echo "no"`, '/', (data) => { isDirOut += data; }).result;
+
+  if (isDirOut.trim() === 'dir') {
+    await taskManager.execute(`mv "${gitFilePath}" "${linuxRepoPath}"`, '/', () => {}).result;
+    await taskManager.execute(`echo "gitdir: ${linuxRepoPath}" > "${gitFilePath}"`, '/', () => {}).result;
+    logGit('Virtual Git', `Migrated .git → ${linuxRepoPath}`);
+  } else {
+    // No .git or already a file — (re)init with separate-git-dir
+    await taskManager.execute(`rm -rf "${gitFilePath}"`, '/', () => {}).result;
+    const branch = opts?.initBranch || 'main';
+    await taskManager.execute(
+      `git -c safe.directory="*" init -b ${branch} --separate-git-dir="${linuxRepoPath}"`,
+      cwd,
+      () => {},
+    ).result;
+    logGit('Virtual Git', `Init with separate-git-dir → ${linuxRepoPath}`);
+  }
+
+  virtualApproved.add(cwd);
+  return linuxRepoPath;
+}
+
 async function handleBrokenRepoRecovery(cwd: string, failedCommand: string, hideLog: boolean): Promise<string> {
   return new Promise((resolve, reject) => {
     const notif = useNotificationStore.getState();
-    
+
     const warningId = notif.addNotification({
       type: 'warning', title: 'Repository Error', source: 'Git',
       message: 'The repository link is broken or corrupted.',
@@ -162,109 +223,69 @@ async function handleBrokenRepoRecovery(cwd: string, failedCommand: string, hide
         {
           label: 'Force Re-Initialize', variant: 'type1',
           onClick: async () => {
-            notif.removeNotification(warningId); // Dismiss warning
-            
-            // Track the loading state notification ID
-            const loadingId = notif.addNotification({ type: 'loading', title: 'Repairing...', source: 'Git', message: 'Re-initializing repository link...' });
-            
+            notif.removeNotification(warningId);
+            const loadingId = notif.addNotification({
+              type: 'loading', title: 'Repairing...', source: 'Git',
+              message: 'Re-initializing repository link...',
+            });
             try {
-              await taskManager.execute(`rm -f "${cwd}/.git"`, '/', () => {}).result;
-              const uniqueHash = `repo_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-              const linuxRepoPath = `${GIT_REPOS_BASE}/${uniqueHash}`;
-              
-              await taskManager.execute(`mkdir -p "${linuxRepoPath}"`, '/', () => {}).result;
-              await taskManager.execute(`git init --separate-git-dir="${linuxRepoPath}"`, cwd, () => {}).result;
-              
+              await enableVirtualGit(cwd);
               const result = await run(failedCommand, cwd, hideLog);
-              
-              // Remove the loading notification and dispatch a success notice on operation complete
               notif.removeNotification(loadingId);
-              notif.addNotification({ type: 'success', title: 'Repaired', source: 'Git', message: 'Repository linked successfully!' });
-              
-              resolve(result); 
+              notif.addNotification({
+                type: 'success', title: 'Repaired', source: 'Git',
+                message: 'Repository linked successfully!',
+              });
+              resolve(result);
             } catch (e: any) {
-              // Clear the active loading notification interface if an error occurs
               notif.removeNotification(loadingId);
-              notif.addNotification({ type: 'error', title: 'Repair Failed', source: 'Git', message: e.message });
+              notif.addNotification({
+                type: 'error', title: 'Repair Failed', source: 'Git', message: e.message,
+              });
               reject(e);
             }
-          }
+          },
         },
         {
           label: 'Cancel', variant: 'type2',
           onClick: () => {
             notif.removeNotification(warningId);
-            reject(new Error("fatal: not a git repository"));
-          }
-        }
-      ]
+            reject(new Error('fatal: not a git repository'));
+          },
+        },
+      ],
     });
   });
 }
 
+async function handlePermissionWithVirtualOffer(
+  cwd: string,
+  failedCommand: string,
+  hideLog: boolean,
+  errMessage: string,
+): Promise<string> {
+  if (!isSharedStorage(cwd)) {
+    throw new Error(errMessage);
+  }
+
+  const ok = await askVirtualGitConsent(
+    cwd,
+    'Permission denied writing Git data on shared storage. Use a virtual git directory in app storage?',
+  );
+  if (!ok) {
+    throw new Error(errMessage + '\n(Virtual Git declined by user)');
+  }
+
+  await enableVirtualGit(cwd);
+  return run(failedCommand, cwd, hideLog);
+}
+
 // ─── Main Execution Ops ─────────────────────────────────────────────────────
-
-/**
- * Executes a custom raw Git subcommand within a virtual secure sandbox layer.
- * Automatically injects the runtime dynamic security configurations (`safe.directory="*"`) 
- * and handles symlink path normalization targets matching standard mobile storage parameters.
- * * @param {string} command The specific raw Git subcommand parameters (e.g. 'status', 'add .').
- * @param {string} cwd Absolute file system target destination path.
- * @param {boolean} [hideLog=false] Prevents streaming data piping to the logging output channel panel.
- * @returns {Promise<string>} Resolves with trimmed raw stdout string responses from the execution pipeline.
- */
-// export async function run(command: string, cwd: string, hideLog = false): Promise<string> {
-//   await ensureGitInstalled();
-//   await setupVirtualGit(cwd);
-
-//   return new Promise((resolve, reject) => {
-//     let output = '';
-//     const safeCommand = `-c safe.directory="*" ${command}`;
-//     const safeCwd     = cwd.replace('/storage/emulated/0', '/sdcard');
-
-//     const execution = taskManager.execute(`git ${safeCommand}`, safeCwd, (data) => {
-//       output += data;
-//     });
-
-//     execution.result
-//       .then(async ({ exitCode }) => {
-//         const clean = output
-//           .split('\n')
-//           .filter(l => !l.startsWith('warning:'))
-//           .join('\n')
-//           .trimEnd();
-
-//         if (!hideLog) logGit(command, clean);
-
-//         if (exitCode !== 0) {
-//           const errMessage = clean || `git ${command} failed (exit ${exitCode})`;
-          
-//           if (errMessage.includes('fatal: not a git repository')) {
-//             // Check if the physical link reference file exists on storage
-//             let existsOut = '';
-//             await taskManager.execute(`[ -e "${safeCwd}/.git" ] && echo "yes" || echo "no"`, '/', (data) => { existsOut += data; }).result;
-            
-//             if (existsOut.trim() === 'yes') {
-//               // File is physically present but git fails, indicating a broken or detached link. Fire recovery interceptor.
-//               handleBrokenRepoRecovery(cwd, command, hideLog).then(resolve).catch(reject);
-//             } else {
-//               // User intentionally removed the .git tracking metadata. Propagate standard reject to show 'Initialize' controls.
-//               reject(new Error(errMessage));
-//             }
-//           } else {
-//             reject(new Error(errMessage));
-//           }
-//         } else {
-//           resolve(clean);
-//         }
-//       })
-//       .catch(reject);
-//   });
-// }
 
 export async function run(command: string, cwd: string, hideLog = false): Promise<string> {
   await ensureGitInstalled();
-  await setupVirtualGit(cwd);
+  // Only validate existing virtual links — never auto-migrate
+  await validateVirtualGitLinks(cwd);
 
   return new Promise((resolve, reject) => {
     let output = '';
@@ -287,24 +308,30 @@ export async function run(command: string, cwd: string, hideLog = false): Promis
 
         if (exitCode !== 0) {
           const errMessage = clean || `git ${command} failed (exit ${exitCode})`;
-          
+
           if (errMessage.includes('fatal: not a git repository')) {
-            // Check if the physical link reference file exists on storage
             let existsOut = '';
-            await taskManager.execute(`[ -e "${safeCwd}/.git" ] && echo "yes" || echo "no"`, '/', (data) => { existsOut += data; }).result;
-            
+            await taskManager.execute(
+              `[ -e "${safeCwd}/.git" ] && echo "yes" || echo "no"`,
+              '/',
+              (data) => { existsOut += data; },
+            ).result;
+
             if (existsOut.trim() === 'yes') {
-              // File is physically present but git fails, indicating a broken or detached link. Fire recovery interceptor.
               handleBrokenRepoRecovery(cwd, command, hideLog).then(resolve).catch(reject);
             } else {
-              // User intentionally removed the .git tracking metadata. Propagate standard reject to show 'Initialize' controls.
               reject(new Error(errMessage));
             }
-          } 
-          else if (errMessage.includes('divergent branches') || errMessage.includes('Need to specify how to reconcile')) {
+          } else if (
+            errMessage.includes('divergent branches') ||
+            errMessage.includes('Need to specify how to reconcile')
+          ) {
             handleDivergentBranches(cwd, command, hideLog).then(resolve).catch(reject);
-          } 
-          else {
+          } else if (isPermissionError(errMessage) && isSharedStorage(cwd)) {
+            handlePermissionWithVirtualOffer(cwd, command, hideLog, errMessage)
+              .then(resolve)
+              .catch(reject);
+          } else {
             reject(new Error(errMessage));
           }
         } else {
@@ -315,27 +342,15 @@ export async function run(command: string, cwd: string, hideLog = false): Promis
   });
 }
 
-
-/**
- * Runs a Git command and forces the visual bottom execution output logging dashboard panel to pop up open.
- * Useful for asynchronous streaming operations like tracking a network `git pull` or `git push`.
- * * @param {string} command The specific Git command string expression.
- * @param {string} cwd Absolute target path of the executing process directory context.
- * @returns {Promise<string>}
- */
 export async function runVisible(command: string, cwd: string): Promise<string> {
   openGitPanel();
   return run(command, cwd, false);
 }
 
-/**
- * UI Prompt for Divergent Branches
- * Catches the divergent branch error and provides a friendly UI to configure the pull strategy.
- */
 async function handleDivergentBranches(cwd: string, failedCommand: string, hideLog: boolean): Promise<string> {
   return new Promise((resolve, reject) => {
     const notif = useNotificationStore.getState();
-    
+
     const warningId = notif.addNotification({
       type: 'warning', title: 'Divergent Branches', source: 'Git',
       message: 'Your local and remote branches have diverged. How would you like to reconcile them?',
@@ -344,75 +359,68 @@ async function handleDivergentBranches(cwd: string, failedCommand: string, hideL
           label: 'Merge (Default)', variant: 'type1',
           onClick: async () => {
             notif.removeNotification(warningId);
-            const loadingId = notif.addNotification({ type: 'loading', title: 'Merging...', source: 'Git', message: 'Configuring and pulling changes...' });
+            const loadingId = notif.addNotification({
+              type: 'loading', title: 'Merging...', source: 'Git',
+              message: 'Configuring and pulling changes...',
+            });
             try {
               await run(`config pull.rebase false`, cwd, true);
-              
               let cmd = failedCommand;
               if (!cmd.includes('--no-edit')) cmd += ' --no-edit';
-              
               const result = await run(cmd, cwd, hideLog);
-              
               notif.removeNotification(loadingId);
-              notif.addNotification({ type: 'success', title: 'Pull Successful', source: 'Git', message: 'Branches merged successfully!' });
+              notif.addNotification({
+                type: 'success', title: 'Pull Successful', source: 'Git',
+                message: 'Branches merged successfully!',
+              });
               resolve(result);
             } catch (e: any) {
               notif.removeNotification(loadingId);
               reject(e);
             }
-          }
+          },
         },
         {
           label: 'Rebase', variant: 'type2',
           onClick: async () => {
             notif.removeNotification(warningId);
-            const loadingId = notif.addNotification({ type: 'loading', title: 'Rebasing...', source: 'Git', message: 'Configuring and rebasing changes...' });
+            const loadingId = notif.addNotification({
+              type: 'loading', title: 'Rebasing...', source: 'Git',
+              message: 'Configuring and rebasing changes...',
+            });
             try {
               await run(`config pull.rebase true`, cwd, true);
-              
               const result = await run(failedCommand, cwd, hideLog);
-              
               notif.removeNotification(loadingId);
-              notif.addNotification({ type: 'success', title: 'Pull Successful', source: 'Git', message: 'Branches rebased successfully!' });
+              notif.addNotification({
+                type: 'success', title: 'Pull Successful', source: 'Git',
+                message: 'Branches rebased successfully!',
+              });
               resolve(result);
             } catch (e: any) {
               notif.removeNotification(loadingId);
               reject(e);
             }
-          }
+          },
         },
         {
           label: 'Cancel', variant: 'type2',
           onClick: () => {
             notif.removeNotification(warningId);
-            reject(new Error("Pull cancelled. Divergent branches need reconciliation."));
-          }
-        }
-      ]
+            reject(new Error('Pull cancelled. Divergent branches need reconciliation.'));
+          },
+        },
+      ],
     });
   });
 }
 
-
-/**
- * Securely requests active credential access tokens for GitHub from the remote sync provider context.
- * Generates an ephemeral runtime configuration override string passing token scopes via Base64 Basic auth headers.
- * * @returns {Promise<string>} Returns a complete inline git configuration header string (`-c http.extraHeader="..."`).
- * @throws {Error} Rejects if authentication request tokens are refused or missing permissions.
- */
 export async function getAuthPrefix(): Promise<string> {
   const token = await gitAccess.requestToken();
   if (!token) throw new Error('GitHub Authentication required or access denied. Please grant permission.');
   return `-c http.extraHeader="Authorization: Basic ${window.btoa(`${token}:x-oauth-basic`)}"`;
 }
 
-/**
- * Maps a long absolute file system reference path down into a relative path node based off the running workspace directory.
- * Used to normalize file statuses when passing change indicators into list rendering engines.
- * * @param {string} cwd The running parent repository absolute base path context.
- * @param {string} fullPath The full absolute path targeting a specific altered script file.
- * @returns {string} Normalized relative path expression string.
- */
 export function getRelativePath(cwd: string, fullPath: string): string {
   if (fullPath.startsWith(cwd)) {
     let rel = fullPath.substring(cwd.length);
@@ -421,4 +429,3 @@ export function getRelativePath(cwd: string, fullPath: string): string {
   }
   return fullPath;
 }
-
