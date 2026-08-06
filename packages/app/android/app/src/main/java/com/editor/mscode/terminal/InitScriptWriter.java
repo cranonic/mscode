@@ -95,6 +95,10 @@ public class InitScriptWriter {
         sb.append("export BUSYBOX='").append(safeBb).append("'\n");
         sb.append("export MSCODE_HOST='").append(safeHost).append("'\n");
         sb.append("export PS1='[$MSCODE_HOST:\\w]\\$ '\n");
+        // Bionic expects these (tzdata warnings otherwise)
+        sb.append("export ANDROID_DATA=/data\n");
+        sb.append("export ANDROID_ROOT=/system\n");
+        sb.append("export ANDROID_STORAGE=/storage\n");
         sb.append("\n");
 
         // ── System Bionic linker (runs ELF from non-executable filesDir) ──
@@ -269,22 +273,27 @@ public class InitScriptWriter {
         sb.append("  done\n");
         sb.append("  [ -n \"$_data\" ] || { echo \"[pkg] no data.tar in deb\" >&2; return 1; }\n");
         sb.append("  echo \"[pkg] extracting $(basename \"$_data\") → $PREFIX\"\n");
+        // IMPORTANT: system/termux tar may spawn xz/zstd as a child via execve.\n
+        // Those children are under filesDir → Permission denied (targetSdk>28).\n
+        // Always decompress via linker (elf) and pipe into bb tar -xf -.\n
         sb.append("  case \"$_data\" in\n");
         sb.append("    *.xz)\n");
-        sb.append("      if [ -x \"$PREFIX/bin/tar\" ]; then\n");
-        sb.append("        elf \"$PREFIX/bin/tar\" -xJf \"$_data\" -C \"$PREFIX\" || return 1\n");
+        sb.append("      if [ -f \"$PREFIX/bin/xz\" ]; then\n");
+        sb.append("        elf \"$PREFIX/bin/xz\" -dc \"$_data\" | bb tar -xf - -C \"$PREFIX\" || return 1\n");
+        sb.append("      elif [ -f \"$PREFIX/bin/busybox\" ]; then\n");
+        sb.append("        elf \"$PREFIX/bin/busybox\" xz -dc \"$_data\" | bb tar -xf - -C \"$PREFIX\" || return 1\n");
         sb.append("      else\n");
-        sb.append("        tar -xJf \"$_data\" -C \"$PREFIX\" || return 1\n");
+        sb.append("        echo \"[pkg] need $PREFIX/bin/xz to extract data.tar.xz\" >&2; return 1\n");
         sb.append("      fi\n");
         sb.append("      ;;\n");
         sb.append("    *.gz|*.tgz)\n");
         sb.append("      bb tar -xzf \"$_data\" -C \"$PREFIX\" || return 1\n");
         sb.append("      ;;\n");
         sb.append("    *.zst)\n");
-        sb.append("      if [ -x \"$PREFIX/bin/tar\" ]; then\n");
-        sb.append("        elf \"$PREFIX/bin/tar\" --zstd -xf \"$_data\" -C \"$PREFIX\" || return 1\n");
+        sb.append("      if [ -f \"$PREFIX/bin/zstd\" ]; then\n");
+        sb.append("        elf \"$PREFIX/bin/zstd\" -dc \"$_data\" | bb tar -xf - -C \"$PREFIX\" || return 1\n");
         sb.append("      else\n");
-        sb.append("        echo \"[pkg] zstd data.tar needs termux tar\" >&2; return 1\n");
+        sb.append("        echo \"[pkg] need $PREFIX/bin/zstd for data.tar.zst\" >&2; return 1\n");
         sb.append("      fi\n");
         sb.append("      ;;\n");
         sb.append("    *)\n");
@@ -305,7 +314,9 @@ public class InitScriptWriter {
         sb.append("  _deb=\"$_pkg_cache/$(basename \"$_path\")\"\n");
         sb.append("  if [ ! -f \"$_deb\" ]; then\n");
         sb.append("    echo \"[pkg] downloading $_path\"\n");
-        sb.append("    curl -fsSL -o \"$_deb\" \"$_pkg_repo/$_path\" || return 1\n");
+        sb.append("    _curl_ca=\n");
+        sb.append("    [ -n \"$CURL_CA_BUNDLE\" ] && _curl_ca=\"--cacert $CURL_CA_BUNDLE\"\n");
+        sb.append("    curl -fsSL $_curl_ca -o \"$_deb\" \"$_pkg_repo/$_path\" || return 1\n");
         sb.append("  else\n");
         sb.append("    echo \"[pkg] cached $(basename \"$_deb\")\"\n");
         sb.append("  fi\n");

@@ -163,6 +163,12 @@ public class ProotCommandBuilder {
         // Termux compatibility aliases
         env.add("TERMUX_PREFIX=" + prefixPath);
         env.add("TERMUX_VERSION=mscode");
+        env.add("ANDROID_DATA=/data");
+        env.add("ANDROID_ROOT=/system");
+        env.add("ANDROID_STORAGE=/storage");
+        env.add("TERMINFO=" + prefixPath + "/share/terminfo");
+        env.add("SSL_CERT_FILE=" + prefixPath + "/etc/tls/cert.pem");
+        env.add("CURL_CA_BUNDLE=" + prefixPath + "/etc/tls/cert.pem");
         if (initScriptPath != null && !initScriptPath.isEmpty()) {
             // mksh (Android /system/bin/sh) sources $ENV for interactive shells
             env.add("ENV=" + initScriptPath);
@@ -200,6 +206,12 @@ public class ProotCommandBuilder {
         map.put("BUSYBOX",         busyboxPath);
         map.put("TERMUX_PREFIX",   prefixPath);
         map.put("TERMUX_VERSION",  "mscode");
+        map.put("ANDROID_DATA",    "/data");
+        map.put("ANDROID_ROOT",    "/system");
+        map.put("ANDROID_STORAGE", "/storage");
+        map.put("TERMINFO",        prefixPath + "/share/terminfo");
+        map.put("SSL_CERT_FILE",   prefixPath + "/etc/tls/cert.pem");
+        map.put("CURL_CA_BUNDLE",  prefixPath + "/etc/tls/cert.pem");
         return map;
     }
 
