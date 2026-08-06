@@ -200,31 +200,37 @@ public class InitScriptWriter {
         }
         sb.append("\n");
 
-        // ── PREFIX/bin ELF wrappers (linker64) ────────────────────────────
-        // Generated for every file in $PREFIX/bin so `curl`, `git`, … work.
-        // Shell functions override PATH; `which curl` still shows PREFIX path.
-        if (bootOk) {
-            File binDir = new File(prefix, "bin");
-            File[] bins = binDir.isDirectory() ? binDir.listFiles() : null;
-            int wrapCount = 0;
-            if (bins != null) {
-                sb.append("# Auto wrappers for $PREFIX/bin via MSCODE_LINKER\n");
-                for (File bin : bins) {
-                    if (!bin.isFile() && !isSymlink(bin)) continue;
-                    String name = bin.getName();
-                    // skip invalid function names / busybox already wrapped
-                    if (!isValidShellName(name)) continue;
-                    if (seen.contains(name)) continue; // prefer busybox applet
-                    // skip apt internals that confuse interactive use? keep all
-
-                    String abs = bin.getAbsolutePath().replace("'", "'\\''");
-                    // function: name() { elf 'abs' "$@"; }
-                    sb.append(name).append("() { elf '").append(abs).append("' \"$@\"; }\n");
-                    wrapCount++;
-                }
-                sb.append("# wrappers: ").append(wrapCount).append("\n\n");
-            }
+        // ── Dynamic PREFIX/bin wrappers (re-run after pkg install) ────────
+        // Java static list goes stale; shell scan always matches current $PREFIX/bin.
+        // Skip busybox-covered names and invalid function identifiers.
+        sb.append("_MSCODE_BB_SKIP=' ");
+        for (String a : seen) {
+            sb.append(a).append(' ');
         }
+        sb.append("'\n");
+        sb.append("mscode_wrap() {\n");
+        sb.append("  [ -d \"$PREFIX/bin\" ] || return 0\n");
+        sb.append("  _wc=0\n");
+        sb.append("  for _f in \"$PREFIX\"/bin/*; do\n");
+        sb.append("    [ -e \"$_f\" ] || continue\n");
+        sb.append("    _n=${_f##*/}\n");
+        sb.append("    # valid shell function name?\n");
+        sb.append("    case \"$_n\" in\n");
+        sb.append("      ''|*[!a-zA-Z0-9_]*|[0-9]*) continue ;;\n");
+        sb.append("    esac\n");
+        sb.append("    case \"$_MSCODE_BB_SKIP\" in\n");
+        sb.append("      *\" $_n \"*) continue ;;\n");
+        sb.append("    esac\n");
+        sb.append("    case \"$_n\" in\n");
+        sb.append("      elf|bb|pkg|mscode_wrap|export|exec|if|fi|then|else|while|do|done|case|esac|function|return|shift|cd|command) continue ;;\n");
+        sb.append("    esac\n");
+        sb.append("    eval \"$_n() { elf \\\"$_f\\\" \\\"\\\$@\\\"; }\"\n");
+        sb.append("    _wc=$((_wc+1))\n");
+        sb.append("  done\n");
+        sb.append("  return 0\n");
+        sb.append("}\n");
+        sb.append("mscode_wrap\n");
+        sb.append("\n");
 
         // ── pkg — real install from shell (curl + ar + tar via linker) ──
         sb.append("_pkg_repo='https://packages-cf.termux.dev/apt/termux-main'\n");
@@ -332,7 +338,8 @@ public class InitScriptWriter {
         sb.append("    return 1\n");
         sb.append("  fi\n");
         sb.append("  echo \"[pkg] merging $_src → $PREFIX\"\n");
-        sb.append("  bb cp -a \"$_src\"/. \"$PREFIX\"/ || return 1\n");
+        // -a preserve, -f overwrite existing (re-install / shared libs)
+        sb.append("  bb cp -af \"$_src\"/. \"$PREFIX\"/ || return 1\n");
         sb.append("  mkdir -p \"$PREFIX/var/lib/dpkg/info\"\n");
         sb.append("  echo \"# mscode\" > \"$PREFIX/var/lib/dpkg/info/$_name.list\"\n");
         sb.append("  rm -rf \"$_work\"\n");
@@ -522,3 +529,4 @@ public class InitScriptWriter {
         }
     }
 }
+!
