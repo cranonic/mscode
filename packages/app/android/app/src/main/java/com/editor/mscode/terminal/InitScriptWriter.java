@@ -179,12 +179,12 @@ public class InitScriptWriter {
             "ls", "cat", "cp", "mv", "rm", "mkdir", "rmdir", "grep", "find",
             "tar", "head", "tail", "wc", "uname", "clear", "chmod", "chown",
             "sed", "sort", "awk", "cut", "tr", "uniq", "basename", "dirname",
-            "dirname", "pwd", "echo", "printf", "sleep", "date", "touch",
+            "pwd", "echo", "printf", "sleep", "date", "touch",
             "ln", "readlink", "stat", "du", "df", "mount", "umount",
             "ps", "kill", "id", "whoami", "which", "xargs", "tee",
             "md5sum", "sha256sum", "base64", "gzip", "gunzip", "zcat",
             "diff", "cmp", "od", "hexdump", "yes", "true", "false",
-            "test", "env", "printenv", "seq", "expr", "tr", "fold",
+            "test", "env", "printenv", "seq", "expr", "fold",
             "realpath", "mktemp", "wget"
         };
         // dedupe while writing
@@ -224,7 +224,7 @@ public class InitScriptWriter {
         sb.append("    case \"$_n\" in\n");
         sb.append("      elf|bb|pkg|mscode_wrap|export|exec|if|fi|then|else|while|do|done|case|esac|function|return|shift|cd|command) continue ;;\n");
         sb.append("    esac\n");
-        sb.append("    eval \"$_n() { elf \\\"$_f\\\" \\\"\\\$@\\\"; }\"\n");
+        sb.append("    eval \"$_n() { elf \\\"$_f\\\" \\\"\\$@\\\"; }\"\n");
         sb.append("    _wc=$((_wc+1))\n");
         sb.append("  done\n");
         sb.append("  return 0\n");
@@ -296,8 +296,6 @@ public class InitScriptWriter {
         sb.append("  done\n");
         sb.append("  [ -n \"$_data\" ] || { echo \"[pkg] no data.tar in deb\" >&2; return 1; }\n");
         sb.append("  echo \"[pkg] extracting $(basename \"$_data\") → $PREFIX\"\n");
-        // Termux debs contain: data/data/com.termux/files/usr/bin/...\n
-        // Stage extract, then merge that tree into our $PREFIX.\n
         sb.append("  _stage=\"$_work/stage\"\n");
         sb.append("  mkdir -p \"$_stage\"\n");
         sb.append("  case \"$_data\" in\n");
@@ -338,14 +336,13 @@ public class InitScriptWriter {
         sb.append("    return 1\n");
         sb.append("  fi\n");
         sb.append("  echo \"[pkg] merging $_src → $PREFIX\"\n");
-        // -a preserve, -f overwrite existing (re-install / shared libs)
         sb.append("  bb cp -af \"$_src\"/. \"$PREFIX\"/ || return 1\n");
         sb.append("  mkdir -p \"$PREFIX/var/lib/dpkg/info\"\n");
         sb.append("  echo \"# mscode\" > \"$PREFIX/var/lib/dpkg/info/$_name.list\"\n");
         sb.append("  rm -rf \"$_work\"\n");
         sb.append("}\n");
         sb.append("\n");
-        // Parse Depends: from Packages index (simple, ignores versions/alternatives)
+        // Parse Depends: from Packages index
         sb.append("_pkg_depends() {\n");
         sb.append("  _want=\"$1\"\n");
         sb.append("  _pkg_ensure_index || return 0\n");
@@ -359,7 +356,6 @@ public class InitScriptWriter {
         sb.append("      '') _cur= ;;\n");
         sb.append("    esac\n");
         sb.append("  done < \"$_pkg_cache/Packages\"\n");
-        sb.append("  # split on commas; strip version constraints and |\n");
         sb.append("  echo \"$_deps\" | tr ',' '\\n' | while IFS= read -r _d; do\n");
         sb.append("    _d=$(echo \"$_d\" | sed 's/|.*//' | sed 's/(.*//' | sed 's/^ *//;s/ *$//')\n");
         sb.append("    [ -n \"$_d\" ] && echo \"$_d\"\n");
@@ -372,7 +368,6 @@ public class InitScriptWriter {
         sb.append("\n");
         sb.append("_pkg_install_one() {\n");
         sb.append("  _p=\"$1\"\n");
-        sb.append("  # depth guard for recursive deps\n");
         sb.append("  _pkg_depth=${_pkg_depth:-0}\n");
         sb.append("  if [ \"$_pkg_depth\" -gt 15 ]; then\n");
         sb.append("    echo \"[pkg] dependency depth exceeded at $_p\" >&2; return 1\n");
@@ -385,11 +380,9 @@ public class InitScriptWriter {
         sb.append("  _path=$(_pkg_resolve \"$_p\") || {\n");
         sb.append("    echo \"[pkg] package not found: $_p\" >&2; return 1\n");
         sb.append("  }\n");
-        // install dependencies first
         sb.append("  _pkg_depth=$((_pkg_depth + 1))\n");
         sb.append("  for _dep in $(_pkg_depends \"$_p\"); do\n");
         sb.append("    case \"$_dep\" in\n");
-        // skip virtual/boring deps
         sb.append("      ''|bash|coreutils|busybox|termux-am|termux-exec|dash|libandroid-support) ;;\n");
         sb.append("      *)\n");
         sb.append("        if ! _pkg_is_installed \"$_dep\"; then\n");
@@ -529,4 +522,3 @@ public class InitScriptWriter {
         }
     }
 }
-!
