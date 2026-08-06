@@ -21,23 +21,33 @@ export const openGitDiff = async (file: GitChangedFile, isStaged: boolean) => {
   const cwd = getCwd();
   if (!cwd) return;
 
-  const originalContent = await GitBackend.getFileContent(
-    cwd,
-    isStaged ? 'HEAD' : 'INDEX',
-    file.path,
-  );
-  const modifiedContent = isStaged
-    ? await GitBackend.getFileContent(cwd, 'INDEX', file.path)
-    : null; // null = read from disk (editable)
+  try {
+    // Staged: HEAD (committed) vs INDEX (staged). Empty repo → HEAD missing → ''
+    // Unstaged: INDEX (staged/last) vs working tree (null → read disk)
+    const originalContent = await GitBackend.getFileContent(
+      cwd,
+      isStaged ? 'HEAD' : 'INDEX',
+      file.path,
+    );
+    const modifiedContent = isStaged
+      ? await GitBackend.getFileContent(cwd, 'INDEX', file.path)
+      : null;
 
-  useTabStore.getState().addTab({
-    id:       `diff-${isStaged ? 'staged' : 'unstaged'}-${file.path}`,
-    type:     'diff' as any,
-    title:    `${file.name} (${isStaged ? 'Index' : 'Working Tree'})`,
-    icon:     'git-compare',
-    filePath: file.path,
-    diffData: { originalContent, modifiedContent, readOnly: isStaged, filePath: file.path },
-  } as any);
+    useTabStore.getState().addTab({
+      id:       `diff-${isStaged ? 'staged' : 'unstaged'}-${file.path}`,
+      type:     'diff' as any,
+      title:    `${file.name} (${isStaged ? 'Index' : 'Working Tree'})`,
+      icon:     'git-compare',
+      filePath: file.path,
+      diffData: { originalContent, modifiedContent, readOnly: isStaged, filePath: file.path },
+    } as any);
+  } catch (e: any) {
+    console.error('[openGitDiff]', e);
+    useNotificationStore.getState().addNotification({
+      type: 'error', title: 'Git Diff', source: 'Git',
+      message: e?.message ?? 'Could not open diff',
+    });
+  }
 };
 
 // ─── Staged subsection ────────────────────────────────────────────────────────

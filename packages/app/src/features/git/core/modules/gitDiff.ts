@@ -27,9 +27,13 @@ export async function getFileContent(
 
     return await run(`show "${target}"`, cwd, true);
   } catch (e: any) {
-    // New files don't exist in old refs — return empty string instead of throwing
-    if (e?.message?.includes('exists on disk, but not in')) return '';
-    if (e?.message?.includes('does not exist in'))          return '';
+    const msg = e?.message ?? String(e);
+    // New files / empty repo (no commits yet) — treat as empty original
+    if (msg.includes('exists on disk, but not in')) return '';
+    if (msg.includes('does not exist in'))          return '';
+    if (msg.includes("invalid object name 'HEAD'")) return '';
+    if (msg.includes('ambiguous argument') && msg.includes('HEAD')) return '';
+    if (msg.includes('bad revision') && msg.includes('HEAD')) return '';
     throw e;
   }
 }

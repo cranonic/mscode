@@ -1,3 +1,4 @@
+
 // src/features/editor/components/DiffEditor/DiffEditor.tsx
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -50,6 +51,7 @@ export const DiffEditor: React.FC<DiffEditorProps> = ({ tabId }) => {
   const refs = useEditorRefs();
   const [editorInstance, setEditorInstance] = useState<any>(null);
   const originalEditorRef = useRef<any>(null); // Reference for the Left (Original) Side
+  const diffEditorRef = useRef<Monaco.editor.IStandaloneDiffEditor | null>(null);
 
   // Close context menu on focus
   refs.closeMenuRef.current = () => {
@@ -158,6 +160,7 @@ export const DiffEditor: React.FC<DiffEditorProps> = ({ tabId }) => {
 
   // ─── Monaco Initialization ───
   const handleEditorDidMount = useCallback((editor: Monaco.editor.IStandaloneDiffEditor, monacoInstance: typeof Monaco) => {
+    diffEditorRef.current = editor;
     const modified = editor.getModifiedEditor();
     const original = editor.getOriginalEditor();
     
@@ -235,19 +238,26 @@ export const DiffEditor: React.FC<DiffEditorProps> = ({ tabId }) => {
     if ('virtualKeyboard' in navigator) (navigator as any).virtualKeyboard.show();
   };
 
-  if (!isReady || !diffData) return null;
-  
-    // ─── URI Generation & Debug Logging ───
-  // Using pure alphanumeric prefixes to ensure TS Worker doesn't get confused
-  const originalPath = `inmemory://original_${diffData.filePath.replace(/^\//, '')}`;
-  const modifiedPath = diffData.modifiedContent !== null 
-    ? `inmemory://modified_${diffData.filePath.replace(/^\//, '')}` 
-    : `file://${diffData.filePath}`;
+  // Detach models before unmount so Monaco doesn't throw
+  // "TextModel got disposed before DiffEditorWidget model got reset"
+  useEffect(() => {
+    return () => {
+      const de = diffEditorRef.current;
+      if (de) {
+        try {
+          de.setModel({ original: null as any, modified: null as any });
+        } catch { /* already disposed */ }
+        diffEditorRef.current = null;
+      }
+    };
+  }, []);
 
-  // Log exactly what we are sending to Monaco to verify 'git-original' is fully gone
-  console.log(`[DiffEditor Debug] 🚀 Mounting DiffEditor for: ${diffData.filePath}`);
-  console.log(`[DiffEditor Debug] 📝 Original URI: ${originalPath}`);
-  console.log(`[DiffEditor Debug] 📝 Modified URI: ${modifiedPath}`);
+  if (!isReady || !diffData) return null;
+
+  // Always use unique inmemory URIs — never file:// (would share/dispose the CodeEditor model)
+  const safeKey = diffData.filePath.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const originalPath = `inmemory://git-orig/${tabId}/${safeKey}`;
+  const modifiedPath = `inmemory://git-mod/${tabId}/${safeKey}`;
 
   return (
     <div
