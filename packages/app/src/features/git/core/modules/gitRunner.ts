@@ -15,6 +15,19 @@ let isGitVerified  = false;
 let installPromise: Promise<void> | null = null;
 
 /**
+ * App-private store for --separate-git-dir.
+ * NOT /root (missing on unrooted Android).
+ * Matches RootfsManager filesDir: /data/data/<package>/files
+ */
+const GIT_REPOS_BASE = '/data/data/com.editor.mscode/files/.mscode_git_repos';
+
+/** Virtual-git migration only for shared storage (FAT/FUSE limits on .git). */
+function isSharedStorage(path: string): boolean {
+  const n = path.replace('/storage/emulated/0', '/sdcard');
+  return n.startsWith('/sdcard') || n.startsWith('/storage/');
+}
+
+/**
  * Ensures that the Git binary is installed within the underlying environment.
  * If Git is missing, it automatically creates a background installation task using PKG, 
  * provisions a dedicated output channel, and handles global UI state updates.
@@ -44,9 +57,11 @@ async function ensureGitInstalled(): Promise<void> {
       useTermisStore.getState().setActiveView('output');
 
       const tasks   = createTasksModule('system');
-      const install = tasks.runInBackground('pkg update && pkg install git', {
-        cwd: '/', outputChannel: 'Git Setup',
-      });
+      // mscode_env.sh is sourced by native background runner (pkg = shell function)
+      const install = tasks.runInBackground(
+        'pkg update; pkg install git; command -v git >/dev/null || ls "$PREFIX/bin/git"',
+        { cwd: '/', outputChannel: 'Git Setup' },
+      );
       
       const { exitCode: code } = await install.result;
       if (code === 0) {
@@ -78,14 +93,17 @@ async function ensureGitInstalled(): Promise<void> {
 /**
  * Sanitizes and establishes the "Virtual Git" layer for a given workspace.
  * Resolves critical Android Shared Storage/SDCard permission issues by migrating standard 
- * physical `.git` folders to an isolated, safe Linux storage layer (`/root/.mscode_git_repos`), 
+ * physical `.git` folders to an app-private storage (`filesDir/.mscode_git_repos`), 
  * leaving behind a standard Git reference pointer (`gitdir: <path>`).
  * * @param {string} cwd The current absolute directory path of the active project.
  * @returns {Promise<void>}
  */
 async function setupVirtualGit(cwd: string): Promise<void> {
+  // Only needed on shared storage (/sdcard) — app-private dirs can keep a real .git
+  if (!isSharedStorage(cwd)) return;
+
   const gitFilePath = `${cwd}/.git`;
-  
+
   let existsOut = '';
   await taskManager.execute(`[ -e "${gitFilePath}" ] && echo "yes" || echo "no"`, '/', (data) => { existsOut += data; }).result;
   if (existsOut.trim() !== 'yes') return;
@@ -94,7 +112,7 @@ async function setupVirtualGit(cwd: string): Promise<void> {
   await taskManager.execute(`[ -d "${gitFilePath}" ] && echo "dir" || echo "file"`, '/', (data) => { dirOut += data; }).result;
   const isDir = dirOut.trim() === 'dir';
 
-  const linuxRepoBase = '/root/.mscode_git_repos';
+  const linuxRepoBase = GIT_REPOS_BASE;
 
   if (isDir) {
     await taskManager.execute(`mkdir -p "${linuxRepoBase}"`, '/', () => {}).result;
@@ -103,7 +121,7 @@ async function setupVirtualGit(cwd: string): Promise<void> {
 
     await taskManager.execute(`mv "${gitFilePath}" "${linuxRepoPath}"`, '/', () => {}).result;
     await taskManager.execute(`echo "gitdir: ${linuxRepoPath}" > "${gitFilePath}"`, '/', () => {}).result;
-    logGit('Virtual Git', `Migrated real .git folder to safe Linux storage: ${linuxRepoPath}`);
+    logGit('Virtual Git', `Migrated real .git → ${linuxRepoPath}`);
   } else {
     let contentOut = '';
     await taskManager.execute(`cat "${gitFilePath}"`, '/', (data) => { contentOut += data; }).result;
@@ -152,7 +170,7 @@ async function handleBrokenRepoRecovery(cwd: string, failedCommand: string, hide
             try {
               await taskManager.execute(`rm -f "${cwd}/.git"`, '/', () => {}).result;
               const uniqueHash = `repo_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-              const linuxRepoPath = `/root/.mscode_git_repos/${uniqueHash}`;
+              const linuxRepoPath = `${GIT_REPOS_BASE}/${uniqueHash}`;
               
               await taskManager.execute(`mkdir -p "${linuxRepoPath}"`, '/', () => {}).result;
               await taskManager.execute(`git init --separate-git-dir="${linuxRepoPath}"`, cwd, () => {}).result;
