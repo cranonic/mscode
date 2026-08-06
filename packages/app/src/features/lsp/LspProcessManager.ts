@@ -7,24 +7,21 @@ const NativeTerminal = registerPlugin<any>('NativeTerminal');
 
 const LANGUAGE_CONFIGS: Record<string, { packages: string[]; postInstall?: string[]; checkCmd: string; serverCmd: string }> = {};
 
-// APK exit code 99 = database temporarily locked by another process.
-const APK_LOCK_EXIT_CODE = 99;
-const APK_MAX_RETRIES    = 3;
-const APK_RETRY_DELAY_MS = 3_000;
+// Package manager retry config (Termux/Native Bionic)
+const PKG_MAX_RETRIES    = 3;
+const PKG_RETRY_DELAY_MS = 3_000;
 
 export class LspProcessManager {
 
     // ─── Port registry ────────────────────────────────────────────────────────
     // Tracks every language that has a running server: language → port.
-    // replaces the old single-slot (activeLanguage + activePort) pair so that
     private activePorts = new Map<string, number>();
     private pendingStarts = new Map<string, Promise<number | null>>();
 
     // ─── Serial installation queue ────────────────────────────────────────────
-    // `apk add` holds a system-wide lock while it runs. Running two installs
-    // concurrently causes exit code 99 ("database temporarily unavailable").
-    // Every new startServer call chains off this Promise so only one
-    // _doStart body executes at a time.
+    // Modifying the Termux $PREFIX via `pkg install` concurrently can cause
+    // race conditions or partial extractions. Every new startServer call
+    // chains off this Promise so only one _doStart body executes at a time.
     private installQueue: Promise<void> = Promise.resolve();
 
     public dynamicConfigs: Record<string, any> = {};
@@ -77,7 +74,7 @@ export class LspProcessManager {
         command: string,
         onLog: (data: string) => void,
     ): Promise<number> {
-        for (let attempt = 1; attempt <= APK_MAX_RETRIES; attempt++) {
+        for (let attempt = 1; attempt <= PKG_MAX_RETRIES; attempt++) {
             const exitCode = await this.executeStreamCommand(
                 `${baseSessionId}_attempt${attempt}`,
                 command,
@@ -86,9 +83,9 @@ export class LspProcessManager {
 
             if (exitCode === 0) return 0;
 
-            if (exitCode === APK_LOCK_EXIT_CODE && attempt < APK_MAX_RETRIES) {
-                onLog(`\n> APK database locked (exit 99) — retrying in ${APK_RETRY_DELAY_MS / 1000}s… (${attempt}/${APK_MAX_RETRIES})\n`);
-                await new Promise(r => setTimeout(r, APK_RETRY_DELAY_MS));
+            if (attempt < PKG_MAX_RETRIES) {
+                onLog(`\n> Command failed (exit ${exitCode}) — retrying in ${PKG_RETRY_DELAY_MS / 1000}s… (${attempt}/${PKG_MAX_RETRIES})\n`);
+                await new Promise(r => setTimeout(r, PKG_RETRY_DELAY_MS));
                 continue;
             }
 
@@ -114,7 +111,7 @@ export class LspProcessManager {
         if (inflight) return inflight;
 
         // Slow path: queue behind any running installation so we never run two
-        // `apk add` commands at the same time (avoids database-lock exit 99).
+        // `pkg install` commands at the same time.
         let releaseQueue!: () => void;
         const mySlot = new Promise<void>(r => { releaseQueue = r; });
 
@@ -176,7 +173,7 @@ export class LspProcessManager {
             } else {
                 const pkgs = config.packages.join(' ');
                 if (pkgs) {
-                    consoleLogs += `> Executing: apk add --no-cache ${pkgs}\n`;
+                    consoleLogs += `> Executing: pkg install ${pkgs}\n`;
                     useNotificationStore.getState().updateNotification(notifId, {
                         message: `Installing ${language} toolchain… (expand to view logs)`,
                         fullMessage: consoleLogs,
@@ -184,7 +181,7 @@ export class LspProcessManager {
 
                     const exitCode = await this.executeWithRetry(
                         notifId,
-                        `apk add --no-cache ${pkgs}`,
+                        `pkg install ${pkgs}`,
                         (data) => {
                             consoleLogs += data;
                             useNotificationStore.getState().updateNotification(notifId, { fullMessage: consoleLogs });
@@ -253,7 +250,7 @@ export class LspProcessManager {
 
     /**
      * Stops tracked LSP server(s).
-     * Always attempts a native killLsp so the proot/language-server process
+     * Always attempts a native killLsp so the language-server process
      * and listening WebSocket are torn down — not just the JS port map.
      */
     public stopServer(language?: string): void {

@@ -94,8 +94,38 @@ public class InitScriptWriter {
         sb.append("fi\n");
         sb.append("export BUSYBOX='").append(safeBb).append("'\n");
         sb.append("export MSCODE_HOST='").append(safeHost).append("'\n");
-        // mksh (Android /system/bin/sh) does not expand \w — use $PWD
-        sb.append("export PS1='[$MSCODE_HOST:$PWD]\\$ '\n");
+        // Termux-style: mscode: ~/.../code/test $  (last 2 segments if deeper)
+        sb.append("_mscode_prompt() {\n");
+        sb.append("  _cwd=$PWD\n");
+        sb.append("  if [ \"$_cwd\" = \"$HOME\" ]; then\n");
+        sb.append("    _cwd='~'\n");
+        sb.append("  elif [ \"${_cwd#$HOME/}\" != \"$_cwd\" ]; then\n");
+        sb.append("    _under=\"${_cwd#$HOME/}\"\n");
+        sb.append("    case \"$_under\" in\n");
+        sb.append("      */*/*)\n");
+        // ≥3 segments → ~/.../second-last/last
+        sb.append("        _b=${_under##*/}\n");
+        sb.append("        _rest=${_under%/*}\n");
+        sb.append("        _a=${_rest##*/}\n");
+        sb.append("        _cwd=\"~/.../$_a/$_b\"\n");
+        sb.append("        ;;\n");
+        sb.append("      *)\n");
+        sb.append("        _cwd=\"~/$_under\"\n");
+        sb.append("        ;;\n");
+        sb.append("    esac\n");
+        sb.append("  else\n");
+        sb.append("    case \"$_cwd\" in\n");
+        sb.append("      /*/*/*/*)\n");
+        sb.append("        _b=${_cwd##*/}\n");
+        sb.append("        _rest=${_cwd%/*}\n");
+        sb.append("        _a=${_rest##*/}\n");
+        sb.append("        _cwd=\"/.../$_a/$_b\"\n");
+        sb.append("        ;;\n");
+        sb.append("    esac\n");
+        sb.append("  fi\n");
+        sb.append("  command printf '\\033[1;32m%s\\033[0m: \\033[1;34m%s\\033[0m $ ' \"$MSCODE_HOST\" \"$_cwd\"\n");
+        sb.append("}\n");
+        sb.append("export PS1='$(_mscode_prompt)'\n");
         // Bionic expects these (tzdata warnings otherwise)
         sb.append("export ANDROID_DATA=/data\n");
         sb.append("export ANDROID_ROOT=/system\n");
@@ -526,15 +556,25 @@ public class InitScriptWriter {
         sb.append("fi\n");
         sb.append("\n");
 
-        // banner
+        // Termux-style welcome (no internal PREFIX/linker noise)
         sb.append("if [ -z \"$MSCODE_BANNER_SHOWN\" ]; then\n");
         sb.append("  export MSCODE_BANNER_SHOWN=1\n");
-        sb.append("  echo \"[+] Opened: $PWD\"\n");
-        if (bootOk) {
-            sb.append("  echo \"[+] PREFIX=$PREFIX  linker=$MSCODE_LINKER\"\n");
-            sb.append("  echo \"[+] bb ls / curl / elf $PREFIX/bin/curl / pkg\"\n");
-        } else {
-            sb.append("  echo \"[+] Native shell (bootstrap pending)  |  bb ls / bb --list\"\n");
+        sb.append("  echo \"\"\n");
+        sb.append("  echo $'\\033[1;36mWelcome to MS Code terminal!\\033[0m'\n");
+        sb.append("  echo \"\"\n");
+        sb.append("  echo $'\\033[1;33mUseful packages:\\033[0m'\n");
+        sb.append("  echo \"  pkg install git python nodejs clang\"\n");
+        sb.append("  echo \"\"\n");
+        sb.append("  echo $'\\033[1;33mBasic commands:\\033[0m'\n");
+        sb.append("  echo \"  pkg search <name>     Search packages\"\n");
+        sb.append("  echo \"  pkg install <pkg>    Install package\"\n");
+        sb.append("  echo \"  pkg list-installed   List installed\"\n");
+        sb.append("  echo \"  ls / cd / nano / curl / python / node\"\n");
+        sb.append("  echo \"  bb --list            BusyBox applets\"\n");
+        sb.append("  echo \"\"\n");
+        if (!bootOk) {
+            sb.append("  echo $'\\033[1;31mBootstrap pending — run setup from the app.\\033[0m'\n");
+            sb.append("  echo \"\"\n");
         }
         sb.append("fi\n");
 

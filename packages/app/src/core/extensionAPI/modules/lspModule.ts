@@ -3,7 +3,7 @@
 import { lspProcessManager } from '@/features/lsp/LspProcessManager';
 
 export interface LspServerConfig {
-  /** Array of package names to install via the system package manager (e.g., 'apk add'). */
+  /** Array of package names to install via the system package manager (e.g., 'pkg i'). */
   packages: string[];
   /** Optional shell commands to run after packages are installed (e.g., 'pip install'). */
   postInstall?: string[];

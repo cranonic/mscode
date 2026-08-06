@@ -16,7 +16,7 @@ let installPromise: Promise<void> | null = null;
 
 /**
  * Ensures that the Git binary is installed within the underlying environment.
- * If Git is missing, it automatically creates a background installation task using APK, 
+ * If Git is missing, it automatically creates a background installation task using PKG, 
  * provisions a dedicated output channel, and handles global UI state updates.
  * * @returns {Promise<void>} Resolves when Git is verified or successfully provisioned.
  * @throws {Error} Rejects if background package installation fails.
@@ -44,7 +44,7 @@ async function ensureGitInstalled(): Promise<void> {
       useTermisStore.getState().setActiveView('output');
 
       const tasks   = createTasksModule('system');
-      const install = tasks.runInBackground('apk update && apk add git', {
+      const install = tasks.runInBackground('pkg update && pkg install git', {
         cwd: '/', outputChannel: 'Git Setup',
       });
       
