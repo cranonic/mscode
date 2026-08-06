@@ -123,7 +123,8 @@ public class InitScriptWriter {
         sb.append("        ;;\n");
         sb.append("    esac\n");
         sb.append("  fi\n");
-        sb.append("  command printf '\\033[1;32m%s\\033[0m: \\033[1;34m%s\\033[0m $ ' \"$MSCODE_HOST\" \"$_cwd\"\n");
+        // PATH printf → $PREFIX/bin/printf → Permission denied. Use busybox directly.
+        sb.append("  ( exec -a printf \"$BUSYBOX\" printf '\\033[1;32m%s\\033[0m: \\033[1;34m%s\\033[0m $ ' \"$MSCODE_HOST\" \"$_cwd\" )\n");
         sb.append("}\n");
         sb.append("export PS1='$(_mscode_prompt)'\n");
         // Bionic expects these (tzdata warnings otherwise)
