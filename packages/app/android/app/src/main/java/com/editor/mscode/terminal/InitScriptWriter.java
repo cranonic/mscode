@@ -123,8 +123,8 @@ public class InitScriptWriter {
         sb.append("        ;;\n");
         sb.append("    esac\n");
         sb.append("  fi\n");
-        // PATH printf → $PREFIX/bin/printf → Permission denied. Use busybox directly.
-        sb.append("  ( exec -a printf \"$BUSYBOX\" printf '\\033[1;32m%s\\033[0m: \\033[1;34m%s\\033[0m $ ' \"$MSCODE_HOST\" \"$_cwd\" )\n");
+        // argv0=printf selects applet; format is first real arg (do NOT pass extra "printf")
+        sb.append("  ( exec -a printf \"$BUSYBOX\" '\\033[1;32m%s\\033[0m: \\033[1;34m%s\\033[0m $ ' \"$MSCODE_HOST\" \"$_cwd\" )\n");
         sb.append("}\n");
         sb.append("export PS1='$(_mscode_prompt)'\n");
         // Bionic expects these (tzdata warnings otherwise)
@@ -579,13 +579,22 @@ public class InitScriptWriter {
         }
         sb.append("fi\n");
 
+        byte[] bytes = sb.toString().getBytes("UTF-8");
         File f = new File(outputPath);
         f.getParentFile().mkdirs();
         try (FileOutputStream fos = new FileOutputStream(f)) {
-            fos.write(sb.toString().getBytes("UTF-8"));
+            fos.write(bytes);
         }
         //noinspection ResultOfMethodCallIgnored
         f.setReadable(true, false);
+
+        // Shared env for background tasks (taskManager / pkg install git)
+        File shared = new File(rootfs.getFilesDir(), "mscode_env.sh");
+        try (FileOutputStream fos = new FileOutputStream(shared)) {
+            fos.write(bytes);
+        }
+        //noinspection ResultOfMethodCallIgnored
+        shared.setReadable(true, false);
     }
 
     public void cleanup(String outputPath) {

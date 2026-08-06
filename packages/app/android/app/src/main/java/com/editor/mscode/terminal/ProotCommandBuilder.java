@@ -106,7 +106,11 @@ public class ProotCommandBuilder {
         // Same reason as session: cannot use libbusybox.so as argv[0] applet name
         cmd.add("/system/bin/sh");
         cmd.add("-c");
-        cmd.add(shellCommand);
+        // Source shared env so pkg/elf/git wrappers exist (interactive ENV is not set for -c)
+        String envFile = filesDir + "/mscode_env.sh";
+        // Suppress welcome banner for background jobs
+        String wrapped = "MSCODE_BANNER_SHOWN=1; [ -f '" + envFile + "' ] && . '" + envFile + "'; " + shellCommand;
+        cmd.add(wrapped);
         return cmd.toArray(new String[0]);
     }
 

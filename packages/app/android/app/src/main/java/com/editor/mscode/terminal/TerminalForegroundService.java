@@ -102,6 +102,14 @@ public class TerminalForegroundService extends Service {
             rootfs.ensureNativeBinaries();
             rootfs.ensureBootstrap(arch);
         }
+        // Shared env for background pkg/git (taskManager) even before a PTY session
+        if (scriptWriter != null) {
+            try {
+                scriptWriter.write(rootfs.getFilesDir() + "/mscode_env.sh", rootfs.getHomePath());
+            } catch (Exception e) {
+                emitLog("mscode_env.sh write: " + e.getMessage());
+            }
+        }
     }
 
     /**
