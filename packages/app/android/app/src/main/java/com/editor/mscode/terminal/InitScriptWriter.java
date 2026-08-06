@@ -99,6 +99,8 @@ public class InitScriptWriter {
         sb.append("export ANDROID_DATA=/data\n");
         sb.append("export ANDROID_ROOT=/system\n");
         sb.append("export ANDROID_STORAGE=/storage\n");
+        // bash scripts (neofetch etc.) don't inherit mksh functions — use BASH_ENV
+        sb.append("export BASH_ENV='").append(safePrefix).append("/etc/mscode_bash_env.sh'\n");
         sb.append("\n");
 
         // ── System Bionic linker (runs ELF from non-executable filesDir) ──
@@ -179,12 +181,12 @@ public class InitScriptWriter {
             "ls", "cat", "cp", "mv", "rm", "mkdir", "rmdir", "grep", "find",
             "tar", "head", "tail", "wc", "uname", "clear", "chmod", "chown",
             "sed", "sort", "awk", "cut", "tr", "uniq", "basename", "dirname",
-            "pwd", "echo", "printf", "sleep", "date", "touch",
+            "dirname", "pwd", "echo", "printf", "sleep", "date", "touch",
             "ln", "readlink", "stat", "du", "df", "mount", "umount",
             "ps", "kill", "id", "whoami", "which", "xargs", "tee",
             "md5sum", "sha256sum", "base64", "gzip", "gunzip", "zcat",
             "diff", "cmp", "od", "hexdump", "yes", "true", "false",
-            "test", "env", "printenv", "seq", "expr", "fold",
+            "test", "env", "printenv", "seq", "expr", "tr", "fold",
             "realpath", "mktemp", "wget"
         };
         // dedupe while writing
@@ -224,12 +226,45 @@ public class InitScriptWriter {
         sb.append("    case \"$_n\" in\n");
         sb.append("      elf|bb|pkg|mscode_wrap|export|exec|if|fi|then|else|while|do|done|case|esac|function|return|shift|cd|command) continue ;;\n");
         sb.append("    esac\n");
-        sb.append("    eval \"$_n() { elf \\\"$_f\\\" \\\"\\$@\\\"; }\"\n");
+        sb.append("    eval \"$_n() { elf \\\"$_f\\\" \\\"$@\\\"; }\"\n");
         sb.append("    _wc=$((_wc+1))\n");
         sb.append("  done\n");
         sb.append("  return 0\n");
         sb.append("}\n");
         sb.append("mscode_wrap\n");
+        sb.append("\n");
+        // Write BASH_ENV file so bash scripts get the same wrappers
+        sb.append("_mscode_write_bash_env() {\n");
+        sb.append("  mkdir -p \"$PREFIX/etc\"\n");
+        sb.append("  {\n");
+        sb.append("    echo '# Auto-generated for bash scripts (neofetch, etc.)'\n");
+        sb.append("    echo \"export PREFIX='$PREFIX'\"\n");
+        sb.append("    echo \"export TERMUX_PREFIX='$PREFIX'\"\n");
+        sb.append("    echo \"export BUSYBOX='$BUSYBOX'\"\n");
+        sb.append("    echo \"export MSCODE_LINKER='$MSCODE_LINKER'\"\n");
+        sb.append("    echo \"export LD_LIBRARY_PATH='$LD_LIBRARY_PATH'\"\n");
+        sb.append("    echo \"export PATH='$PATH'\"\n");
+        sb.append("    echo \"export TERMINFO='$TERMINFO'\"\n");
+        sb.append("    echo \"export CURL_CA_BUNDLE='$CURL_CA_BUNDLE'\"\n");
+        sb.append("    echo \"export SSL_CERT_FILE='$SSL_CERT_FILE'\"\n");
+        sb.append("    echo \"export ANDROID_DATA=/data\"\n");
+        sb.append("    echo \"export ANDROID_ROOT=/system\"\n");
+        sb.append("    echo 'bb() { [ $# -lt 1 ] && return 1; local a=\"$1\"; shift; ( exec -a \"$a\" \"$BUSYBOX\" \"$@\" ); }'\n");
+        // busybox applets as bash functions
+        sb.append("    for a in ls cat cp mv rm mkdir grep find tar head tail wc uname clear chmod sed sort awk cut tr uniq basename dirname pwd date touch ln readlink stat which xargs tee ps kill id env seq true false test; do\n");
+        sb.append("      echo \"$a() { bb $a \\\"$@\\\"; }\"\n");
+        sb.append("    done\n");
+        sb.append("    echo 'elf() { local b=\"$1\"; shift; [ -f \"$b\" ] || return 127; if [ -n \"$MSCODE_LINKER\" ]; then \"$MSCODE_LINKER\" \"$b\" \"$@\"; else \"$b\" \"$@\"; fi; }'\n");
+        sb.append("    for _f in \"$PREFIX\"/bin/*; do\n");
+        sb.append("      [ -e \"$_f\" ] || continue\n");
+        sb.append("      _n=${_f##*/}\n");
+        sb.append("      case \"$_n\" in ''|*[!a-zA-Z0-9_]*|[0-9]*) continue ;; esac\n");
+        sb.append("      case \" $_MSCODE_BB_SKIP \" in *\" $_n \"*) continue ;; esac\n");
+        sb.append("      echo \"$_n() { elf '$_f' \\\"$@\\\"; }\"\n");
+        sb.append("    done\n");
+        sb.append("  } > \"$PREFIX/etc/mscode_bash_env.sh\"\n");
+        sb.append("}\n");
+        sb.append("_mscode_write_bash_env 2>/dev/null\n");
         sb.append("\n");
 
         // ── pkg — real install from shell (curl + ar + tar via linker) ──
@@ -289,13 +324,27 @@ public class InitScriptWriter {
         sb.append("  _deb=\"$1\"; _name=\"$2\"\n");
         sb.append("  _work=\"$_pkg_cache/extract-$_name\"\n");
         sb.append("  rm -rf \"$_work\"; mkdir -p \"$_work\"\n");
-        sb.append("  ( cd \"$_work\" && bb ar x \"$_deb\" ) || return 1\n");
+        sb.append("  if ! ( cd \"$_work\" && bb ar x \"$_deb\" ); then\n");
+        sb.append("    echo \"[pkg] ar failed — corrupt cache? re-downloading\"\n");
+        sb.append("    rm -f \"$_deb\"\n");
+        sb.append("    return 1\n");
+        sb.append("  fi\n");
+        sb.append("  # detect truncated deb (ar short read leaves tiny/missing data.tar)\n");
+        sb.append("  _has_data=0\n");
+        sb.append("  for _f in \"$_work\"/data.tar*; do [ -f \"$_f\" ] && [ -s \"$_f\" ] && _has_data=1; done\n");
+        sb.append("  if [ \"$_has_data\" = 0 ]; then\n");
+        sb.append("    echo \"[pkg] missing data.tar — deleting bad cache\"\n");
+        sb.append("    rm -f \"$_deb\"\n");
+        sb.append("    return 1\n");
+        sb.append("  fi\n");
         sb.append("  _data=\n");
         sb.append("  for _f in \"$_work\"/data.tar*; do\n");
         sb.append("    [ -f \"$_f\" ] && _data=\"$_f\" && break\n");
         sb.append("  done\n");
         sb.append("  [ -n \"$_data\" ] || { echo \"[pkg] no data.tar in deb\" >&2; return 1; }\n");
         sb.append("  echo \"[pkg] extracting $(basename \"$_data\") → $PREFIX\"\n");
+        // Termux debs contain: data/data/com.termux/files/usr/bin/...\n
+        // Stage extract, then merge that tree into our $PREFIX.\n
         sb.append("  _stage=\"$_work/stage\"\n");
         sb.append("  mkdir -p \"$_stage\"\n");
         sb.append("  case \"$_data\" in\n");
@@ -336,13 +385,14 @@ public class InitScriptWriter {
         sb.append("    return 1\n");
         sb.append("  fi\n");
         sb.append("  echo \"[pkg] merging $_src → $PREFIX\"\n");
+        // -a preserve, -f overwrite existing (re-install / shared libs)
         sb.append("  bb cp -af \"$_src\"/. \"$PREFIX\"/ || return 1\n");
         sb.append("  mkdir -p \"$PREFIX/var/lib/dpkg/info\"\n");
         sb.append("  echo \"# mscode\" > \"$PREFIX/var/lib/dpkg/info/$_name.list\"\n");
         sb.append("  rm -rf \"$_work\"\n");
         sb.append("}\n");
         sb.append("\n");
-        // Parse Depends: from Packages index
+        // Parse Depends: from Packages index (simple, ignores versions/alternatives)
         sb.append("_pkg_depends() {\n");
         sb.append("  _want=\"$1\"\n");
         sb.append("  _pkg_ensure_index || return 0\n");
@@ -356,6 +406,7 @@ public class InitScriptWriter {
         sb.append("      '') _cur= ;;\n");
         sb.append("    esac\n");
         sb.append("  done < \"$_pkg_cache/Packages\"\n");
+        sb.append("  # split on commas; strip version constraints and |\n");
         sb.append("  echo \"$_deps\" | tr ',' '\\n' | while IFS= read -r _d; do\n");
         sb.append("    _d=$(echo \"$_d\" | sed 's/|.*//' | sed 's/(.*//' | sed 's/^ *//;s/ *$//')\n");
         sb.append("    [ -n \"$_d\" ] && echo \"$_d\"\n");
@@ -368,6 +419,7 @@ public class InitScriptWriter {
         sb.append("\n");
         sb.append("_pkg_install_one() {\n");
         sb.append("  _p=\"$1\"\n");
+        sb.append("  # depth guard for recursive deps\n");
         sb.append("  _pkg_depth=${_pkg_depth:-0}\n");
         sb.append("  if [ \"$_pkg_depth\" -gt 15 ]; then\n");
         sb.append("    echo \"[pkg] dependency depth exceeded at $_p\" >&2; return 1\n");
@@ -380,9 +432,11 @@ public class InitScriptWriter {
         sb.append("  _path=$(_pkg_resolve \"$_p\") || {\n");
         sb.append("    echo \"[pkg] package not found: $_p\" >&2; return 1\n");
         sb.append("  }\n");
+        // install dependencies first
         sb.append("  _pkg_depth=$((_pkg_depth + 1))\n");
         sb.append("  for _dep in $(_pkg_depends \"$_p\"); do\n");
         sb.append("    case \"$_dep\" in\n");
+        // skip virtual/boring deps
         sb.append("      ''|bash|coreutils|busybox|termux-am|termux-exec|dash|libandroid-support) ;;\n");
         sb.append("      *)\n");
         sb.append("        if ! _pkg_is_installed \"$_dep\"; then\n");
@@ -403,8 +457,9 @@ public class InitScriptWriter {
         sb.append("    echo \"[pkg] cached $(basename \"$_deb\")\"\n");
         sb.append("  fi\n");
         sb.append("  _pkg_extract_deb \"$_deb\" \"$_p\" || return 1\n");
+        sb.append("  # refresh command wrappers in THIS session\n");
+        sb.append("  mscode_wrap 2>/dev/null\n");
         sb.append("  echo \"[pkg] ✓ $_p installed\"\n");
-        sb.append("  echo \"[pkg] tip: open a NEW terminal session to pick up new command wrappers\"\n");
         sb.append("}\n");
         sb.append("\n");
         sb.append("pkg() {\n");
