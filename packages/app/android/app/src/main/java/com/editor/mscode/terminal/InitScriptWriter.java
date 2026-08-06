@@ -228,13 +228,14 @@ public class InitScriptWriter {
         sb.append("    esac\n");
         // IMPORTANT: must be \$@ so eval keeps literal "$@" inside the function body.
         // Using plain $@ here expands at wrap-time (empty) and breaks python --version etc.
-        sb.append("    eval \"$_n() { elf \\\"$_f\\\" \\\"\\\$@\\\"; }\"\n");
+        sb.append("    eval \"$_n() { elf \\\"$_f\\\" \\\"\\$@\\\"; }\"\n");
         sb.append("    _wc=$((_wc+1))\n");
         sb.append("  done\n");
         sb.append("  return 0\n");
         sb.append("}\n");
         sb.append("mscode_wrap\n");
         sb.append("\n");
+
         // Write BASH_ENV file so bash scripts get the same wrappers
         sb.append("_mscode_write_bash_env() {\n");
         sb.append("  mkdir -p \"$PREFIX/etc\"\n");
@@ -254,7 +255,7 @@ public class InitScriptWriter {
         sb.append("    echo 'bb() { [ $# -lt 1 ] && return 1; local a=\"$1\"; shift; ( exec -a \"$a\" \"$BUSYBOX\" \"$@\" ); }'\n");
         // busybox applets as bash functions
         sb.append("    for a in ls cat cp mv rm mkdir grep find tar head tail wc uname clear chmod sed sort awk cut tr uniq basename dirname pwd date touch ln readlink stat which xargs tee ps kill id env seq true false test; do\n");
-        sb.append("      echo \"$a() { bb $a \\\"\\\$@\\\"; }\"\n");
+        sb.append("      echo \"$a() { bb $a \\\"\\$@\\\"; }\"\n");
         sb.append("    done\n");
         sb.append("    echo 'elf() { local b=\"$1\"; shift; [ -f \"$b\" ] || return 127; if [ -n \"$MSCODE_LINKER\" ]; then \"$MSCODE_LINKER\" \"$b\" \"$@\"; else \"$b\" \"$@\"; fi; }'\n");
         sb.append("    for _f in \"$PREFIX\"/bin/*; do\n");
@@ -262,7 +263,7 @@ public class InitScriptWriter {
         sb.append("      _n=${_f##*/}\n");
         sb.append("      case \"$_n\" in ''|*[!a-zA-Z0-9_]*|[0-9]*) continue ;; esac\n");
         sb.append("      case \" $_MSCODE_BB_SKIP \" in *\" $_n \"*) continue ;; esac\n");
-        sb.append("      echo \"$_n() { elf '$_f' \\\"\\\$@\\\"; }\"\n");
+        sb.append("      echo \"$_n() { elf '$_f' \\\"\\$@\\\"; }\"\n");
         sb.append("    done\n");
         sb.append("  } > \"$PREFIX/etc/mscode_bash_env.sh\"\n");
         sb.append("}\n");
@@ -324,6 +325,7 @@ public class InitScriptWriter {
         sb.append("  echo \"$_fn\"\n");
         sb.append("}\n");
         sb.append("\n");
+
         // Extract .deb → $PREFIX
         sb.append("_pkg_extract_deb() {\n");
         sb.append("  _deb=\"$1\"; _name=\"$2\"\n");
@@ -422,6 +424,7 @@ public class InitScriptWriter {
         sb.append("  [ -f \"$PREFIX/var/lib/dpkg/info/$1.list\" ]\n");
         sb.append("}\n");
         sb.append("\n");
+
         sb.append("_pkg_install_one() {\n");
         sb.append("  _p=\"$1\"\n");
         sb.append("  # depth guard for recursive deps\n");
@@ -584,4 +587,3 @@ public class InitScriptWriter {
         }
     }
 }
-!
