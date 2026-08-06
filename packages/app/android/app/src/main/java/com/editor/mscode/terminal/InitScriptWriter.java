@@ -63,6 +63,17 @@ public class InitScriptWriter {
         sb.append("export TERMUX_VERSION=mscode\n");
         sb.append("export TERM=xterm-256color\n");
         sb.append("export LANG=C.UTF-8\n");
+        // terminfo for nano/ncurses (lives under bootstrap share/)
+        sb.append("export TERMINFO='").append(safePrefix).append("/share/terminfo'\n");
+        sb.append("export TERMINFO_DIRS='").append(safePrefix).append("/share/terminfo'\n");
+        sb.append("# fallback TERM if xterm-256color entry missing\n");
+        sb.append("if [ ! -e \"$TERMINFO/x/xterm-256color\" ] && [ ! -e \"$TERMINFO/78/xterm-256color\" ]; then\n");
+        sb.append("  if [ -e \"$TERMINFO/x/xterm\" ] || [ -e \"$TERMINFO/78/xterm\" ]; then\n");
+        sb.append("    export TERM=xterm\n");
+        sb.append("  else\n");
+        sb.append("    export TERM=linux\n");
+        sb.append("  fi\n");
+        sb.append("fi\n");
         // PREFIX still first so `which` reports the real binary path;
         // shell functions (below) win over PATH for actual execution.
         sb.append("export PATH='").append(safePrefix).append("/bin:")
@@ -71,6 +82,16 @@ public class InitScriptWriter {
         sb.append("export LD_LIBRARY_PATH='").append(safePrefix).append("/lib:")
           .append(safePrefix).append("/lib/glibc:")
           .append(safeLib).append("'\n");
+        // Termux curl/openssl were built with hardcoded com.termux CA path —
+        // force our PREFIX certs (or Android system bundle as fallback).
+        sb.append("if [ -f '").append(safePrefix).append("/etc/tls/cert.pem' ]; then\n");
+        sb.append("  export SSL_CERT_FILE='").append(safePrefix).append("/etc/tls/cert.pem'\n");
+        sb.append("  export CURL_CA_BUNDLE='").append(safePrefix).append("/etc/tls/cert.pem'\n");
+        sb.append("  export REQUESTS_CA_BUNDLE='").append(safePrefix).append("/etc/tls/cert.pem'\n");
+        sb.append("elif [ -f '").append(safePrefix).append("/etc/ssl/certs/ca-certificates.crt' ]; then\n");
+        sb.append("  export SSL_CERT_FILE='").append(safePrefix).append("/etc/ssl/certs/ca-certificates.crt'\n");
+        sb.append("  export CURL_CA_BUNDLE=\"$SSL_CERT_FILE\"\n");
+        sb.append("fi\n");
         sb.append("export BUSYBOX='").append(safeBb).append("'\n");
         sb.append("export MSCODE_HOST='").append(safeHost).append("'\n");
         sb.append("export PS1='[$MSCODE_HOST:\\w]\\$ '\n");
@@ -87,7 +108,8 @@ public class InitScriptWriter {
         sb.append("fi\n");
         sb.append("\n");
 
-        // elf <path> [args…] — run one PREFIX binary via linker (or sh for scripts)
+        // elf <path> [args…] — run PREFIX binary via linker WITHOUT replacing the shell.
+        // NEVER use bare `exec` here — that killed the whole terminal session.
         sb.append("elf() {\n");
         sb.append("  if [ $# -lt 1 ]; then\n");
         sb.append("    echo \"usage: elf <binary-path> [args…]\" >&2\n");
@@ -101,13 +123,16 @@ public class InitScriptWriter {
         sb.append("  # shebang scripts → system sh (no +x needed)\n");
         sb.append("  _elf_hd=$(bb head -c 2 \"$_elf_bin\" 2>/dev/null)\n");
         sb.append("  if [ \"$_elf_hd\" = '#!' ]; then\n");
-        sb.append("    exec /system/bin/sh \"$_elf_bin\" \"$@\"\n");
+        sb.append("    /system/bin/sh \"$_elf_bin\" \"$@\"\n");
+        sb.append("    return $?\n");
         sb.append("  fi\n");
         sb.append("  if [ -n \"$MSCODE_LINKER\" ]; then\n");
-        sb.append("    exec \"$MSCODE_LINKER\" \"$_elf_bin\" \"$@\"\n");
+        sb.append("    \"$MSCODE_LINKER\" \"$_elf_bin\" \"$@\"\n");
+        sb.append("    return $?\n");
         sb.append("  fi\n");
         sb.append("  # last resort (may Permission denied)\n");
-        sb.append("  exec \"$_elf_bin\" \"$@\"\n");
+        sb.append("  \"$_elf_bin\" \"$@\"\n");
+        sb.append("  return $?\n");
         sb.append("}\n");
         sb.append("\n");
 
@@ -205,7 +230,9 @@ public class InitScriptWriter {
         sb.append("  fi\n");
         sb.append("  if [ \"$_need\" = 1 ]; then\n");
         sb.append("    echo \"[pkg] fetching index ($_arch)…\"\n");
-        sb.append("    curl -fsSL -o \"$_pkg_cache/Packages.gz\" \\\n");
+        sb.append("    _curl_ca=\n");
+        sb.append("    [ -n \"$CURL_CA_BUNDLE\" ] && _curl_ca=\"--cacert $CURL_CA_BUNDLE\"\n");
+        sb.append("    curl -fsSL $_curl_ca -o \"$_pkg_cache/Packages.gz\" \\\n");
         sb.append("      \"$_pkg_repo/dists/stable/main/binary-$_arch/Packages.gz\" || return 1\n");
         sb.append("    bb gunzip -c \"$_pkg_cache/Packages.gz\" > \"$_idx\" || return 1\n");
         sb.append("  fi\n");
