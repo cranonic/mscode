@@ -6,6 +6,7 @@ import { useMenuStore } from '@/store/menuStore';
 import { useNotificationStore } from '@/store/notificationStore';
 import { usePaletteStore } from '@/store/paletteStore';
 import { commands } from '@/core/extensionAPI/registry/commandRegistry';
+import { msEvents } from '@/core/extensionAPI/events/EventManager';
 import { useGitStore } from './store/gitStore';
 import { useGithubAuthStore } from '@/store/githubAuthStore';
 import { useExplorerStore } from '@/features/explorer/store/exploreStore';
@@ -15,6 +16,8 @@ import { gitAccess } from './gitAccess';
 
 
 let autoFetchInterval: any = null;
+/** Debounce rapid saves so we don't spam `git status`. */
+let saveRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function bootstrapGit() {
     bootstrapGitPanel();
@@ -68,6 +71,18 @@ export function bootstrapGit() {
 
     useExplorerStore.subscribe((state, prev) => {
         if (state.workspacePath !== prev.workspacePath) setTimeout(() => useGitStore.getState().refresh(), 300);
+    });
+
+    // Editor already emits onDidSaveTextDocument — refresh SCM without coupling editor → git
+    msEvents.on('onDidSaveTextDocument', () => {
+        const state = useGitStore.getState();
+        if (!state.isGitRepo) return;
+        if (saveRefreshTimer) clearTimeout(saveRefreshTimer);
+        saveRefreshTimer = setTimeout(() => {
+            saveRefreshTimer = null;
+            const s = useGitStore.getState();
+            if (s.isGitRepo && !s.isLoading) s.refresh();
+        }, 400);
     });
 
     setTimeout(() => useGitStore.getState().refresh(), 800);
