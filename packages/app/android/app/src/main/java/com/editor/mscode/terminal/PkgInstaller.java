@@ -247,66 +247,116 @@ public class PkgInstaller {
             throw new IOException("No data.tar.* inside " + deb.getName());
         }
 
-        // Extract data.tar.* → PREFIX
-        // Termux debs often use data.tar.xz; busybox tar may not support xz.
-        // Try: busybox tar, then system tar.
-        extractDataTar(dataTar, prefix, log);
+        // Termux debs contain data/data/com.termux/files/usr/... — stage then merge
+        File stage = new File(work, "stage");
+        stage.mkdirs();
+        extractDataTar(dataTar, stage, log);
+        File src = resolveTermuxUsr(stage);
+        if (src == null) {
+            throw new IOException("Could not locate package files (expected …/files/usr) in " + deb.getName());
+        }
+        logMsg(log, "Merging " + src.getAbsolutePath() + " → " + prefix);
+        copyTree(src, prefix);
 
-        // Write a simple .list of top-level entries for list-installed
         File listFile = new File(infoDir, pkg + ".list");
         try (FileOutputStream fos = new FileOutputStream(listFile)) {
             fos.write(("# installed by MS Code PkgInstaller\n" + dataTar.getName() + "\n")
                 .getBytes("UTF-8"));
         }
 
-        // Cleanup work dir
         deleteRecursive(work);
     }
 
-    private void extractDataTar(File dataTar, File prefix, ProgressListener log) throws IOException {
+    /** Find Termux nested usr/ or relative bin/lib/share root inside stage. */
+    private static File resolveTermuxUsr(File stage) {
+        File nested = new File(stage, "data/data/com.termux/files/usr");
+        if (nested.isDirectory()) return nested;
+        File usr = new File(stage, "usr");
+        if (usr.isDirectory()) return usr;
+        if (new File(stage, "bin").isDirectory()
+                || new File(stage, "lib").isDirectory()
+                || new File(stage, "share").isDirectory()) {
+            return stage;
+        }
+        // deep search
+        return findDirNamed(stage, "usr", 8);
+    }
+
+    private static File findDirNamed(File root, String name, int maxDepth) {
+        if (maxDepth < 0 || root == null || !root.isDirectory()) return null;
+        if (name.equals(root.getName()) && new File(root, "bin").exists()) return root;
+        File[] kids = root.listFiles();
+        if (kids == null) return null;
+        for (File k : kids) {
+            File f = findDirNamed(k, name, maxDepth - 1);
+            if (f != null) return f;
+        }
+        return null;
+    }
+
+    private static void copyTree(File src, File dest) throws IOException {
+        if (src.isDirectory()) {
+            if (!dest.exists() && !dest.mkdirs()) {
+                throw new IOException("mkdir failed: " + dest);
+            }
+            File[] kids = src.listFiles();
+            if (kids == null) return;
+            for (File k : kids) {
+                copyTree(k, new File(dest, k.getName()));
+            }
+        } else {
+            File parent = dest.getParentFile();
+            if (parent != null && !parent.exists()) parent.mkdirs();
+            try (FileInputStream in = new FileInputStream(src);
+                 FileOutputStream out = new FileOutputStream(dest)) {
+                RootfsManager.pipe(in, out);
+            }
+            //noinspection ResultOfMethodCallIgnored
+            dest.setReadable(true, false);
+            if (src.canExecute() || src.getName().contains(".")) {
+                //noinspection ResultOfMethodCallIgnored
+                dest.setExecutable(true, false);
+            }
+        }
+    }
+
+    private void extractDataTar(File dataTar, File destDir, ProgressListener log) throws IOException {
         String name = dataTar.getName();
         String busybox = rootfs.getBusyboxPath();
 
         List<String> cmd = new ArrayList<>();
+        // Prefer system tar for xz/zstd; busybox for gz/plain
         if (name.endsWith(".xz")) {
-            // Need xz | tar — try system tar with -J, or busybox
             cmd.add("tar");
             cmd.add("-xJf");
             cmd.add(dataTar.getAbsolutePath());
             cmd.add("-C");
-            cmd.add(prefix.getAbsolutePath());
+            cmd.add(destDir.getAbsolutePath());
         } else if (name.endsWith(".gz") || name.endsWith(".tgz")) {
             if (new File(busybox).exists()) {
-                cmd.add(busybox);
-                cmd.add("tar");
-                cmd.add("-xzf");
+                cmd.add(busybox); cmd.add("tar"); cmd.add("-xzf");
             } else {
-                cmd.add("tar");
-                cmd.add("-xzf");
+                cmd.add("tar"); cmd.add("-xzf");
             }
             cmd.add(dataTar.getAbsolutePath());
             cmd.add("-C");
-            cmd.add(prefix.getAbsolutePath());
+            cmd.add(destDir.getAbsolutePath());
         } else if (name.endsWith(".zst") || name.endsWith(".zstd")) {
             cmd.add("tar");
             cmd.add("--zstd");
             cmd.add("-xf");
             cmd.add(dataTar.getAbsolutePath());
             cmd.add("-C");
-            cmd.add(prefix.getAbsolutePath());
+            cmd.add(destDir.getAbsolutePath());
         } else {
-            // plain tar
             if (new File(busybox).exists()) {
-                cmd.add(busybox);
-                cmd.add("tar");
-                cmd.add("-xf");
+                cmd.add(busybox); cmd.add("tar"); cmd.add("-xf");
             } else {
-                cmd.add("tar");
-                cmd.add("-xf");
+                cmd.add("tar"); cmd.add("-xf");
             }
             cmd.add(dataTar.getAbsolutePath());
             cmd.add("-C");
-            cmd.add(prefix.getAbsolutePath());
+            cmd.add(destDir.getAbsolutePath());
         }
 
         logMsg(log, "tar extract: " + name);
@@ -314,14 +364,12 @@ public class PkgInstaller {
             Process p = new ProcessBuilder(cmd)
                 .redirectErrorStream(true)
                 .start();
-            // drain
             byte[] buf = new byte[4096];
             InputStream in = p.getInputStream();
             while (in.read(buf) != -1) { /* discard */ }
             int code = p.waitFor();
             if (code != 0) {
-                throw new IOException("tar failed (exit " + code + ") for " + name
-                    + " — xz/zstd may need system support");
+                throw new IOException("tar failed (exit " + code + ") for " + name);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

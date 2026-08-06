@@ -273,33 +273,49 @@ public class InitScriptWriter {
         sb.append("  done\n");
         sb.append("  [ -n \"$_data\" ] || { echo \"[pkg] no data.tar in deb\" >&2; return 1; }\n");
         sb.append("  echo \"[pkg] extracting $(basename \"$_data\") → $PREFIX\"\n");
-        // IMPORTANT: system/termux tar may spawn xz/zstd as a child via execve.\n
-        // Those children are under filesDir → Permission denied (targetSdk>28).\n
-        // Always decompress via linker (elf) and pipe into bb tar -xf -.\n
+        // Termux debs contain: data/data/com.termux/files/usr/bin/...\n
+        // Stage extract, then merge that tree into our $PREFIX.\n
+        sb.append("  _stage=\"$_work/stage\"\n");
+        sb.append("  mkdir -p \"$_stage\"\n");
         sb.append("  case \"$_data\" in\n");
         sb.append("    *.xz)\n");
         sb.append("      if [ -f \"$PREFIX/bin/xz\" ]; then\n");
-        sb.append("        elf \"$PREFIX/bin/xz\" -dc \"$_data\" | bb tar -xf - -C \"$PREFIX\" || return 1\n");
-        sb.append("      elif [ -f \"$PREFIX/bin/busybox\" ]; then\n");
-        sb.append("        elf \"$PREFIX/bin/busybox\" xz -dc \"$_data\" | bb tar -xf - -C \"$PREFIX\" || return 1\n");
+        sb.append("        elf \"$PREFIX/bin/xz\" -dc \"$_data\" | bb tar -xf - -C \"$_stage\" || return 1\n");
         sb.append("      else\n");
         sb.append("        echo \"[pkg] need $PREFIX/bin/xz to extract data.tar.xz\" >&2; return 1\n");
         sb.append("      fi\n");
         sb.append("      ;;\n");
         sb.append("    *.gz|*.tgz)\n");
-        sb.append("      bb tar -xzf \"$_data\" -C \"$PREFIX\" || return 1\n");
+        sb.append("      bb tar -xzf \"$_data\" -C \"$_stage\" || return 1\n");
         sb.append("      ;;\n");
         sb.append("    *.zst)\n");
         sb.append("      if [ -f \"$PREFIX/bin/zstd\" ]; then\n");
-        sb.append("        elf \"$PREFIX/bin/zstd\" -dc \"$_data\" | bb tar -xf - -C \"$PREFIX\" || return 1\n");
+        sb.append("        elf \"$PREFIX/bin/zstd\" -dc \"$_data\" | bb tar -xf - -C \"$_stage\" || return 1\n");
         sb.append("      else\n");
         sb.append("        echo \"[pkg] need $PREFIX/bin/zstd for data.tar.zst\" >&2; return 1\n");
         sb.append("      fi\n");
         sb.append("      ;;\n");
         sb.append("    *)\n");
-        sb.append("      bb tar -xf \"$_data\" -C \"$PREFIX\" || return 1\n");
+        sb.append("      bb tar -xf \"$_data\" -C \"$_stage\" || return 1\n");
         sb.append("      ;;\n");
         sb.append("  esac\n");
+        sb.append("  _src=\"\"\n");
+        sb.append("  if [ -d \"$_stage/data/data/com.termux/files/usr\" ]; then\n");
+        sb.append("    _src=\"$_stage/data/data/com.termux/files/usr\"\n");
+        sb.append("  elif [ -d \"$_stage/usr\" ]; then\n");
+        sb.append("    _src=\"$_stage/usr\"\n");
+        sb.append("  elif [ -d \"$_stage/bin\" ] || [ -d \"$_stage/lib\" ] || [ -d \"$_stage/share\" ]; then\n");
+        sb.append("    _src=\"$_stage\"\n");
+        sb.append("  else\n");
+        sb.append("    _src=$(bb find \"$_stage\" -type d -path '*/files/usr' 2>/dev/null | head -1)\n");
+        sb.append("  fi\n");
+        sb.append("  if [ -z \"$_src\" ] || [ ! -d \"$_src\" ]; then\n");
+        sb.append("    echo \"[pkg] could not locate package files in archive\" >&2\n");
+        sb.append("    bb find \"$_stage\" -maxdepth 8 2>/dev/null | head -30\n");
+        sb.append("    return 1\n");
+        sb.append("  fi\n");
+        sb.append("  echo \"[pkg] merging $_src → $PREFIX\"\n");
+        sb.append("  bb cp -a \"$_src\"/. \"$PREFIX\"/ || return 1\n");
         sb.append("  mkdir -p \"$PREFIX/var/lib/dpkg/info\"\n");
         sb.append("  echo \"# mscode\" > \"$PREFIX/var/lib/dpkg/info/$_name.list\"\n");
         sb.append("  rm -rf \"$_work\"\n");
