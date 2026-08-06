@@ -15,7 +15,7 @@ import { bootstrapGitPanel } from './GitSkeleton';
 import { gitAccess } from './gitAccess'; 
 
 
-let autoFetchInterval: any = null;
+let autoFetchInterval: any = null; 
 /** Debounce rapid saves so we don't spam `git status` */
 let saveRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
