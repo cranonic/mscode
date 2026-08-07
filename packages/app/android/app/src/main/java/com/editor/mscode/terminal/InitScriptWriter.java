@@ -101,6 +101,10 @@ public class InitScriptWriter {
             // internal -cc1/ld sub-execs, python subprocess, etc. work through
             // the same linker64 trick as top-level shell commands.
             sb.append("export LD_PRELOAD='").append(safeTermuxExec).append("'\n");
+            // Every exec in this app goes through the system linker (no direct
+            // exec is ever possible under app data dir) — don't let termux-exec
+            // probe/guess, force it on unconditionally.
+            sb.append("export TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force\n");
         } else {
             sb.append("# libtermux-exec.so not bundled in jniLibs — clang/gcc-style\n");
             sb.append("# tools may fail on internal cc1/ld sub-execs (tcc -run is fine)\n");
@@ -292,6 +296,7 @@ public class InitScriptWriter {
         sb.append("    echo \"export LD_LIBRARY_PATH='$LD_LIBRARY_PATH'\"\n");
         sb.append("    echo \"export PATH='$PATH'\"\n");
         sb.append("    echo \"export LD_PRELOAD='$LD_PRELOAD'\"\n");
+        sb.append("    echo \"export TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE='$TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE'\"\n");
         sb.append("    echo \"export TERMINFO='$TERMINFO'\"\n");
         sb.append("    echo \"export CURL_CA_BUNDLE='$CURL_CA_BUNDLE'\"\n");
         sb.append("    echo \"export SSL_CERT_FILE='$SSL_CERT_FILE'\"\n");

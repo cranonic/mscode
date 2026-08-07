@@ -178,6 +178,7 @@ public class ProotCommandBuilder {
             // internal -cc1/ld invocations, python subprocess, etc.) also get
             // routed through /system/bin/linker64, not just top-level commands.
             env.add("LD_PRELOAD=" + termuxExecPath);
+            env.add("TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force");
         }
         // Termux compatibility aliases
         env.add("TERMUX_PREFIX=" + prefixPath);
@@ -225,6 +226,7 @@ public class ProotCommandBuilder {
         map.put("BUSYBOX",         busyboxPath);
         if (termuxExecAvailable) {
             map.put("LD_PRELOAD", termuxExecPath);
+            map.put("TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE", "force");
         }
         map.put("TERMUX_PREFIX",   prefixPath);
         map.put("TERMUX_VERSION",  "mscode");
