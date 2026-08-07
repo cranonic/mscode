@@ -442,7 +442,13 @@ public class TerminalForegroundService extends Service {
             rootfs.ensureNativeBinaries();
         }
 
-        String[] cmd = builder.buildBackgroundCommand(shellCommand);
+        // Rewrite common langserver CLIs so they run via node + linker.
+        // PREFIX/bin/* is not directly executable (targetSdk>28); hyphenated
+        // names cannot be shell functions either.
+        String rewritten = rewriteLspCommand(shellCommand);
+        emitLog("🔌 LSP cmd: " + rewritten);
+
+        String[] cmd = builder.buildBackgroundCommand(rewritten);
         java.util.Map<String, String> envMap = builder.buildBackgroundEnvMap();
 
         int port = ProcessServer.findFreePort();
@@ -451,6 +457,40 @@ public class TerminalForegroundService extends Service {
         processServers.put(port, server);
         emitLog("🔌 ProcessServer listening on port " + port);
         return port;
+    }
+
+    /**
+     * Map "pyright-langserver --stdio" → run the JS entry via node (elf/linker).
+     * Falls back to the original command when no rewrite applies.
+     */
+    private String rewriteLspCommand(String shellCommand) {
+        if (shellCommand == null) return "";
+        String s = shellCommand.trim();
+        String prefix = rootfs.getPrefixPath();
+
+        // pyright (npm global under $PREFIX)
+        if (s.startsWith("pyright-langserver") || s.contains("pyright-langserver")) {
+            String js = prefix + "/lib/node_modules/pyright/dist/pyright-langserver.js";
+            String node = prefix + "/bin/node";
+            // node is wrapped by mscode_env.sh as a function using linker
+            return "if [ -f \"" + js + "\" ]; then "
+                 + "node \"" + js + "\" --stdio; "
+                 + "else "
+                 + "node \"$(npm root -g 2>/dev/null)/pyright/dist/pyright-langserver.js\" --stdio; "
+                 + "fi";
+        }
+
+        // typescript-language-server
+        if (s.startsWith("typescript-language-server") || s.contains("typescript-language-server")) {
+            String js = prefix + "/lib/node_modules/typescript-language-server/lib/cli.mjs";
+            return "if [ -f \"" + js + "\" ]; then "
+                 + "node \"" + js + "\" --stdio; "
+                 + "else "
+                 + "node \"$(npm root -g 2>/dev/null)/typescript-language-server/lib/cli.mjs\" --stdio; "
+                 + "fi";
+        }
+
+        return s;
     }
 
     public boolean stopProcessServer(int port) {

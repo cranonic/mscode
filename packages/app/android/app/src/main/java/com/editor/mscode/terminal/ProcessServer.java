@@ -135,13 +135,30 @@ public class ProcessServer extends WebSocketServer {
                 pb.environment().putAll(env);
             }
 
-            Process process = pb.redirectErrorStream(true).start();
+            // CRITICAL: do NOT merge stderr into stdout.
+            // LSP uses Content-Length framing on stdout; any log on the same
+            // stream corrupts the protocol and causes "initialize timeout".
+            Process process = pb.redirectErrorStream(false).start();
             liveProcesses.add(process);
 
             InputStream stdout = process.getInputStream();
+            InputStream stderr = process.getErrorStream();
             OutputStream stdin = process.getOutputStream();
 
             conn.setAttachment(new ConnState(process, stdin));
+
+            // Drain stderr to log only — never to the WebSocket
+            new Thread(() -> {
+                try {
+                    byte[] buf = new byte[4096];
+                    int len;
+                    while ((len = stderr.read(buf)) != -1) {
+                        if (forceStopped.get()) break;
+                        String chunk = new String(buf, 0, len, StandardCharsets.UTF_8);
+                        android.util.Log.w("ProcessServer", "lsp-stderr: " + chunk);
+                    }
+                } catch (Exception ignored) {}
+            }, "lsp-stderr-reader").start();
 
             new Thread(() -> {
                 try {
@@ -165,7 +182,10 @@ public class ProcessServer extends WebSocketServer {
         try {
             ConnState state = conn.getAttachment();
             if (state != null) {
-                state.stdin.write(msg.array(), msg.position(), msg.remaining());
+                // Copy remaining bytes — msg.array() may be a larger backing buffer
+                byte[] data = new byte[msg.remaining()];
+                msg.get(data);
+                state.stdin.write(data);
                 state.stdin.flush();
             }
         } catch (Exception ignored) {}

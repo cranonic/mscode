@@ -56,12 +56,18 @@ export function sendRequest(state: LspState, method: string, params: unknown): P
     const body = JSON.stringify({ jsonrpc: '2.0', id, method, params } as JsonRpcRequest);
     state.ws.send(frame(body));
 
+    // Cold start on Android (pyright + node via linker) can exceed 10s
+    const timeoutMs = method === 'initialize' ? 45_000 : 15_000;
     setTimeout(() => {
       if (state.pendingRequests.has(id)) {
         state.pendingRequests.delete(id);
-        reject(new Error(`Language server interaction timed out on command: ${method}`));
+        reject(new Error(
+          method === 'initialize'
+            ? 'LSP initialize timeout'
+            : `Language server interaction timed out on command: ${method}`,
+        ));
       }
-    }, 10_000);
+    }, timeoutMs);
   });
 }
 
