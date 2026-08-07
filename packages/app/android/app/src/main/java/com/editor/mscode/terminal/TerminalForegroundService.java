@@ -509,6 +509,18 @@ public class TerminalForegroundService extends Service {
                  + "fi";
         }
 
+        // clangd — real ELF under $PREFIX/bin; must run via linker (targetSdk>28)
+        if (s.startsWith("clangd") || s.matches("(?s).*\\bclangd\\b.*")) {
+            String clangd = prefix + "/bin/clangd";
+            // Keep user flags after the binary name
+            String flags = s.replaceFirst("^clangd\\s*", "").trim();
+            return "if [ -n \"$MSCODE_LINKER\" ] && [ -f \"" + clangd + "\" ]; then "
+                 + "\"$MSCODE_LINKER\" \"" + clangd + "\" " + flags + "; "
+                 + "else "
+                 + "clangd " + flags + "; "
+                 + "fi";
+        }
+
         return s;
     }
 
