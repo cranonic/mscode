@@ -30,8 +30,6 @@ public class ProotCommandBuilder {
     private final String homePath;
     private final String tmpPath;
     private final String prefixPath;
-    private final String  termuxExecPath;
-    private final boolean termuxExecAvailable;
 
     /** Prefer native busybox + bootstrap over proot. */
     private boolean useNative = true;
@@ -45,8 +43,6 @@ public class ProotCommandBuilder {
         this.homePath     = mgr.getHomePath();
         this.tmpPath      = mgr.getTmpPath();
         this.prefixPath   = mgr.getPrefixPath();
-        this.termuxExecPath      = mgr.getTermuxExecPath();
-        this.termuxExecAvailable = mgr.isTermuxExecAvailable();
     }
 
     public void setUseNative(boolean nativeMode) {
@@ -55,11 +51,6 @@ public class ProotCommandBuilder {
 
     public boolean isNative() {
         return useNative;
-    }
-
-    /** True once libtermux-exec.so is bundled — see RootfsManager#getTermuxExecPath(). */
-    public boolean isTermuxExecAvailable() {
-        return termuxExecAvailable;
     }
 
     // ─── Terminal session command ─────────────────────────────────────────────
@@ -173,13 +164,6 @@ public class ProotCommandBuilder {
                 + nativeLibDir + ":/system/bin:/system/xbin");
         env.add("LD_LIBRARY_PATH=" + prefixPath + "/lib:" + nativeLibDir);
         env.add("BUSYBOX=" + busyboxPath);
-        if (termuxExecAvailable) {
-            // Transparent execve() interception so nested sub-execs (clang's
-            // internal -cc1/ld invocations, python subprocess, etc.) also get
-            // routed through /system/bin/linker64, not just top-level commands.
-            env.add("LD_PRELOAD=" + termuxExecPath);
-            env.add("TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force");
-        }
         // Termux compatibility aliases
         env.add("TERMUX_PREFIX=" + prefixPath);
         env.add("TERMUX_VERSION=mscode");
@@ -189,6 +173,14 @@ public class ProotCommandBuilder {
         env.add("TERMINFO=" + prefixPath + "/share/terminfo");
         env.add("SSL_CERT_FILE=" + prefixPath + "/etc/tls/cert.pem");
         env.add("CURL_CA_BUNDLE=" + prefixPath + "/etc/tls/cert.pem");
+        // proot binary lives in nativeLibraryDir (executable) — used only for compilers
+        env.add("MSCODE_PROOT=" + prootPath);
+        env.add("PROOT_LOADER=" + nativeLibDir + "/libproot-loader.so");
+        File l32e = new File(nativeLibDir, "libproot-loader32.so");
+        if (l32e.exists()) {
+            env.add("PROOT_LOADER32=" + l32e.getAbsolutePath());
+        }
+        env.add("PROOT_TMP_DIR=" + tmpPath);
         if (initScriptPath != null && !initScriptPath.isEmpty()) {
             // mksh (Android /system/bin/sh) sources $ENV for interactive shells
             env.add("ENV=" + initScriptPath);
@@ -224,10 +216,6 @@ public class ProotCommandBuilder {
                                    + nativeLibDir + ":/system/bin:/system/xbin");
         map.put("LD_LIBRARY_PATH", prefixPath + "/lib:" + nativeLibDir);
         map.put("BUSYBOX",         busyboxPath);
-        if (termuxExecAvailable) {
-            map.put("LD_PRELOAD", termuxExecPath);
-            map.put("TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE", "force");
-        }
         map.put("TERMUX_PREFIX",   prefixPath);
         map.put("TERMUX_VERSION",  "mscode");
         map.put("ANDROID_DATA",    "/data");
@@ -236,6 +224,14 @@ public class ProotCommandBuilder {
         map.put("TERMINFO",        prefixPath + "/share/terminfo");
         map.put("SSL_CERT_FILE",   prefixPath + "/etc/tls/cert.pem");
         map.put("CURL_CA_BUNDLE",  prefixPath + "/etc/tls/cert.pem");
+        // Compiler helper: proot from nativeLibraryDir bypasses noexec on $PREFIX
+        map.put("MSCODE_PROOT",    prootPath);
+        map.put("PROOT_LOADER",    nativeLibDir + "/libproot-loader.so");
+        File l32 = new File(nativeLibDir, "libproot-loader32.so");
+        if (l32.exists()) {
+            map.put("PROOT_LOADER32", l32.getAbsolutePath());
+        }
+        map.put("PROOT_TMP_DIR",   tmpPath);
         return map;
     }
 
@@ -291,6 +287,29 @@ public class ProotCommandBuilder {
 
         cmd.add("-b"); cmd.add("/dev/urandom:/dev/random");
         cmd.add("-b"); cmd.add(tmpPath + ":/dev/shm");
+    }
+
+    /**
+     * Build a shell snippet that runs {@code guestCmd} under proot with host root (-r /).
+     * proot intercepts execve → can load ELF from non-executable $PREFIX (targetSdk>28).
+     * Used for clang/tcc/gcc only — interactive shell stays native.
+     */
+    public String wrapWithProot(String guestCmd) {
+        // Minimal binds: keep paths identical to host so $PREFIX paths stay valid.
+        // Termux packages hardcode /data/data/com.termux/files/usr/tmp — bind our tmp.
+        String termuxTmp = "/data/data/com.termux/files/usr/tmp";
+        return "\"" + prootPath + "\""
+            + " --link2symlink --kill-on-exit -0 -r /"
+            + " -b /system -b /data -b /dev -b /proc -b /sys"
+            + " -b /storage -b /sdcard -b /apex"
+            + " -b " + tmpPath + ":" + termuxTmp
+            + " -b " + tmpPath + ":/tmp"
+            + " -w \\\"$PWD\\\""
+            + " /system/bin/sh -c " + shellQuote(guestCmd);
+    }
+
+    private static String shellQuote(String s) {
+        return "'" + s.replace("'", "'\\''") + "'";
     }
 
     private void addCommonProotEnv(List<String> env) {

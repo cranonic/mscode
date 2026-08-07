@@ -139,7 +139,6 @@ public class NativeTerminalPlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("isReady", terminalService.isRootfsReady());
         ret.put("bootstrapReady", terminalService.isBootstrapReady());
-        ret.put("termuxExecReady", terminalService.isTermuxExecReady());
         ret.put("prefix", terminalService.getPrefixPath());
         call.resolve(ret);
     }
