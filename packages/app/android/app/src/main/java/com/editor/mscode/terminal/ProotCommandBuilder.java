@@ -30,6 +30,8 @@ public class ProotCommandBuilder {
     private final String homePath;
     private final String tmpPath;
     private final String prefixPath;
+    private final String  termuxExecPath;
+    private final boolean termuxExecAvailable;
 
     /** Prefer native busybox + bootstrap over proot. */
     private boolean useNative = true;
@@ -43,6 +45,8 @@ public class ProotCommandBuilder {
         this.homePath     = mgr.getHomePath();
         this.tmpPath      = mgr.getTmpPath();
         this.prefixPath   = mgr.getPrefixPath();
+        this.termuxExecPath      = mgr.getTermuxExecPath();
+        this.termuxExecAvailable = mgr.isTermuxExecAvailable();
     }
 
     public void setUseNative(boolean nativeMode) {
@@ -51,6 +55,11 @@ public class ProotCommandBuilder {
 
     public boolean isNative() {
         return useNative;
+    }
+
+    /** True once libtermux-exec.so is bundled — see RootfsManager#getTermuxExecPath(). */
+    public boolean isTermuxExecAvailable() {
+        return termuxExecAvailable;
     }
 
     // ─── Terminal session command ─────────────────────────────────────────────
@@ -164,6 +173,12 @@ public class ProotCommandBuilder {
                 + nativeLibDir + ":/system/bin:/system/xbin");
         env.add("LD_LIBRARY_PATH=" + prefixPath + "/lib:" + nativeLibDir);
         env.add("BUSYBOX=" + busyboxPath);
+        if (termuxExecAvailable) {
+            // Transparent execve() interception so nested sub-execs (clang's
+            // internal -cc1/ld invocations, python subprocess, etc.) also get
+            // routed through /system/bin/linker64, not just top-level commands.
+            env.add("LD_PRELOAD=" + termuxExecPath);
+        }
         // Termux compatibility aliases
         env.add("TERMUX_PREFIX=" + prefixPath);
         env.add("TERMUX_VERSION=mscode");
@@ -208,6 +223,9 @@ public class ProotCommandBuilder {
                                    + nativeLibDir + ":/system/bin:/system/xbin");
         map.put("LD_LIBRARY_PATH", prefixPath + "/lib:" + nativeLibDir);
         map.put("BUSYBOX",         busyboxPath);
+        if (termuxExecAvailable) {
+            map.put("LD_PRELOAD", termuxExecPath);
+        }
         map.put("TERMUX_PREFIX",   prefixPath);
         map.put("TERMUX_VERSION",  "mscode");
         map.put("ANDROID_DATA",    "/data");

@@ -39,6 +39,8 @@ public class InitScriptWriter {
         String busybox  = rootfs.getBusyboxPath();
         String libDir   = rootfs.getNativeLibDir();
         boolean bootOk  = rootfs.isBootstrapReady();
+        String  termuxExec   = rootfs.getTermuxExecPath();
+        boolean termuxExecOk = rootfs.isTermuxExecAvailable();
 
         String safeCwd = (projectCwd != null && !projectCwd.isEmpty())
             ? projectCwd.replace("'", "'\\''")
@@ -53,6 +55,7 @@ public class InitScriptWriter {
         String safePrefix = prefix.replace("'", "'\\''");
         String safeLib    = libDir.replace("'", "'\\''");
         String safeBb     = busybox.replace("'", "'\\''");
+        String safeTermuxExec = termuxExec.replace("'", "'\\''");
 
         StringBuilder sb = new StringBuilder();
         sb.append("# MS Code native / Termux-style ENV (sourced by interactive sh)\n");
@@ -93,6 +96,15 @@ public class InitScriptWriter {
         sb.append("  export CURL_CA_BUNDLE=\"$SSL_CERT_FILE\"\n");
         sb.append("fi\n");
         sb.append("export BUSYBOX='").append(safeBb).append("'\n");
+        if (termuxExecOk) {
+            // Transparent execve() interception (termux-exec) — lets clang's
+            // internal -cc1/ld sub-execs, python subprocess, etc. work through
+            // the same linker64 trick as top-level shell commands.
+            sb.append("export LD_PRELOAD='").append(safeTermuxExec).append("'\n");
+        } else {
+            sb.append("# libtermux-exec.so not bundled in jniLibs — clang/gcc-style\n");
+            sb.append("# tools may fail on internal cc1/ld sub-execs (tcc -run is fine)\n");
+        }
         sb.append("export MSCODE_HOST='").append(safeHost).append("'\n");
         // Termux-style: mscode: ~/.../code/test $  (last 2 segments if deeper)
         sb.append("_mscode_prompt() {\n");
@@ -279,6 +291,7 @@ public class InitScriptWriter {
         sb.append("    echo \"export MSCODE_LINKER='$MSCODE_LINKER'\"\n");
         sb.append("    echo \"export LD_LIBRARY_PATH='$LD_LIBRARY_PATH'\"\n");
         sb.append("    echo \"export PATH='$PATH'\"\n");
+        sb.append("    echo \"export LD_PRELOAD='$LD_PRELOAD'\"\n");
         sb.append("    echo \"export TERMINFO='$TERMINFO'\"\n");
         sb.append("    echo \"export CURL_CA_BUNDLE='$CURL_CA_BUNDLE'\"\n");
         sb.append("    echo \"export SSL_CERT_FILE='$SSL_CERT_FILE'\"\n");

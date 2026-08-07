@@ -89,6 +89,11 @@ public class TerminalForegroundService extends Service {
         return rootfs.isBootstrapReady();
     }
 
+    /** True once libtermux-exec.so is bundled — enables clang/gcc-style multi-process toolchains. */
+    public boolean isTermuxExecReady() {
+        return rootfs.isTermuxExecAvailable();
+    }
+
     public String getPrefixPath() {
         return rootfs.getPrefixPath();
     }

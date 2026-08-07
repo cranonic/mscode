@@ -81,6 +81,31 @@ public class RootfsManager {
         return nativeLibDir + "/libbusybox.so";
     }
 
+    /**
+     * Optional LD_PRELOAD shim (termux-exec) for transparent execve() interception.
+     * MUST be bundled under nativeLibraryDir (jniLibs/&lt;abi&gt;/libtermux-exec.so) at
+     * APK build time — same as libbusybox.so — since Android only allows executing /
+     * mmap-exec'ing files from that directory. It CANNOT be downloaded into $PREFIX
+     * at runtime the way the Termux bootstrap zip is: a file under filesDir/usr is
+     * still subject to the same noexec restriction as everything else there.
+     *
+     * When present, every native session / background exec preloads it so that
+     * subprocess execve()/posix_spawn() calls made *from inside* other programs
+     * (e.g. clang forking to run its "-cc1" frontend, or invoking "ld") get
+     * transparently rewritten to go through /system/bin/linker64 — the same trick
+     * elf()/mscode_wrap() already apply manually to top-level shell commands.
+     * Without it, multi-process toolchains (clang, gcc-style linking) will keep
+     * failing on their internal sub-execs even though plain PREFIX binaries work.
+     */
+    public String getTermuxExecPath() {
+        return nativeLibDir + "/libtermux-exec.so";
+    }
+
+    /** True once libtermux-exec.so has actually been bundled into the APK. */
+    public boolean isTermuxExecAvailable() {
+        return new File(getTermuxExecPath()).exists();
+    }
+
     /** User home for native / Termux-style sessions. */
     public String getHomePath() {
         return filesDir + "/home";
@@ -130,6 +155,9 @@ public class RootfsManager {
             );
         }
         Log.i(TAG, "Using busybox from nativeLibraryDir: " + busybox.getAbsolutePath());
+        Log.i(TAG, isTermuxExecAvailable()
+                ? "termux-exec shim found — multi-process toolchains (clang/gcc) supported"
+                : "libtermux-exec.so not bundled — clang/gcc-style tools may fail on internal cc1/ld sub-execs");
 
         ensureDir(getHomePath());
         ensureDir(getTmpPath());
