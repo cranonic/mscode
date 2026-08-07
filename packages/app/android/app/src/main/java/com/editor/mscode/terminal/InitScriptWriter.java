@@ -85,6 +85,7 @@ public class InitScriptWriter {
         sb.append("export LD_LIBRARY_PATH='").append(safePrefix).append("/lib:")
           .append(safePrefix).append("/lib/glibc:")
           .append(safeLib).append("'\n");
+
         // Termux curl/openssl were built with hardcoded com.termux CA path —
         // force our PREFIX certs (or Android system bundle as fallback).
         sb.append("if [ -f '").append(safePrefix).append("/etc/tls/cert.pem' ]; then\n");
@@ -97,20 +98,15 @@ public class InitScriptWriter {
         sb.append("fi\n");
         sb.append("export BUSYBOX='").append(safeBb).append("'\n");
         if (termuxExecOk) {
-            // Transparent execve() interception (termux-exec) — lets clang's
-            // internal -cc1/ld sub-execs, python subprocess, etc. work through
-            // the same linker64 trick as top-level shell commands.
+            // Transparent execve() interception (termux-exec)
             sb.append("export LD_PRELOAD='").append(safeTermuxExec).append("'\n");
-            // Every exec in this app goes through the system linker (no direct
-            // exec is ever possible under app data dir) — don't let termux-exec
-            // probe/guess, force it on unconditionally.
             sb.append("export TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force\n");
         } else {
-            sb.append("# libtermux-exec.so not bundled in jniLibs — clang/gcc-style\n");
-            sb.append("# tools may fail on internal cc1/ld sub-execs (tcc -run is fine)\n");
+            sb.append("# libtermux-exec.so not bundled in jniLibs\n");
         }
         sb.append("export MSCODE_HOST='").append(safeHost).append("'\n");
-        // Termux-style: mscode: ~/.../code/test $  (last 2 segments if deeper)
+
+        // Termux-style: mscode: ~/.../code/test $
         sb.append("_mscode_prompt() {\n");
         sb.append("  _cwd=$PWD\n");
         sb.append("  if [ \"$_cwd\" = \"$HOME\" ]; then\n");
@@ -119,7 +115,6 @@ public class InitScriptWriter {
         sb.append("    _under=\"${_cwd#$HOME/}\"\n");
         sb.append("    case \"$_under\" in\n");
         sb.append("      */*/*)\n");
-        // ≥3 segments → ~/.../second-last/last
         sb.append("        _b=${_under##*/}\n");
         sb.append("        _rest=${_under%/*}\n");
         sb.append("        _a=${_rest##*/}\n");
@@ -139,19 +134,16 @@ public class InitScriptWriter {
         sb.append("        ;;\n");
         sb.append("    esac\n");
         sb.append("  fi\n");
-        // argv0=printf selects applet; format is first real arg (do NOT pass extra "printf")
         sb.append("  ( exec -a printf \"$BUSYBOX\" '\\033[1;32m%s\\033[0m: \\033[1;34m%s\\033[0m $ ' \"$MSCODE_HOST\" \"$_cwd\" )\n");
         sb.append("}\n");
         sb.append("export PS1='$(_mscode_prompt)'\n");
-        // Bionic expects these (tzdata warnings otherwise)
         sb.append("export ANDROID_DATA=/data\n");
         sb.append("export ANDROID_ROOT=/system\n");
         sb.append("export ANDROID_STORAGE=/storage\n");
-        // bash scripts (neofetch etc.) don't inherit mksh functions — use BASH_ENV
         sb.append("export BASH_ENV='").append(safePrefix).append("/etc/mscode_bash_env.sh'\n");
         sb.append("\n");
 
-        // ── System Bionic linker (runs ELF from non-executable filesDir) ──
+        // ── System Bionic linker ──
         sb.append("# targetSdk>28: exec from filesDir is blocked — use linker\n");
         sb.append("if [ -x /system/bin/linker64 ]; then\n");
         sb.append("  export MSCODE_LINKER=/system/bin/linker64\n");
@@ -162,8 +154,6 @@ public class InitScriptWriter {
         sb.append("fi\n");
         sb.append("\n");
 
-        // elf <path> [args…] — run PREFIX binary via linker WITHOUT replacing the shell.
-        // NEVER use bare `exec` here — that killed the whole terminal session.
         sb.append("elf() {\n");
         sb.append("  if [ $# -lt 1 ]; then\n");
         sb.append("    echo \"usage: elf <binary-path> [args…]\" >&2\n");
@@ -176,7 +166,6 @@ public class InitScriptWriter {
         sb.append("  fi\n");
         sb.append("  _elf_hd=$(bb head -c 2 \"$_elf_bin\" 2>/dev/null)\n");
         sb.append("  if [ \"$_elf_hd\" = '#!' ]; then\n");
-        sb.append("    # Honour shebang: Termux scripts often need bash, not system sh\n");
         sb.append("    _shebang=$(bb head -n 1 \"$_elf_bin\")\n");
         sb.append("    _interp=\n");
         sb.append("    case \"$_shebang\" in\n");
@@ -207,7 +196,7 @@ public class InitScriptWriter {
         sb.append("}\n");
         sb.append("\n");
 
-        // ── Busybox multi-call ────────────────────────────────────────────
+        // ── Busybox multi-call ──
         sb.append("bb() {\n");
         sb.append("  if [ $# -lt 1 ]; then\n");
         sb.append("    echo \"usage: bb <applet> [args…]\" >&2\n");
@@ -224,7 +213,6 @@ public class InitScriptWriter {
         sb.append("}\n");
         sb.append("\n");
 
-        // Coreutils via busybox — always work, never hit PREFIX Permission denied
         String[] bbApplets = {
             "ls", "cat", "cp", "mv", "rm", "mkdir", "rmdir", "grep", "find",
             "tar", "head", "tail", "wc", "uname", "clear", "chmod", "chown",
@@ -237,7 +225,6 @@ public class InitScriptWriter {
             "test", "env", "printenv", "seq", "expr", "tr", "fold",
             "realpath", "mktemp", "wget"
         };
-        // dedupe while writing
         java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
         for (String a : bbApplets) {
             if (!seen.add(a)) continue;
@@ -250,9 +237,7 @@ public class InitScriptWriter {
         }
         sb.append("\n");
 
-        // ── Dynamic PREFIX/bin wrappers (re-run after pkg install) ────────
-        // Java static list goes stale; shell scan always matches current $PREFIX/bin.
-        // Skip busybox-covered names and invalid function identifiers.
+        // ── Dynamic PREFIX/bin wrappers ──
         sb.append("_MSCODE_BB_SKIP=' ");
         for (String a : seen) {
             sb.append(a).append(' ');
@@ -264,7 +249,6 @@ public class InitScriptWriter {
         sb.append("  for _f in \"$PREFIX\"/bin/*; do\n");
         sb.append("    [ -e \"$_f\" ] || continue\n");
         sb.append("    _n=${_f##*/}\n");
-        sb.append("    # valid shell function name?\n");
         sb.append("    case \"$_n\" in\n");
         sb.append("      ''|*[!a-zA-Z0-9_]*|[0-9]*) continue ;;\n");
         sb.append("    esac\n");
@@ -273,9 +257,9 @@ public class InitScriptWriter {
         sb.append("    esac\n");
         sb.append("    case \"$_n\" in\n");
         sb.append("      elf|bb|pkg|mscode_wrap|export|exec|if|fi|then|else|while|do|done|case|esac|function|return|shift|cd|command) continue ;;\n");
+        // clang, gcc ইত্যাদিকে সাধারণ র‍্যাপার থেকে বাদ দিচ্ছি
+        sb.append("      clang|clang++|gcc|g++|cc|c++) continue ;;\n"); 
         sb.append("    esac\n");
-        // IMPORTANT: must be \$@ so eval keeps literal "$@" inside the function body.
-        // Using plain $@ here expands at wrap-time (empty) and breaks python --version etc.
         sb.append("    eval \"$_n() { elf \\\"$_f\\\" \\\"\\$@\\\"; }\"\n");
         sb.append("    _wc=$((_wc+1))\n");
         sb.append("  done\n");
@@ -284,11 +268,29 @@ public class InitScriptWriter {
         sb.append("mscode_wrap\n");
         sb.append("\n");
 
+        // ─── C/C++ Compiler Wrapper via proot (fixes linker64 -cc1 crash) ───
+        sb.append("_wrap_compiler() {\n");
+        sb.append("  _bin=\"$1\"; shift\n");
+        sb.append("  if [ ! -f \"$PREFIX/bin/proot\" ]; then\n");
+        sb.append("    echo \"[!] MS Code: C/C++ requires proot on Android 10+. Run: pkg install proot\" >&2\n");
+        sb.append("    return 1\n");
+        sb.append("  fi\n");
+        // proot এর মাধ্যমে কম্পাইলার রান করা হচ্ছে
+        sb.append("  elf \"$PREFIX/bin/proot\" -b /data -b /system -b /dev -b /proc -b /storage -w \"$PWD\" \"$PREFIX/bin/$_bin\" \"$@\"\n");
+        sb.append("}\n");
+        sb.append("clang()   { _wrap_compiler clang \"$@\"; }\n");
+        sb.append("clang++() { _wrap_compiler clang++ \"$@\"; }\n");
+        sb.append("gcc()     { _wrap_compiler gcc \"$@\"; }\n");
+        sb.append("g++()     { _wrap_compiler g++ \"$@\"; }\n");
+        sb.append("cc()      { _wrap_compiler cc \"$@\"; }\n");
+        sb.append("c++()     { _wrap_compiler c++ \"$@\"; }\n");
+        sb.append("\n");
+
         // Write BASH_ENV file so bash scripts get the same wrappers
         sb.append("_mscode_write_bash_env() {\n");
         sb.append("  mkdir -p \"$PREFIX/etc\"\n");
         sb.append("  {\n");
-        sb.append("    echo '# Auto-generated for bash scripts (neofetch, etc.)'\n");
+        sb.append("    echo '# Auto-generated for bash scripts'\n");
         sb.append("    echo \"export PREFIX='$PREFIX'\"\n");
         sb.append("    echo \"export TERMUX_PREFIX='$PREFIX'\"\n");
         sb.append("    echo \"export BUSYBOX='$BUSYBOX'\"\n");
@@ -303,7 +305,6 @@ public class InitScriptWriter {
         sb.append("    echo \"export ANDROID_DATA=/data\"\n");
         sb.append("    echo \"export ANDROID_ROOT=/system\"\n");
         sb.append("    echo 'bb() { [ $# -lt 1 ] && return 1; local a=\"$1\"; shift; ( exec -a \"$a\" \"$BUSYBOX\" \"$@\" ); }'\n");
-        // busybox applets as bash functions
         sb.append("    for a in ls cat cp mv rm mkdir grep find tar head tail wc uname clear chmod sed sort awk cut tr uniq basename dirname pwd date touch ln readlink stat which xargs tee ps kill id env seq true false test; do\n");
         sb.append("      echo \"$a() { bb $a \\\"\\$@\\\"; }\"\n");
         sb.append("    done\n");
@@ -313,14 +314,21 @@ public class InitScriptWriter {
         sb.append("      _n=${_f##*/}\n");
         sb.append("      case \"$_n\" in ''|*[!a-zA-Z0-9_]*|[0-9]*) continue ;; esac\n");
         sb.append("      case \" $_MSCODE_BB_SKIP \" in *\" $_n \"*) continue ;; esac\n");
+        // bash env-এও কম্পাইলারগুলোকে স্কিপ করা হলো
+        sb.append("      case \"$_n\" in clang|clang++|gcc|g++|cc|c++) continue ;; esac\n"); 
         sb.append("      echo \"$_n() { elf '$_f' \\\"\\$@\\\"; }\"\n");
         sb.append("    done\n");
+        
+        // bash env-এর জন্য proot র‍্যাপার
+        sb.append("    echo '_wrap_compiler() { local b=\"$1\"; shift; if [ ! -f \"$PREFIX/bin/proot\" ]; then echo \"[!] C/C++ needs proot. Run: pkg install proot\" >&2; return 1; fi; elf \"$PREFIX/bin/proot\" -b /data -b /system -b /dev -b /proc -b /storage -w \"$PWD\" \"$PREFIX/bin/$b\" \"$@\"; }'\n");
+        sb.append("    for c in clang clang++ gcc g++ cc c++; do echo \"$c() { _wrap_compiler $c \\\"\\$@\\\"; }\"; done\n");
+        
         sb.append("  } > \"$PREFIX/etc/mscode_bash_env.sh\"\n");
         sb.append("}\n");
         sb.append("_mscode_write_bash_env 2>/dev/null\n");
         sb.append("\n");
 
-        // ── pkg — real install from shell (curl + ar + tar via linker) ──
+        // ── pkg — real install from shell ──
         sb.append("_pkg_repo='https://packages-cf.termux.dev/apt/termux-main'\n");
         sb.append("_pkg_cache=\"$HOME/../pkg-cache\"\n");
         sb.append("_pkg_arch() {\n");
@@ -333,7 +341,7 @@ public class InitScriptWriter {
         sb.append("  esac\n");
         sb.append("}\n");
         sb.append("\n");
-        // Ensure Packages index
+        
         sb.append("_pkg_ensure_index() {\n");
         sb.append("  mkdir -p \"$_pkg_cache\"\n");
         sb.append("  _arch=$(_pkg_arch)\n");
@@ -356,7 +364,7 @@ public class InitScriptWriter {
         sb.append("  fi\n");
         sb.append("}\n");
         sb.append("\n");
-        // Resolve Filename: for a package name
+
         sb.append("_pkg_resolve() {\n");
         sb.append("  _want=\"$1\"\n");
         sb.append("  _pkg_ensure_index || return 1\n");
@@ -376,7 +384,6 @@ public class InitScriptWriter {
         sb.append("}\n");
         sb.append("\n");
 
-        // Extract .deb → $PREFIX
         sb.append("_pkg_extract_deb() {\n");
         sb.append("  _deb=\"$1\"; _name=\"$2\"\n");
         sb.append("  _work=\"$_pkg_cache/extract-$_name\"\n");
@@ -386,7 +393,6 @@ public class InitScriptWriter {
         sb.append("    rm -f \"$_deb\"\n");
         sb.append("    return 1\n");
         sb.append("  fi\n");
-        sb.append("  # detect truncated deb (ar short read leaves tiny/missing data.tar)\n");
         sb.append("  _has_data=0\n");
         sb.append("  for _f in \"$_work\"/data.tar*; do [ -f \"$_f\" ] && [ -s \"$_f\" ] && _has_data=1; done\n");
         sb.append("  if [ \"$_has_data\" = 0 ]; then\n");
@@ -400,8 +406,6 @@ public class InitScriptWriter {
         sb.append("  done\n");
         sb.append("  [ -n \"$_data\" ] || { echo \"[pkg] no data.tar in deb\" >&2; return 1; }\n");
         sb.append("  echo \"[pkg] extracting $(basename \"$_data\") → $PREFIX\"\n");
-        // Termux debs contain: data/data/com.termux/files/usr/bin/...\n
-        // Stage extract, then merge that tree into our $PREFIX.\n
         sb.append("  _stage=\"$_work/stage\"\n");
         sb.append("  mkdir -p \"$_stage\"\n");
         sb.append("  case \"$_data\" in\n");
@@ -442,14 +446,13 @@ public class InitScriptWriter {
         sb.append("    return 1\n");
         sb.append("  fi\n");
         sb.append("  echo \"[pkg] merging $_src → $PREFIX\"\n");
-        // -a preserve, -f overwrite existing (re-install / shared libs)
         sb.append("  bb cp -af \"$_src\"/. \"$PREFIX\"/ || return 1\n");
         sb.append("  mkdir -p \"$PREFIX/var/lib/dpkg/info\"\n");
         sb.append("  echo \"# mscode\" > \"$PREFIX/var/lib/dpkg/info/$_name.list\"\n");
         sb.append("  rm -rf \"$_work\"\n");
         sb.append("}\n");
         sb.append("\n");
-        // Parse Depends: from Packages index (simple, ignores versions/alternatives)
+
         sb.append("_pkg_depends() {\n");
         sb.append("  _want=\"$1\"\n");
         sb.append("  _pkg_ensure_index || return 0\n");
@@ -463,13 +466,13 @@ public class InitScriptWriter {
         sb.append("      '') _cur= ;;\n");
         sb.append("    esac\n");
         sb.append("  done < \"$_pkg_cache/Packages\"\n");
-        sb.append("  # split on commas; strip version constraints and |\n");
         sb.append("  echo \"$_deps\" | tr ',' '\\n' | while IFS= read -r _d; do\n");
         sb.append("    _d=$(echo \"$_d\" | sed 's/|.*//' | sed 's/(.*//' | sed 's/^ *//;s/ *$//')\n");
         sb.append("    [ -n \"$_d\" ] && echo \"$_d\"\n");
         sb.append("  done\n");
         sb.append("}\n");
         sb.append("\n");
+        
         sb.append("_pkg_is_installed() {\n");
         sb.append("  [ -f \"$PREFIX/var/lib/dpkg/info/$1.list\" ]\n");
         sb.append("}\n");
@@ -477,7 +480,6 @@ public class InitScriptWriter {
 
         sb.append("_pkg_install_one() {\n");
         sb.append("  _p=\"$1\"\n");
-        sb.append("  # depth guard for recursive deps\n");
         sb.append("  _pkg_depth=${_pkg_depth:-0}\n");
         sb.append("  if [ \"$_pkg_depth\" -gt 15 ]; then\n");
         sb.append("    echo \"[pkg] dependency depth exceeded at $_p\" >&2; return 1\n");
@@ -490,11 +492,9 @@ public class InitScriptWriter {
         sb.append("  _path=$(_pkg_resolve \"$_p\") || {\n");
         sb.append("    echo \"[pkg] package not found: $_p\" >&2; return 1\n");
         sb.append("  }\n");
-        // install dependencies first
         sb.append("  _pkg_depth=$((_pkg_depth + 1))\n");
         sb.append("  for _dep in $(_pkg_depends \"$_p\"); do\n");
         sb.append("    case \"$_dep\" in\n");
-        // skip virtual/boring deps
         sb.append("      ''|bash|coreutils|busybox|termux-am|termux-exec|dash|libandroid-support) ;;\n");
         sb.append("      *)\n");
         sb.append("        if ! _pkg_is_installed \"$_dep\"; then\n");
@@ -517,11 +517,11 @@ public class InitScriptWriter {
         sb.append("    echo \"[pkg] cached $(basename \"$_deb\")\"\n");
         sb.append("  fi\n");
         sb.append("  _pkg_extract_deb \"$_deb\" \"$_p\" || return 1\n");
-        sb.append("  # refresh command wrappers in THIS session\n");
         sb.append("  mscode_wrap 2>/dev/null\n");
         sb.append("  echo \"[pkg] ✓ $_p installed\"\n");
         sb.append("}\n");
         sb.append("\n");
+        
         sb.append("pkg() {\n");
         sb.append("  case \"$1\" in\n");
         sb.append("    install|i)\n");
@@ -575,7 +575,6 @@ public class InitScriptWriter {
         sb.append("fi\n");
         sb.append("\n");
 
-        // Termux-style welcome (no internal PREFIX/linker noise)
         sb.append("if [ -z \"$MSCODE_BANNER_SHOWN\" ]; then\n");
         sb.append("  export MSCODE_BANNER_SHOWN=1\n");
         sb.append("  echo \"\"\n");
@@ -606,7 +605,7 @@ public class InitScriptWriter {
         //noinspection ResultOfMethodCallIgnored
         f.setReadable(true, false);
 
-        // Shared env for background tasks (taskManager / pkg install git)
+        // Shared env for background tasks
         File shared = new File(rootfs.getFilesDir(), "mscode_env.sh");
         try (FileOutputStream fos = new FileOutputStream(shared)) {
             fos.write(bytes);
@@ -617,42 +616,5 @@ public class InitScriptWriter {
 
     public void cleanup(String outputPath) {
         new File(outputPath).delete();
-    }
-
-    /** Valid mksh function name: [a-zA-Z_][a-zA-Z0-9_]* — also allow digits after start, plus + - . for some tools we skip. */
-    private static boolean isValidShellName(String name) {
-        if (name == null || name.isEmpty()) return false;
-        // skip names with chars invalid in function identifiers
-        if (name.contains("-") || name.contains(".") || name.contains("+")) return false;
-        if (name.contains("[")) return false;
-        char c0 = name.charAt(0);
-        if (!(c0 == '_' || (c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z'))) return false;
-        for (int i = 1; i < name.length(); i++) {
-            char c = name.charAt(i);
-            if (!(c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-                    || (c >= '0' && c <= '9'))) return false;
-        }
-        // reserved / shell builtins we must not override badly
-        if ("elf".equals(name) || "bb".equals(name) || "pkg".equals(name)
-                || "export".equals(name) || "exec".equals(name)
-                || "if".equals(name) || "fi".equals(name)
-                || "then".equals(name) || "else".equals(name)
-                || "while".equals(name) || "do".equals(name)
-                || "done".equals(name) || "case".equals(name)
-                || "esac".equals(name) || "function".equals(name)
-                || "return".equals(name) || "shift".equals(name)
-                || "cd".equals(name) || "command".equals(name)) {
-            return false;
-        }
-        return true;
-    }
-
-    private static boolean isSymlink(File f) {
-        try {
-            return !f.getCanonicalPath().equals(f.getAbsolutePath())
-                || java.nio.file.Files.isSymbolicLink(f.toPath());
-        } catch (Exception e) {
-            return false;
-        }
     }
 }

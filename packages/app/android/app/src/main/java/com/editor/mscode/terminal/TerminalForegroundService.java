@@ -54,7 +54,7 @@ public class TerminalForegroundService extends Service {
     @Override
     public IBinder onBind(Intent intent) { return binder; }
 
-    // ─── Event callback ───────────────────────────────────────────────────────
+    // ─── Event callback ───
 
     public interface EventCallback {
         void onData(String sessionId, String data);
@@ -79,7 +79,7 @@ public class TerminalForegroundService extends Service {
         if (eventCallback != null) eventCallback.onLog(msg);
     }
 
-    // ─── Setup ────────────────────────────────────────────────────────────────
+    // ─── Setup ───
 
     public boolean isRootfsReady() {
         return rootfs.isRootfsReady();
@@ -89,7 +89,6 @@ public class TerminalForegroundService extends Service {
         return rootfs.isBootstrapReady();
     }
 
-    /** True once libtermux-exec.so is bundled — enables clang/gcc-style multi-process toolchains. */
     public boolean isTermuxExecReady() {
         return rootfs.isTermuxExecAvailable();
     }
@@ -98,17 +97,11 @@ public class TerminalForegroundService extends Service {
         return rootfs.getPrefixPath();
     }
 
-    /**
-     * Native + Termux bootstrap setup.
-     * Ensures busybox, home/tmp, then downloads/extracts $PREFIX (filesDir/usr).
-     * Alpine / proot are intentionally skipped.
-     */
     public void ensureSetup(String arch) throws Exception {
         synchronized (rootfsLock) {
             rootfs.ensureNativeBinaries();
             rootfs.ensureBootstrap(arch);
         }
-        // Shared env for background pkg/git (taskManager) even before a PTY session
         if (scriptWriter != null) {
             try {
                 scriptWriter.write(rootfs.getFilesDir() + "/mscode_env.sh", rootfs.getHomePath());
@@ -118,14 +111,6 @@ public class TerminalForegroundService extends Service {
         }
     }
 
-    /**
-     * Install Termux packages into $PREFIX (online).
-     * Bootstrap must already be ready.
-     *
-     * @param packages  e.g. ["git", "curl"]
-     * @param arch      device ABI (aarch64 / arm / x86_64)
-     * @return summary text
-     */
     public String pkgInstall(java.util.List<String> packages, String arch) throws Exception {
         synchronized (rootfsLock) {
             if (!rootfs.isBootstrapReady()) {
@@ -141,7 +126,7 @@ public class TerminalForegroundService extends Service {
         return installer.listInstalled();
     }
 
-    // ─── State ────────────────────────────────────────────────────────────────
+    // ─── State ───
 
     private final ConcurrentHashMap<String, TerminalSession> sessions
         = new ConcurrentHashMap<>();
@@ -155,7 +140,7 @@ public class TerminalForegroundService extends Service {
     private PowerManager.WakeLock wakeLock;
     private boolean wakeLockHeld = false;
 
-    // ─── Lifecycle ────────────────────────────────────────────────────────────
+    // ─── Lifecycle ───
 
     @Override
     public void onCreate() {
@@ -173,7 +158,6 @@ public class TerminalForegroundService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-        // Re-assert foreground on every start (required after process death / demotion)
         int n = sessions != null ? sessions.size() : 0;
         startAsForeground(n > 0
                 ? ("Terminal running — " + n + " session" + (n == 1 ? "" : "s"))
@@ -181,7 +165,6 @@ public class TerminalForegroundService extends Service {
         return START_STICKY;
     }
 
-    /** API 29+ must pass foregroundServiceType matching the manifest. */
     private void startAsForeground(String text) {
         Notification n = buildNotification(text);
         if (Build.VERSION.SDK_INT >= 34) {
@@ -201,24 +184,13 @@ public class TerminalForegroundService extends Service {
         super.onDestroy();
     }
 
-    // ─── Public API ───────────────────────────────────────────────────────────
+    // ─── Public API ───
 
     public void initBuilder(String nativeLibDir) {
         this.builder = new ProotCommandBuilder(rootfs, nativeLibDir);
-        // Default: native mode (no proot)
         this.builder.setUseNative(true);
     }
 
-    /**
-     * Starts a new PTY terminal session (native busybox + Termux $PREFIX).
-     *
-     * @param sessionId   Unique ID.
-     * @param projectPath Android path to open in the terminal.
-     * @param type        "local" | "server".
-     * @param arch        Device ABI (used for bootstrap if needed).
-     * @param rows        Initial terminal rows.
-     * @param cols        Initial terminal columns.
-     */
     public void startSession(String sessionId, String projectPath,
                              String type, String arch,
                              int rows, int cols) throws Exception {
@@ -229,10 +201,8 @@ public class TerminalForegroundService extends Service {
         if (builder == null)
             throw new IllegalStateException("Builder not initialised — call initBuilder() first");
 
-        // Native + bootstrap (no Alpine / proot)
         synchronized (rootfsLock) {
             rootfs.ensureNativeBinaries();
-            // Bootstrap is best-effort on session start — full install via initSetup()
             try {
                 if (!rootfs.isBootstrapReady()) {
                     rootfs.ensureBootstrap(arch);
@@ -243,17 +213,14 @@ public class TerminalForegroundService extends Service {
             }
         }
 
-        // Cwd: use Android path directly (no proot mapping)
         String cwd = (projectPath != null && new File(projectPath).isDirectory())
             ? projectPath
             : rootfs.getHomePath();
 
-        // Write per-session init script
         String initPath = rootfs.getFilesDir() + "/init_" + sessionId + ".sh";
         scriptWriter.write(initPath, cwd);
 
         String[] cmd = builder.buildSessionCommand(initPath);
-        // ENV=initPath so interactive sh sources bb()/aliases + PREFIX
         String[] env = builder.buildSessionEnv(initPath);
 
         emitLog("🚀 Starting [" + sessionId + "] native " + type
@@ -265,7 +232,6 @@ public class TerminalForegroundService extends Service {
         sessions.put(sessionId, session);
 
         int[] pids = new int[1];
-        // Working directory = home (init script will cd to project)
         session.ptyFd = PtyEngine.createSubprocess(cmd, env,
                                                     rootfs.getHomePath(),
                                                     pids, rows, cols);
@@ -355,16 +321,12 @@ public class TerminalForegroundService extends Service {
         return new ArrayList<>(sessions.keySet());
     }
 
-    // ─── Background execute (no PTY) ─────────────────────────────────────────
+    // ─── Background execute (no PTY) ───
 
-    /**
-     * Runs a command with native busybox ash -c (no PTY).
-     */
     public BackgroundResult backgroundExecute(String command) throws Exception {
         if (builder == null)
             throw new IllegalStateException("Builder not initialised");
 
-        // Ensure dirs exist
         synchronized (rootfsLock) {
             rootfs.ensureNativeBinaries();
         }
@@ -393,16 +355,14 @@ public class TerminalForegroundService extends Service {
         }
     }
 
-    // ─── Streaming Background Execute ─────────────────────────────────────────
+    // ─── Streaming Background Execute ───
 
     public interface BackgroundStreamListener {
         void onData(String data);
     }
 
     private final Map<String, Process> backgroundProcesses = new ConcurrentHashMap<>();
-
-    private final ConcurrentHashMap<Integer, ProcessServer> processServers
-        = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, ProcessServer> processServers = new ConcurrentHashMap<>();
 
     public interface BackgroundProcessListener {
         void onData(String data);
@@ -452,12 +412,8 @@ public class TerminalForegroundService extends Service {
         if (p != null) p.destroy();
     }
 
-    // ─── LSP / ProcessServer ─────────────────────────────────────────────────
+    // ─── LSP / ProcessServer ───
 
-    /**
-     * Starts a WebSocket↔stdio bridge.
-     * Command runs under native busybox ash -c.
-     */
     public int spawnProcessServer(String shellCommand) throws Exception {
         if (builder == null)
             throw new IllegalStateException("Builder not initialised");
@@ -466,9 +422,6 @@ public class TerminalForegroundService extends Service {
             rootfs.ensureNativeBinaries();
         }
 
-        // Rewrite common langserver CLIs so they run via node + linker.
-        // PREFIX/bin/* is not directly executable (targetSdk>28); hyphenated
-        // names cannot be shell functions either.
         String rewritten = rewriteLspCommand(shellCommand);
         emitLog("🔌 LSP cmd: " + rewritten);
 
@@ -483,20 +436,14 @@ public class TerminalForegroundService extends Service {
         return port;
     }
 
-    /**
-     * Map "pyright-langserver --stdio" → run the JS entry via node (elf/linker).
-     * Falls back to the original command when no rewrite applies.
-     */
     private String rewriteLspCommand(String shellCommand) {
         if (shellCommand == null) return "";
         String s = shellCommand.trim();
         String prefix = rootfs.getPrefixPath();
 
-        // pyright (npm global under $PREFIX)
         if (s.startsWith("pyright-langserver") || s.contains("pyright-langserver")) {
             String js = prefix + "/lib/node_modules/pyright/dist/pyright-langserver.js";
             String node = prefix + "/bin/node";
-            // node is wrapped by mscode_env.sh as a function using linker
             return "if [ -f \"" + js + "\" ]; then "
                  + "node \"" + js + "\" --stdio; "
                  + "else "
@@ -504,7 +451,6 @@ public class TerminalForegroundService extends Service {
                  + "fi";
         }
 
-        // typescript-language-server
         if (s.startsWith("typescript-language-server") || s.contains("typescript-language-server")) {
             String js = prefix + "/lib/node_modules/typescript-language-server/lib/cli.mjs";
             return "if [ -f \"" + js + "\" ]; then "
@@ -514,12 +460,17 @@ public class TerminalForegroundService extends Service {
                  + "fi";
         }
 
-        // clangd — real ELF under $PREFIX/bin; must run via linker (targetSdk>28)
+        // clangd — real ELF under $PREFIX/bin; must run via proot to fix header resolving and sub-execs
         if (s.startsWith("clangd") || s.matches("(?s).*\\bclangd\\b.*")) {
             String clangd = prefix + "/bin/clangd";
+            String proot = prefix + "/bin/proot";
             // Keep user flags after the binary name
             String flags = s.replaceFirst("^clangd\\s*", "").trim();
-            return "if [ -n \"$MSCODE_LINKER\" ] && [ -f \"" + clangd + "\" ]; then "
+            
+            // proot এর মাধ্যমে clangd রান করার লজিক
+            return "if [ -n \"$MSCODE_LINKER\" ] && [ -f \"" + proot + "\" ] && [ -f \"" + clangd + "\" ]; then "
+                 + "\"$MSCODE_LINKER\" \"" + proot + "\" -b /data -b /system -b /dev -b /proc -b /storage -w \"$PWD\" \"" + clangd + "\" " + flags + "; "
+                 + "elif [ -n \"$MSCODE_LINKER\" ] && [ -f \"" + clangd + "\" ]; then "
                  + "\"$MSCODE_LINKER\" \"" + clangd + "\" " + flags + "; "
                  + "else "
                  + "clangd " + flags + "; "
@@ -546,13 +497,13 @@ public class TerminalForegroundService extends Service {
         }
     }
 
-    // ─── Hostname ─────────────────────────────────────────────────────────────
+    // ─── Hostname ───
 
     public void setHostname(String name) throws IOException {
         rootfs.saveHostname(name);
     }
 
-    // ─── WakeLock ─────────────────────────────────────────────────────────────
+    // ─── WakeLock ───
 
     public void acquireWakeLock() {
         if (wakeLockHeld) return;
@@ -576,11 +527,10 @@ public class TerminalForegroundService extends Service {
 
     public boolean isWakeLockHeld() { return wakeLockHeld; }
 
-    // ─── Notification ─────────────────────────────────────────────────────────
+    // ─── Notification ───
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // DEFAULT (not LOW) so the ongoing notification stays visible in the shade
             NotificationChannel ch = new NotificationChannel(
                 CHANNEL_ID, "MS Code Terminal",
                 NotificationManager.IMPORTANCE_DEFAULT);
@@ -591,7 +541,6 @@ public class TerminalForegroundService extends Service {
     }
 
     private void updateNotification(String text) {
-        // Prefer re-asserting FGS so Android doesn't demote the service
         try {
             startAsForeground(text);
         } catch (Exception e) {
@@ -628,7 +577,7 @@ public class TerminalForegroundService extends Service {
         return b.build();
     }
 
-    // ─── Helpers ─────────────────────────────────────────────────────────────
+    // ─── Helpers ───
 
     private void cleanupSession(TerminalSession s) {
         if (s == null) return;
