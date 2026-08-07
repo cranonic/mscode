@@ -231,12 +231,17 @@ export function useLspSync(editorInstance: any, tabId: string) {
     }
 
   
+    // Same language but WebSocket died (app backgrounded / Android killed process)
+    // → drop stale port cache so startServer respawns instead of reconnecting dead port.
+    if (currentLang === langId && !activeLspService.isConnected) {
+      activeProcessManager.invalidatePort?.(langId);
+      activeProcessManager.stopServer?.(langId);
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     // SAME language, server process running, WebSocket connected
     //    (may still be initializing — race window handled via waitUntilReady)
     //    → DON'T reconnect. Never call connect() while a connection is live.
-    //      clangd supports only ONE client; a second connect() destroys the
-    //      existing session and causes "LSP initialize timeout".
     // ══════════════════════════════════════════════════════════════════════
     if (
       currentLang === langId &&
@@ -351,8 +356,7 @@ export function useLspSync(editorInstance: any, tabId: string) {
         // connect() opens WebSocket + does LSP initialize handshake
         activeLspService.connect(langId, `ws://127.0.0.1:${port}`, lspOptions);
 
-        // Wait for initialized flag (WebSocket onopen + initialize() are async)
-        // Poll with a short timeout so we can send didOpen after handshake
+        // Wait for handshake — allow longer on cold Android start
         await new Promise<void>((resolve, reject) => {
           const start    = Date.now();
           const interval = setInterval(() => {
@@ -360,19 +364,20 @@ export function useLspSync(editorInstance: any, tabId: string) {
               clearInterval(interval);
               resolve();
             }
-            if (Date.now() - start > 15_000) {
+            if (Date.now() - start > 45_000) {
               clearInterval(interval);
               reject(new Error('LSP initialize timeout'));
             }
           }, 100);
         });
 
-        //send didOpen for the current model immediately after handshake
         activeLspService.registerModelUri(model, fileUri);
         activeLspService.notifyDocumentOpen(model);
 
         outputChannel.appendLine(`[INFO] ${refractorLangId(langId)} LSP ready.`);
         outputChannel.show();
+
+        activeProcessManager.markAlive?.(langId);
 
         useStatusBarStore.getState().updateItem('lsp-status', {
           label: `{${refractorLangId(langId)}}`,
@@ -387,18 +392,41 @@ export function useLspSync(editorInstance: any, tabId: string) {
         lastNotifiedLang = langId;
 
       } catch (err: any) {
-        outputChannel.appendLine(`[ERROR] ${err.message ?? err}`);
+        const msg = err?.message ?? String(err);
+        outputChannel.appendLine(`[ERROR] ${msg}`);
         console.error(`[LSP-Sync] Boot error for ${langId}:`, err);
+
+        // Stale port after background kill — clear cache and auto-retry once
+        activeLspService.disconnect();
+        activeProcessManager.stopServer(langId);
+        activeProcessManager.invalidatePort?.(langId);
+
+        if (!(boot as any)._retried) {
+          (boot as any)._retried = true;
+          outputChannel.appendLine(`[INFO] Retrying ${langId} language server (previous instance was dead)…`);
+          bootingRef.current = false;
+          setTimeout(() => {
+            if (!bootingRef.current) {
+              bootingRef.current = true;
+              boot();
+            }
+          }, 400);
+          return;
+        }
+
         useStatusBarStore.getState().updateItem('lsp-status', {
           label: 'LSP Error', icon: 'error', spin: false,
           color: 'var(--vscode-errorForeground)',
         });
         useNotificationStore.getState().updateNotification(notifId, {
           type: 'error',
-          message: `Boot failed: ${err.message}`,
+          message: `Boot failed: ${msg}`,
         });
       } finally {
-        bootingRef.current = false;
+        // Don't clear bootingRef if we scheduled a retry above
+        if (!(boot as any)._retried || activeLspService.initialized) {
+          bootingRef.current = false;
+        }
       }
     };
 

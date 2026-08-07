@@ -16,6 +16,8 @@ export class LspProcessManager {
     // ─── Port registry ────────────────────────────────────────────────────────
     // Tracks every language that has a running server: language → port.
     private activePorts = new Map<string, number>();
+    /** Languages whose WebSocket handshake completed (Android may kill the process later). */
+    private aliveLanguages = new Set<string>();
     private pendingStarts = new Map<string, Promise<number | null>>();
 
     // ─── Serial installation queue ────────────────────────────────────────────
@@ -101,12 +103,18 @@ export class LspProcessManager {
         const config = this.dynamicConfigs[language] || LANGUAGE_CONFIGS[language];
         if (!config) return Promise.resolve(null);
 
-        // Fast path 1: server is already up and running.
+        // Fast path 1: only reuse port if handshake previously succeeded AND we
+        // have not marked it dead (background kill clears aliveLanguages).
         const cached = this.activePorts.get(language);
-        if (cached) return Promise.resolve(cached);
+        if (cached && this.aliveLanguages.has(language)) {
+            return Promise.resolve(cached);
+        }
+        if (cached && !this.aliveLanguages.has(language)) {
+            // Stale cache after process death — drop it and respawn below
+            this.activePorts.delete(language);
+        }
 
         // Fast path 2: an install for this exact language is already in progress.
-        // Return the same Promise so the caller just awaits the existing work.
         const inflight = this.pendingStarts.get(language);
         if (inflight) return inflight;
 
@@ -253,10 +261,21 @@ export class LspProcessManager {
      * Always attempts a native killLsp so the language-server process
      * and listening WebSocket are torn down — not just the JS port map.
      */
+    /** Call after LSP initialize succeeds. */
+    public markAlive(language: string): void {
+        this.aliveLanguages.add(language);
+    }
+
+    /** Call when WebSocket dies / boot fails — forces respawn on next startServer. */
+    public invalidatePort(language: string): void {
+        this.activePorts.delete(language);
+        this.aliveLanguages.delete(language);
+    }
+
     public stopServer(language?: string): void {
         const kill = (lang: string, port: number) => {
             this.activePorts.delete(lang);
-            // Fire-and-forget native teardown
+            this.aliveLanguages.delete(lang);
             NativeTerminal.killLsp({ port }).catch((err: any) => {
                 console.warn(`[LSP] killLsp(${port}) for ${lang} failed:`, err);
             });
@@ -267,7 +286,6 @@ export class LspProcessManager {
             if (port != null) kill(language, port);
             else this.activePorts.delete(language);
         } else {
-            // Snapshot then clear — kill every tracked server
             const entries = [...this.activePorts.entries()];
             this.activePorts.clear();
             for (const [lang, port] of entries) {
@@ -275,7 +293,6 @@ export class LspProcessManager {
                     console.warn(`[LSP] killLsp(${port}) for ${lang} failed:`, err);
                 });
             }
-            // Belt-and-suspenders: also ask native to wipe any orphans
             NativeTerminal.killAllLsp?.().catch(() => {});
         }
     }

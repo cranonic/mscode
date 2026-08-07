@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.os.Binder;
 import android.os.Build;
 import android.os.IBinder;
@@ -157,7 +158,7 @@ public class TerminalForegroundService extends Service {
         rootfs        = new RootfsManager(this);
         scriptWriter  = new InitScriptWriter(rootfs);
         createNotificationChannel();
-        startForeground(NOTIF_ID, buildNotification("Terminal ready"));
+        startAsForeground("Terminal ready");
         emitLog("TerminalForegroundService started (native + Termux bootstrap mode)");
     }
 
@@ -165,8 +166,26 @@ public class TerminalForegroundService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
             stopSelf();
+            return START_NOT_STICKY;
         }
+        // Re-assert foreground on every start (required after process death / demotion)
+        int n = sessions != null ? sessions.size() : 0;
+        startAsForeground(n > 0
+                ? ("Terminal running — " + n + " session" + (n == 1 ? "" : "s"))
+                : "Terminal ready");
         return START_STICKY;
+    }
+
+    /** API 29+ must pass foregroundServiceType matching the manifest. */
+    private void startAsForeground(String text) {
+        Notification n = buildNotification(text);
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+        } else if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+        } else {
+            startForeground(NOTIF_ID, n);
+        }
     }
 
     @Override
@@ -544,18 +563,25 @@ public class TerminalForegroundService extends Service {
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // DEFAULT (not LOW) so the ongoing notification stays visible in the shade
             NotificationChannel ch = new NotificationChannel(
                 CHANNEL_ID, "MS Code Terminal",
-                NotificationManager.IMPORTANCE_LOW);
-            ch.setDescription("Keeps terminal sessions alive in the background");
+                NotificationManager.IMPORTANCE_DEFAULT);
+            ch.setDescription("Keeps terminal & LSP sessions alive in the background");
+            ch.setShowBadge(false);
             getSystemService(NotificationManager.class).createNotificationChannel(ch);
         }
     }
 
     private void updateNotification(String text) {
-        Notification n = buildNotification(text);
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        if (nm != null) nm.notify(NOTIF_ID, n);
+        // Prefer re-asserting FGS so Android doesn't demote the service
+        try {
+            startAsForeground(text);
+        } catch (Exception e) {
+            Notification n = buildNotification(text);
+            NotificationManager nm = getSystemService(NotificationManager.class);
+            if (nm != null) nm.notify(NOTIF_ID, n);
+        }
     }
 
     private Notification buildNotification(String text) {
@@ -564,14 +590,25 @@ public class TerminalForegroundService extends Service {
         PendingIntent stopPi = PendingIntent.getService(this, 0, stopIntent,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
-        return new NotificationCompat.Builder(this, CHANNEL_ID)
+        Intent openIntent = getPackageManager().getLaunchIntentForPackage(getPackageName());
+        PendingIntent contentPi = openIntent != null
+            ? PendingIntent.getActivity(this, 0, openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE)
+            : null;
+
+        NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("MS Code Terminal")
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_send)
+            .setSmallIcon(android.R.drawable.ic_menu_manage)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(android.R.drawable.ic_delete, "Stop", stopPi)
-            .build();
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPi);
+
+        if (contentPi != null) b.setContentIntent(contentPi);
+        return b.build();
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
