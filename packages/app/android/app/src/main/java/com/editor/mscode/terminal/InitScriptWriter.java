@@ -294,11 +294,13 @@ public class InitScriptWriter {
         sb.append("    -w \"$PWD\" \\\n");
         sb.append("    \"$@\"\n");
         sb.append("}\n");
-        sb.append("clang()   { _mscode_proot \"$PREFIX/bin/clang\" \"$@\"; }\n");
-        sb.append("clang++() { _mscode_proot \"$PREFIX/bin/clang++\" \"$@\"; }\n");
-        sb.append("tcc()     { [ -f \"$PREFIX/bin/tcc\" ] && _mscode_proot \"$PREFIX/bin/tcc\" \"$@\"; }\n");
+        // mksh: function names cannot contain '+' — use alias for clang++/g++
+        sb.append("clang() { _mscode_proot \"$PREFIX/bin/clang\" \"$@\"; }\n");
+        sb.append("_mscode_clangxx() { _mscode_proot \"$PREFIX/bin/clang++\" \"$@\"; }\n");
+        sb.append("alias 'clang++'=_mscode_clangxx\n");
+        sb.append("tcc() { [ -f \"$PREFIX/bin/tcc\" ] && _mscode_proot \"$PREFIX/bin/tcc\" \"$@\"; }\n");
         // Run produced binary when cwd is noexec (./a.out Permission denied)
-        sb.append("run()     { _mscode_proot \"$@\"; }\n");
+        sb.append("run() { _mscode_proot \"$@\"; }\n");
         sb.append("\n");
 
         // Write BASH_ENV file so bash scripts get the same wrappers
@@ -322,7 +324,8 @@ public class InitScriptWriter {
         sb.append("    echo 'bb() { [ $# -lt 1 ] && return 1; local a=\"$1\"; shift; ( exec -a \"$a\" \"$BUSYBOX\" \"$@\" ); }'\n");
         sb.append("    echo '_mscode_proot() { \"$MSCODE_PROOT\" --link2symlink --kill-on-exit -0 -r / -b /system -b /data -b /dev -b /proc -b /sys -b /storage -b /sdcard -b /apex -b \"${TMPDIR:-$PREFIX/tmp}:/data/data/com.termux/files/usr/tmp\" -b \"${TMPDIR:-$PREFIX/tmp}:/tmp\" -w \"$PWD\" \"$@\"; }'\n");
         sb.append("    echo 'clang() { _mscode_proot \"$PREFIX/bin/clang\" \"$@\"; }'\n");
-        sb.append("    echo 'clang++() { _mscode_proot \"$PREFIX/bin/clang++\" \"$@\"; }'\n");
+        sb.append("    echo '_mscode_clangxx() { _mscode_proot \"$PREFIX/bin/clang++\" \"$@\"; }'\n");
+        sb.append("    echo \"alias 'clang++'=_mscode_clangxx\"\n");
         // busybox applets as bash functions
         sb.append("    for a in ls cat cp mv rm mkdir grep find tar head tail wc uname clear chmod sed sort awk cut tr uniq basename dirname pwd date touch ln readlink stat which xargs tee ps kill id env seq true false test; do\n");
         sb.append("      echo \"$a() { bb $a \\\"\\$@\\\"; }\"\n");
