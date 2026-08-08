@@ -44,11 +44,12 @@ export const FilePickerToolbar: React.FC<ToolbarProps> = ({
 
       <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
         {currentPath === 'ROOT' && onAddStorage && (
-          <InputAction
-            icon={<Icon name="root-folder-opened" size={16} />}
-            onClick={onAddStorage}
-            title="Add Storage (Document Tree)"
-          />
+          <div title="Add Storage (Document Tree)" style={{ display: 'inline-flex' }}>
+            <InputAction
+              icon={<Icon name="root-folder-opened" size={16} />}
+              onClick={onAddStorage}
+            />
+          </div>
         )}
         {allowCreate && currentPath !== 'ROOT' && (
           <>
