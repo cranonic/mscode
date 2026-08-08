@@ -294,13 +294,51 @@ public class InitScriptWriter {
         sb.append("    -w \"$PWD\" \\\n");
         sb.append("    \"$@\"\n");
         sb.append("}\n");
-        // mksh: function names cannot contain '+' — use alias for clang++/g++
-        sb.append("clang() { _mscode_proot \"$PREFIX/bin/clang\" \"$@\"; }\n");
-        sb.append("_mscode_clangxx() { _mscode_proot \"$PREFIX/bin/clang++\" \"$@\"; }\n");
+        // Pull the argument that follows -o (space form only, not -ofile)
+        sb.append("_mscode_dash_o() {\n");
+        sb.append("  _prev=\n");
+        sb.append("  _o=\n");
+        sb.append("  for _tok in \"$@\"; do\n");
+        sb.append("    [ \"$_prev\" = '-o' ] && _o=\"$_tok\"\n");
+        sb.append("    _prev=\"$_tok\"\n");
+        sb.append("  done\n");
+        sb.append("  [ -n \"$_o\" ] && echo \"$_o\"\n");
+        sb.append("}\n");
+        // Compile under proot, then chmod +x on -o output (proot requires x-bit)
+        sb.append("_mscode_compile() {\n");
+        sb.append("  _cc=\"$1\"; shift\n");
+        sb.append("  _mscode_proot \"$_cc\" \"$@\"\n");
+        sb.append("  _st=$?\n");
+        sb.append("  if [ $_st -eq 0 ]; then\n");
+        sb.append("    _out=$(_mscode_dash_o \"$@\")\n");
+        sb.append("    [ -n \"$_out\" ] && [ -f \"$_out\" ] && chmod +x \"$_out\" 2>/dev/null\n");
+        sb.append("  fi\n");
+        sb.append("  return $_st\n");
+        sb.append("}\n");
+        // mksh: function names cannot contain '+' — use alias for clang++
+        sb.append("clang() { _mscode_compile \"$PREFIX/bin/clang\" \"$@\"; }\n");
+        sb.append("_mscode_clangxx() { _mscode_compile \"$PREFIX/bin/clang++\" \"$@\"; }\n");
         sb.append("alias 'clang++'=_mscode_clangxx\n");
-        sb.append("tcc() { [ -f \"$PREFIX/bin/tcc\" ] && _mscode_proot \"$PREFIX/bin/tcc\" \"$@\"; }\n");
-        // Run produced binary when cwd is noexec (./a.out Permission denied)
-        sb.append("run() { _mscode_proot \"$@\"; }\n");
+        sb.append("tcc() { [ -f \"$PREFIX/bin/tcc\" ] && _mscode_compile \"$PREFIX/bin/tcc\" \"$@\"; }\n");
+        // run: absolute path + chmod +x, then proot (sdcard is mount-noexec)
+        sb.append("run() {\n");
+        sb.append("  if [ $# -lt 1 ]; then\n");
+        sb.append("    echo 'usage: run <binary> [args…]' >&2\n");
+        sb.append("    return 1\n");
+        sb.append("  fi\n");
+        sb.append("  _run_bin=\"$1\"; shift\n");
+        sb.append("  case \"$_run_bin\" in\n");
+        sb.append("    /*) ;;\n");
+        sb.append("    ./*) _run_bin=\"$PWD/${_run_bin#./}\" ;;\n");
+        sb.append("    *)  _run_bin=\"$PWD/$_run_bin\" ;;\n");
+        sb.append("  esac\n");
+        sb.append("  if [ ! -f \"$_run_bin\" ]; then\n");
+        sb.append("    echo \"run: not found: $_run_bin\" >&2\n");
+        sb.append("    return 127\n");
+        sb.append("  fi\n");
+        sb.append("  chmod +x \"$_run_bin\" 2>/dev/null\n");
+        sb.append("  _mscode_proot \"$_run_bin\" \"$@\"\n");
+        sb.append("}\n");
         sb.append("\n");
 
         // Write BASH_ENV file so bash scripts get the same wrappers
@@ -347,7 +385,9 @@ public class InitScriptWriter {
         sb.append("_mscode_write_clangd_config() {\n");
         sb.append("  mkdir -p \"$HOME/.config/clangd\" \"$PREFIX/etc/clangd\"\n");
         sb.append("  _res=\"$(ls -d \"$PREFIX\"/lib/clang/* 2>/dev/null | tail -1)\"\n");
-        sb.append("  [ -n \"$_res\" ] || _res=\"$PREFIX/lib/clang/latest\"\n");
+        sb.append("  if [ -z \"$_res\" ] || [ ! -d \"$_res/include\" ]; then\n");
+        sb.append("    _res=\"$PREFIX/lib/clang/latest\"\n");
+        sb.append("  fi\n");
         sb.append("  _arch=aarch64-linux-android\n");
         sb.append("  case \"$(bb uname -m 2>/dev/null)\" in\n");
         sb.append("    armv7*|arm) _arch=arm-linux-androideabi ;;\n");
@@ -356,9 +396,16 @@ public class InitScriptWriter {
         sb.append("  esac\n");
         sb.append("  {\n");
         sb.append("    echo 'CompileFlags:'\n");
+        sb.append("    if [ -f \"$PREFIX/bin/clang\" ]; then\n");
+        sb.append("      echo \"  Compiler: $PREFIX/bin/clang\"\n");
+        sb.append("    fi\n");
         sb.append("    echo '  Add:'\n");
         sb.append("    echo \"    - --sysroot=$PREFIX\"\n");
-        sb.append("    echo \"    - -resource-dir=$_res\"\n");
+        sb.append("    if [ -d \"$_res\" ]; then\n");
+        sb.append("      echo \"    - -resource-dir=$_res\"\n");
+        sb.append("      echo \"    - -isystem\"\n");
+        sb.append("      echo \"    - $_res/include\"\n");
+        sb.append("    fi\n");
         sb.append("    echo \"    - -isystem\"\n");
         sb.append("    echo \"    - $PREFIX/include\"\n");
         sb.append("    echo \"    - -isystem\"\n");
@@ -648,22 +695,48 @@ public class InitScriptWriter {
         }
         sb.append("fi\n");
 
-        byte[] bytes = sb.toString().getBytes("UTF-8");
+        writeBytes(outputPath, sb.toString().getBytes("UTF-8"));
+    }
+
+    /**
+     * Shared env for background / LSP — always anchored at $HOME, never a
+     * session project cwd (avoids stale -I. when clangd sources this file).
+     */
+    public void writeSharedEnv() throws IOException {
+        // Re-use write() with home as cwd so cd lands in HOME
+        write(rootfs.getFilesDir() + "/mscode_env.sh", rootfs.getHomePath());
+    }
+
+    private void writeBytes(String outputPath, byte[] bytes) throws IOException {
         File f = new File(outputPath);
-        f.getParentFile().mkdirs();
+        File parent = f.getParentFile();
+        if (parent != null) parent.mkdirs();
         try (FileOutputStream fos = new FileOutputStream(f)) {
             fos.write(bytes);
         }
         //noinspection ResultOfMethodCallIgnored
         f.setReadable(true, false);
+        validateSyntax(outputPath);
+    }
 
-        // Shared env for background tasks (taskManager / pkg install git)
-        File shared = new File(rootfs.getFilesDir(), "mscode_env.sh");
-        try (FileOutputStream fos = new FileOutputStream(shared)) {
-            fos.write(bytes);
+    /** Logcat alert if generated script has a syntax error (mksh/sh -n). */
+    private void validateSyntax(String path) {
+        try {
+            Process p = new ProcessBuilder("/system/bin/sh", "-n", path)
+                    .redirectErrorStream(true)
+                    .start();
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[1024];
+            int n;
+            java.io.InputStream is = p.getInputStream();
+            while ((n = is.read(buf)) != -1) bos.write(buf, 0, n);
+            if (p.waitFor() != 0) {
+                android.util.Log.e("InitScriptWriter",
+                        "script syntax error (" + path + "): " + bos.toString("UTF-8"));
+            }
+        } catch (Exception e) {
+            android.util.Log.w("InitScriptWriter", "syntax check skipped: " + e.getMessage());
         }
-        //noinspection ResultOfMethodCallIgnored
-        shared.setReadable(true, false);
     }
 
     public void cleanup(String outputPath) {

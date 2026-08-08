@@ -103,10 +103,10 @@ public class TerminalForegroundService extends Service {
             rootfs.ensureNativeBinaries();
             rootfs.ensureBootstrap(arch);
         }
-        // Shared env for background pkg/git (taskManager) even before a PTY session
+        // Shared env for background pkg/git / LSP — always HOME-anchored
         if (scriptWriter != null) {
             try {
-                scriptWriter.write(rootfs.getFilesDir() + "/mscode_env.sh", rootfs.getHomePath());
+                scriptWriter.writeSharedEnv();
             } catch (Exception e) {
                 emitLog("mscode_env.sh write: " + e.getMessage());
             }
@@ -246,6 +246,13 @@ public class TerminalForegroundService extends Service {
         // Write per-session init script
         String initPath = rootfs.getFilesDir() + "/init_" + sessionId + ".sh";
         scriptWriter.write(initPath, cwd);
+        // Keep shared mscode_env.sh fresh (wrappers + clangd config) without
+        // stamping a project cwd into background/LSP jobs
+        try {
+            scriptWriter.writeSharedEnv();
+        } catch (Exception e) {
+            emitLog("mscode_env.sh refresh: " + e.getMessage());
+        }
 
         String[] cmd = builder.buildSessionCommand(initPath);
         // ENV=initPath so interactive sh sources bb()/aliases + PREFIX
