@@ -63,7 +63,10 @@ const trimSeparators = (items: MenuItem[]): MenuItem[] =>
     );
 
 export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested, openSide = 'right' }) => {
-  const { closeMenu } = useMenuStore(); 
+  // Selector (not the whole store) so this component only re-renders when
+  // closeMenu itself changes identity — not on every unrelated store mutation
+  // (e.g. registerMenuItem calls happening anywhere else in the app).
+  const closeMenu = useMenuStore((s) => s.closeMenu);
   
   const menuRef = useRef<HTMLDivElement>(null);
   // Root menu MUST be position:fixed for `top`/`left` to work and for its z-index to
@@ -183,6 +186,50 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested
     }
   }, [style, isNested, items, subPosition]);
   
+  // ─── 1b. OUTSIDE-INTERACTION CLOSE (root menu only) ─────────────────────
+  // This is deliberately NOT an inline onMouseDown/onContextMenu on the
+  // overlay <div> below (that was the actual bug). A right-click fires
+  // `mousedown` first and `contextmenu` second — two separate native events
+  // from the same physical gesture. If the menu opened on the first event,
+  // the overlay got mounted before the second event fired. Since the overlay
+  // now sits on top of the cursor, the browser retargeted that second
+  // `contextmenu` event TO THE OVERLAY, whose own onContextMenu handler
+  // immediately called closeMenu() — so the menu appeared to open and close
+  // in the same instant.
+  //
+  // Attaching the listener here, in useEffect, sidesteps this entirely:
+  // effects run after the browser commits/paints, i.e. strictly after
+  // whatever native event opened the menu has fully finished dispatching.
+  // So this listener can never see — and can never be tricked into reacting
+  // to — the very gesture that opened the menu.
+  useEffect(() => {
+    if (isNested) return; // only the root menu owns this; submenus render inside its DOM subtree
+
+    const isInside = (target: EventTarget | null) =>
+      !!menuRef.current && target instanceof Node && menuRef.current.contains(target);
+
+    const handleOutsideMouseDown = (e: MouseEvent) => {
+      if (!isInside(e.target)) closeMenu();
+    };
+
+    const handleOutsideContextMenu = (e: MouseEvent) => {
+      if (!isInside(e.target)) {
+        e.preventDefault();
+        closeMenu();
+      }
+    };
+
+    // Capture phase: runs before the event can bubble anywhere else,
+    // including through the (now purely visual) overlay.
+    document.addEventListener('mousedown', handleOutsideMouseDown, true);
+    document.addEventListener('contextmenu', handleOutsideContextMenu, true);
+
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideMouseDown, true);
+      document.removeEventListener('contextmenu', handleOutsideContextMenu, true);
+    };
+  }, [isNested, closeMenu]);
+
   // ─── 2. MAIN MENU BACK BUTTON HANDLE ───────────────────────────────────────
   useEffect(() => {
     if (!isNested && items.length > 0) {
@@ -222,11 +269,11 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested
   return (
     <>
       {!isNested && (
-        <div 
-          className="ms-context-menu-overlay" 
-          onMouseDown={(e) => { e.stopPropagation(); closeMenu(); }}
-          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); closeMenu(); }}
-        />
+        // Purely a click/hover-blocking layer now (stops interaction with the
+        // app underneath while the menu is open). Closing is handled by the
+        // document-level listener above — see the comment there for why it
+        // isn't done here anymore.
+        <div className="ms-context-menu-overlay" />
       )}
 
       <div 
