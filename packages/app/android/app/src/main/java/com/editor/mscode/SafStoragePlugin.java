@@ -133,6 +133,15 @@ public class SafStoragePlugin extends Plugin {
         try {
             String docId = DocumentsContract.getTreeDocumentId(treeUri);
             if (docId == null) return null;
+            // URL-decoded form (Termux encodes "/data/data/..." as %2Fdata%2F...)
+            try {
+                docId = java.net.URLDecoder.decode(docId, "UTF-8");
+            } catch (Exception ignored) {}
+
+            // Absolute unix path stored as document id (Termux DocumentsProvider)
+            if (docId.startsWith("/")) {
+                return docId;
+            }
             // primary:Foo → /storage/emulated/0/Foo
             if (docId.startsWith("primary:")) {
                 String rel = docId.substring("primary:".length());
@@ -157,3 +166,4 @@ public class SafStoragePlugin extends Plugin {
         return null;
     }
 }
+

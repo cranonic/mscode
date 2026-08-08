@@ -108,6 +108,7 @@ export const SidebarActions: React.FC<SidebarActionsProps> = ({
 }) => {
   const { openMenu , openMenuDirect} = useMenuStore();
   const anchorRef    = useRef<HTMLDivElement>(null);
+  const actionIconGap : number = "6px" ;
 
   // Merge external contributions registered via menuStore.registerMenuItem(menuId, …)
   const resolved = getResolvedMenu(menuId, actions);
@@ -160,7 +161,7 @@ export const SidebarActions: React.FC<SidebarActionsProps> = ({
   return (
     <div
       ref={anchorRef}
-      style={{ display: 'flex', alignItems: 'center', gap: '0' }}
+      style={{ display: 'flex', alignItems: 'center', gap: actionIconGap }}
       onClick={e => e.stopPropagation()}
     >
       {visibleItems.map((item, idx) =>

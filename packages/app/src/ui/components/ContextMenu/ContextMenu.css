@@ -25,11 +25,11 @@
   transform: scale(0.96);
   will-change: opacity, transform;
   /* snappy open — ~120ms */
-  animation: ms-menu-in 0.12s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+  animation: ms-menu-in 400ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .ms-context-menu.ms-context-menu--closing {
-  animation: ms-menu-out 0.1s cubic-bezier(0.4, 0, 1, 1) forwards;
+  /* animation: ms-menu-out 0.1s cubic-bezier(0.2, 0, 0, 1); */
   pointer-events: none;
 }
 

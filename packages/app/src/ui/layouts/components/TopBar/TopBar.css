@@ -52,7 +52,7 @@
 
 .tab.active { 
   background: var(--ms-tab-active-bg); 
-  border-top: 1px solid var(--ms-accent); 
+  border-top: 3px solid var(--ms-accent); 
 }
 
 /* Unified Action Button (Close / Dirty) */

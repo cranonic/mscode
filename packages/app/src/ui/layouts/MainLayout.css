@@ -130,24 +130,6 @@
   display: none;
 }
 
-.tab {
-  display: flex;
-  align-items: center;
-  padding: 4px 10px;
-  min-width: 100px;
-  background: var(--ms-tab-inactive-bg);
-  border-right: 1px solid var(--ms-border-dark);
-  cursor: pointer;
-  justify-content: space-between;
-  font-size: 13px;
-  height: 100%;
-  position: relative;
-}
-.tab.active { 
-  background: var(--ms-tab-active-bg); 
-  border-top: 1px solid var(--ms-accent); 
-}
-
 /* --- ≡ Hamburger Menu Base --- */
 .hamburger-menu {
   height: 35px;

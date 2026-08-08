@@ -49,6 +49,35 @@ export const FilePickerModal: React.FC = () => {
     }
   }, [isOpen, options]);
 
+
+  const BUILTIN_ROOT_NAMES = new Set(['Internal Storage', 'MS Projects', 'MS System (Data)']);
+
+  const isBuiltinRoot = (path: string, name?: string) => {
+    if (name && BUILTIN_ROOT_NAMES.has(name)) return true;
+    if (path === '/storage/emulated/0') return true;
+    const norm = path.replace(/\/$/, '');
+    if (/\/com\.editor\.mscode\/files$/.test(norm)) return true;
+    if (/\/com\.editor\.mscode\/files\/projects$/.test(norm)) return true;
+    return false;
+  };
+
+  /** Map content:// tree URIs to real paths when document id encodes one (e.g. Termux). */
+  const resolveContentUri = (pathOrUri: string): string => {
+    if (!pathOrUri.startsWith('content://')) return pathOrUri;
+    try {
+      const m = pathOrUri.match(/\/tree\/([^?#]+)/);
+      if (!m) return pathOrUri;
+      let docId = decodeURIComponent(m[1]);
+      if (docId.startsWith('/')) return docId;
+      if (docId.startsWith('primary:')) {
+        const rel = docId.slice('primary:'.length);
+        return rel ? `/storage/emulated/0/${rel}` : '/storage/emulated/0';
+      }
+      if (docId.startsWith('raw:')) return docId.slice(4);
+    } catch { /* ignore */ }
+    return pathOrUri;
+  };
+
   // ── 2. Load Roots (internal + SAF document trees) ──
   const loadRoots = async () => {
     const roots: FileStat[] = [
@@ -80,8 +109,8 @@ export const FilePickerModal: React.FC = () => {
           ? await (fs as any).listSafTrees()
           : [];
       for (const t of trees || []) {
-        const path = t.path || t.uri;
-        if (!path) continue;
+        let path = t.path || (t.uri ? resolveContentUri(t.uri) : '');
+        if (!path || path.startsWith('content://')) continue;
         if (roots.some((r) => r.path === path)) continue;
         roots.push({
           name: t.name || 'External Storage',
@@ -118,21 +147,21 @@ export const FilePickerModal: React.FC = () => {
     try {
       const res = await (fs as any).openFolder?.();
       if (!res?.success) return;
-      const path = res.path || res.uri;
-      if (!path) return;
-      // Persist path-based roots for next open
-      if (res.path) {
-        try {
-          const raw = localStorage.getItem('mscode.extraStorages');
-          const list: Array<{ name: string; path: string }> = raw ? JSON.parse(raw) : [];
-          if (!list.some((x) => x.path === res.path)) {
-            list.push({ name: res.name || 'Storage', path: res.path });
-            localStorage.setItem('mscode.extraStorages', JSON.stringify(list));
-          }
-        } catch {}
+      let path = res.path || (res.uri ? resolveContentUri(res.uri) : '');
+      if (!path || path.startsWith('content://')) {
+        console.warn('[FilePicker] SAF returned no filesystem path', res);
+        return;
       }
+      try {
+        const raw = localStorage.getItem('mscode.extraStorages');
+        const list: Array<{ name: string; path: string }> = raw ? JSON.parse(raw) : [];
+        if (!list.some((x) => x.path === path)) {
+          list.push({ name: res.name || 'Storage', path });
+          localStorage.setItem('mscode.extraStorages', JSON.stringify(list));
+        }
+      } catch {}
       await loadRoots();
-      if (res.path) setCurrentPath(res.path);
+      setCurrentPath(path);
     } catch (e) {
       console.error('[FilePicker] Add Storage failed', e);
     }
@@ -141,7 +170,15 @@ export const FilePickerModal: React.FC = () => {
   // ── 3. Read Files & Manage Root View ──
   const refreshFiles = () => {
     if (currentPath !== 'ROOT') {
-      fs.readDir(currentPath).then(res => setAllItems(res || []));
+      const path = resolveContentUri(currentPath);
+      if (path !== currentPath && !path.startsWith('content://')) {
+        setCurrentPath(path);
+      }
+      if (path.startsWith('content://')) {
+        setAllItems([]);
+        return;
+      }
+      fs.readDir(path).then(res => setAllItems(res || [])).catch(() => setAllItems([]));
     }
   };
 
@@ -202,7 +239,7 @@ export const FilePickerModal: React.FC = () => {
 
     if (openMode === 'singleClick') {
       if (item.isDirectory) {
-        setCurrentPath(item.path);
+        setCurrentPath(resolveContentUri(item.path));
         setSelectedPaths(new Set());
       } else if (options!.mode === 'file') {
         closePicker(item.path); 
@@ -213,7 +250,7 @@ export const FilePickerModal: React.FC = () => {
   const handleItemDoubleClick = (item: FileStat) => {
     if (openMode === 'doubleClick') {
       if (item.isDirectory) {
-        setCurrentPath(item.path);
+        setCurrentPath(resolveContentUri(item.path));
         setSelectedPaths(new Set());
       } else if (options!.mode === 'file') {
         closePicker(item.path);
@@ -244,7 +281,50 @@ export const FilePickerModal: React.FC = () => {
   // ── 7. Context Menu ──
   const handleContextMenu = (e: React.MouseEvent, item?: FileStat) => {
     e.preventDefault();
-    if (currentPath === 'ROOT') return; 
+
+    if (currentPath === 'ROOT') {
+      if (!item || isBuiltinRoot(item.path, item.name)) return;
+      openMenu('filepicker/storage-root', e.clientX, e.clientY, [
+        {
+          id: 'rename-storage',
+          label: 'Rename',
+          icon: 'edit',
+          onClick: () => {
+            const next = window.prompt('Rename storage', item.name);
+            if (!next || !next.trim()) return;
+            try {
+              const raw = localStorage.getItem('mscode.extraStorages');
+              const list: Array<{ name: string; path: string }> = raw ? JSON.parse(raw) : [];
+              const i = list.findIndex((x) => x.path === item.path);
+              if (i >= 0) {
+                list[i].name = next.trim();
+                localStorage.setItem('mscode.extraStorages', JSON.stringify(list));
+              }
+            } catch {}
+            setRootStorages((prev) =>
+              prev.map((r) => (r.path === item.path ? { ...r, name: next.trim() } : r)),
+            );
+          },
+        },
+        {
+          id: 'remove-storage',
+          label: 'Remove',
+          icon: 'trash',
+          onClick: () => {
+            try {
+              const raw = localStorage.getItem('mscode.extraStorages');
+              const list: Array<{ name: string; path: string }> = raw ? JSON.parse(raw) : [];
+              localStorage.setItem(
+                'mscode.extraStorages',
+                JSON.stringify(list.filter((x) => x.path !== item.path)),
+              );
+            } catch {}
+            setRootStorages((prev) => prev.filter((r) => r.path !== item.path));
+          },
+        },
+      ]);
+      return;
+    }
 
     if (!item) {
       openMenu('filepicker/bg', e.clientX, e.clientY, [
@@ -256,7 +336,7 @@ export const FilePickerModal: React.FC = () => {
     } else {
       const itemsMenu: any[] = [];
       if (item.isDirectory) {
-        itemsMenu.push({ id: 'o', label: 'Open Folder', icon: 'folder', onClick: () => setCurrentPath(item.path) });
+        itemsMenu.push({ id: 'o', label: 'Open Folder', icon: 'folder', onClick: () => setCurrentPath(resolveContentUri(item.path)) });
         itemsMenu.push({ id: 'pi', label: 'Paste inside', icon: 'folder', disabled: !clipboard, onClick: () => doPaste(item.path) });
         itemsMenu.push({ type: 'separator', id: 's1' });
 
