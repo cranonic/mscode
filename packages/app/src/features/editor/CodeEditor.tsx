@@ -24,6 +24,7 @@ import { usePaletteProviders } from './hooks/usePaletteProviders';
 import { useContextMenuSetup } from './hooks/useContextMenuSetup';
 import { useLspSync } from './hooks/useLspSync';
 import { useStickyHighlight } from './hooks/useStickyHighlight';
+import { useDiagnosticPopup } from '@/features/editor/hooks/useDiagnosticPopup';
 import { useBreadcrumbs } from './components/BreadCrumb/hooks/useBreadcrumbs';
 
 // Refactored Modular Hooks
@@ -99,6 +100,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tabId, filePath }) => {
   // Background Systems Sync Hook bindings
   usePaletteProviders(editorInstance);
   useStatusBarSync(editorInstance);
+  useDiagnosticPopup(editorInstance);
   useLspSync(editorInstance, tabId);
   useTerminalBoot();
   useStickyHighlight(editorInstance);

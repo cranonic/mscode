@@ -10,27 +10,8 @@ import { usePaletteStore } from '@/store/paletteStore';
 import { useQuickKeyboardStore } from '@/store/quickKeyboardStore'; 
 import { useEditorViewStateStore } from '@/features/editor/store/editorViewStateStore';
 import { useNotificationStore } from '@/store/notificationStore';
-import { useTermisStore } from '@/features/termis/store/termisStore';
+// import { useTermisStore } from '@/features/termis/store/termisStore';
 import { useProblemsStore } from '@/features/termis/components/problems/store/problemsStore';
-
-/** Open termis bottom panel on the Problems view (status-bar error/warn click). */
-function openProblemsPanel() {
-  try {
-    const termis = useTermisStore.getState() as any;
-    // Common shapes across revisions
-    if (typeof termis.setActiveView === 'function') termis.setActiveView('problems');
-    if (typeof termis.setVisible === 'function') termis.setVisible(true);
-    if (typeof termis.show === 'function') termis.show();
-    if (typeof termis.setOpen === 'function') termis.setOpen(true);
-    if (typeof termis.open === 'function') termis.open();
-    // Some builds use a panel visibility flag
-    if ('isOpen' in termis && typeof termis.setState === 'function') {
-      termis.setState({ isOpen: true, activeView: 'problems' });
-    }
-  } catch {
-    /* termis not ready */
-  }
-}
 
 // Items Events 
 import { handleLanguageClick } from '../items/language';
@@ -65,28 +46,8 @@ export function useStatusBarSync(editor: monaco.editor.IStandaloneCodeEditor | n
     // Editor-Specific Items (Visible ONLY when code editor is active)
     const editorCondition = "activeTabType == 'code'";
 
-    registerItem({
-      id: 'problems-error',
-      alignment: 'left',
-      priority: 10000,
-      icon: 'error',
-      label: '0',
-      color: '#a44e3c',
-      tooltip: 'Show Problems',
-      onClick: openProblemsPanel,
-      when: editorCondition,
-    });
-    registerItem({
-      id: 'problems-warn',
-      alignment: 'left',
-      priority: 9990,
-      icon: 'warning',
-      label: '0',
-      color: '#6c5e1f',
-      tooltip: 'Show Problems',
-      onClick: openProblemsPanel,
-      when: editorCondition,
-    });
+    registerItem({ id: 'problems-error', alignment: 'left', priority: 10000, icon: 'error', label: '0', color: '#a44e3c', onClick: () => {}, when: editorCondition });
+    registerItem({ id: 'problems-warn', alignment: 'left', priority: 9990, icon: 'warning', label: '0', color: '#6c5e1f', onClick: () => {}, when: editorCondition });
     registerItem({ id: 'cursor-pos', alignment: 'right', priority: 100, label: 'Ln 1, Col 1', when: editorCondition });
     registerItem({ id: 'indent', alignment: 'right', priority: 80, label: 'Spaces: 4', when: editorCondition });
     registerItem({ id: 'encoding', alignment: 'right', priority: 70, label: 'UTF-8', when: editorCondition });
