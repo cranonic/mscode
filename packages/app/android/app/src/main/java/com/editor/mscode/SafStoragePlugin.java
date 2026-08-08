@@ -1,6 +1,7 @@
 package com.editor.mscode;
 
 import android.app.Activity;
+import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.UriPermission;
 import android.database.Cursor;
@@ -8,7 +9,6 @@ import android.net.Uri;
 import android.provider.DocumentsContract;
 
 import androidx.activity.result.ActivityResult;
-import androidx.documentfile.provider.DocumentFile;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -22,8 +22,7 @@ import java.util.List;
 
 /**
  * Android Storage Access Framework (Document Tree) bridge.
- * Lists children via DocumentFile — works for Termux, SD card, USB, etc.
- * where plain filesystem paths are not readable across app sandboxes.
+ * Uses DocumentsContract only (no androidx.documentfile dependency).
  */
 @CapacitorPlugin(name = "SafStorage")
 public class SafStoragePlugin extends Plugin {
@@ -77,7 +76,6 @@ public class SafStoragePlugin extends Plugin {
         ret.put("name", name);
         String path = tryResolvePath(treeUri);
         if (path != null) ret.put("path", path);
-        // Foreign app private dirs are not readable via Filesystem plugin
         ret.put("useSaf", path == null || isForeignAppData(path));
         call.resolve(ret);
     }
@@ -126,9 +124,7 @@ public class SafStoragePlugin extends Plugin {
     }
 
     /**
-     * List children of a tree URI (or a child document URI under that tree).
-     * @param uri  tree URI (content://.../tree/...) or document URI
-     * @param childUri optional child document URI to list instead of tree root
+     * List children via DocumentsContract (works for Termux / SD / USB trees).
      */
     @PluginMethod
     public void listChildren(PluginCall call) {
@@ -139,40 +135,71 @@ public class SafStoragePlugin extends Plugin {
             return;
         }
         try {
-            DocumentFile dir;
-            if (childUriStr != null && !childUriStr.isEmpty()) {
-                dir = DocumentFile.fromSingleUri(getContext(), Uri.parse(childUriStr));
+            Uri input = Uri.parse(
+                childUriStr != null && !childUriStr.isEmpty() ? childUriStr : uriStr
+            );
+            Uri treeUri = findTreeUri(input);
+            if (treeUri == null) {
+                treeUri = input;
+            }
+
+            String docId;
+            String path = input.getPath();
+            if (path != null && path.contains("/document/")) {
+                docId = extractDocumentId(input);
+            } else if (DocumentsContract.isTreeUri(input)) {
+                docId = DocumentsContract.getTreeDocumentId(input);
             } else {
-                dir = DocumentFile.fromTreeUri(getContext(), Uri.parse(uriStr));
-                if (dir == null) {
-                    dir = DocumentFile.fromSingleUri(getContext(), Uri.parse(uriStr));
+                docId = extractDocumentId(input);
+                if (docId == null) {
+                    docId = DocumentsContract.getTreeDocumentId(treeUri);
                 }
             }
-            if (dir == null || !dir.exists()) {
-                call.reject("not_found");
-                return;
-            }
-            if (!dir.isDirectory()) {
-                call.reject("not_directory");
+
+            if (docId == null) {
+                call.reject("no_doc_id");
                 return;
             }
 
+            Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId);
+            ContentResolver resolver = getContext().getContentResolver();
+
+            String[] projection = new String[] {
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE
+            };
+
             JSArray files = new JSArray();
-            DocumentFile[] children = dir.listFiles();
-            if (children != null) {
-                for (DocumentFile child : children) {
-                    JSObject f = new JSObject();
-                    String displayName = child.getName();
-                    if (displayName == null) displayName = "unnamed";
-                    f.put("name", displayName);
-                    f.put("isDirectory", child.isDirectory());
-                    Uri cu = child.getUri();
-                    String u = cu != null ? cu.toString() : "";
-                    f.put("uri", u);
-                    f.put("path", u);
-                    files.put(f);
+            Cursor cursor = resolver.query(childrenUri, projection, null, null, null);
+            if (cursor != null) {
+                try {
+                    int idIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
+                    int nameIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+                    int mimeIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE);
+                    while (cursor.moveToNext()) {
+                        String childDocId = idIdx >= 0 ? cursor.getString(idIdx) : null;
+                        String displayName = nameIdx >= 0 ? cursor.getString(nameIdx) : "unnamed";
+                        String mime = mimeIdx >= 0 ? cursor.getString(mimeIdx) : null;
+                        boolean isDir = DocumentsContract.Document.MIME_TYPE_DIR.equals(mime);
+
+                        Uri childUri = childDocId != null
+                            ? DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
+                            : null;
+
+                        JSObject f = new JSObject();
+                        f.put("name", displayName != null ? displayName : "unnamed");
+                        f.put("isDirectory", isDir);
+                        String u = childUri != null ? childUri.toString() : "";
+                        f.put("uri", u);
+                        f.put("path", u);
+                        files.put(f);
+                    }
+                } finally {
+                    cursor.close();
                 }
             }
+
             JSObject ret = new JSObject();
             ret.put("files", files);
             call.resolve(ret);
@@ -181,9 +208,49 @@ public class SafStoragePlugin extends Plugin {
         }
     }
 
+    private Uri findTreeUri(Uri input) {
+        if (input == null) return null;
+        try {
+            if (DocumentsContract.isTreeUri(input)) {
+                String treeId = DocumentsContract.getTreeDocumentId(input);
+                return DocumentsContract.buildTreeDocumentUri(input.getAuthority(), treeId);
+            }
+        } catch (Exception ignored) {
+        }
+        List<UriPermission> perms = getContext().getContentResolver().getPersistedUriPermissions();
+        for (UriPermission p : perms) {
+            if (!p.isReadPermission()) continue;
+            Uri tree = p.getUri();
+            if (tree == null) continue;
+            if (tree.getAuthority() != null && tree.getAuthority().equals(input.getAuthority())) {
+                return tree;
+            }
+        }
+        return null;
+    }
+
+    private String extractDocumentId(Uri uri) {
+        try {
+            return DocumentsContract.getDocumentId(uri);
+        } catch (Exception ignored) {
+        }
+        try {
+            List<String> segs = uri.getPathSegments();
+            for (int i = 0; i < segs.size() - 1; i++) {
+                if ("document".equals(segs.get(i))) {
+                    return segs.get(i + 1);
+                }
+            }
+            if (DocumentsContract.isTreeUri(uri)) {
+                return DocumentsContract.getTreeDocumentId(uri);
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
     private boolean isForeignAppData(String path) {
         if (path == null) return true;
-        // Another app's private data — not readable via java.io / Capacitor Filesystem
         if (path.startsWith("/data/data/") || path.startsWith("/data/user/")) {
             String pkg = getContext().getPackageName();
             return !path.contains("/" + pkg + "/");
