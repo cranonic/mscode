@@ -103,7 +103,7 @@ export interface IFileSystem {
    * to securely choose active root folder permissions coordinates for workspace mounting.
    * * @returns {Promise<{ success: boolean; name?: string; path?: string }>} Response footprint variables.
    */
-  openFolder?(): Promise<{ success: boolean; name?: string; path?: string; uri?: string }>;
+  openFolder?(): Promise<{ success: boolean; name?: string; path?: string; uri?: string; useSaf?: boolean }>;
   listSafTrees?(): Promise<Array<{ uri: string; name: string; path?: string }>>;
 
   /**

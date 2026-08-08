@@ -74,7 +74,7 @@ export class AndroidFileSystem implements IFileSystem {
    * Opens the system Document Tree picker (SAF) so the user can grant access
    * to any storage volume (SD card, USB, Downloads, …).
    */
-  async openFolder(): Promise<{ success: boolean; name?: string; uri?: string; path?: string }> {
+  async openFolder(): Promise<{ success: boolean; name?: string; uri?: string; path?: string; useSaf?: boolean }> {
     try {
       // Dynamic import keeps web builds from crashing
       const { registerPlugin } = await import('@capacitor/core');
