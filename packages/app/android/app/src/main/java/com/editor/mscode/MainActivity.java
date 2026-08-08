@@ -18,6 +18,7 @@ public class MainActivity extends BridgeActivity {
         // Native Search Plugin Register
         registerPlugin(NativeSearchPlugin.class);
         registerPlugin(NativeTerminalPlugin.class);
+        registerPlugin(SafStoragePlugin.class);
 
         super.onCreate(savedInstanceState);
 

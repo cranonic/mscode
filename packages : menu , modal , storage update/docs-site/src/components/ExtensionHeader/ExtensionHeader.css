@@ -1,0 +1,75 @@
+/* src/components/ExtensionHeader/ExtensionHeader.css */
+.eh-root {
+  background: var(--ms-bg-side);
+  border: 1px solid var(--ms-border-light);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* top bar */
+.eh-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--ms-border-light);
+  background: rgba(0,0,0,.15);
+}
+.eh-back {
+  display: flex; align-items: center; gap: 6px;
+  background: none; border: none; cursor: pointer;
+  color: var(--ms-accent); font-size: 12px;
+  padding: 0; transition: opacity .15s;
+}
+.eh-back:hover { opacity: .8; }
+.eh-back svg   { stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; }
+
+.eh-version-area { display: flex; align-items: center; gap: 10px; }
+.eh-version-label {
+  font-size: 12px; font-weight: 600;
+  color: var(--ms-text-faded);
+  background: var(--ms-code-bg);
+  padding: 2px 8px; border-radius: 12px;
+}
+
+/* main body */
+.eh-body {
+  display: flex;
+  gap: 24px;
+  padding: 24px;
+  align-items: flex-start;
+}
+
+.eh-info { flex: 1; min-width: 0; }
+.eh-name { font-size: 24px; font-weight: 700; color: var(--ms-text-bright); margin: 0 0 6px; line-height: 1.2; }
+
+.eh-meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+  font-size: 13px; color: var(--ms-text-faded); margin-bottom: 10px;
+}
+.eh-publisher { color: var(--ms-accent); font-weight: 500; }
+.eh-dot       { color: var(--ms-border-dark); }
+.eh-category  { text-transform: capitalize; }
+.eh-id        { font-family: monospace; font-size: 11px; opacity: .7; }
+
+.eh-description {
+  font-size: 14px; color: var(--ms-text-main);
+  margin: 0 0 12px; line-height: 1.5;
+}
+
+.eh-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.eh-tag  {
+  font-size: 11px; padding: 2px 8px;
+  border: 1px solid var(--ms-border-dark);
+  border-radius: 12px; color: var(--ms-text-faded);
+  transition: border-color .15s, color .15s;
+}
+.eh-tag:hover { border-color: var(--ms-accent); color: var(--ms-accent); }
+
+.eh-activates { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.eh-activates-label { font-size: 11px; color: var(--ms-text-faded); }
+.eh-activate-badge  {
+  font-size: 11px; padding: 1px 7px;
+  background: rgba(0,122,204,.15); color: var(--ms-accent);
+  border-radius: 10px;
+}

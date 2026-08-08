@@ -70,8 +70,44 @@ export class AndroidFileSystem implements IFileSystem {
    * Currently locked as a non-operational placeholder wrapper layer under the Android architecture.
    * * @returns {Promise<{ success: boolean; name?: string }>} Bounded operational state flags.
    */
-  async openFolder(): Promise<{ success: boolean; name?: string }> {
-    return { success: false };
+  /**
+   * Opens the system Document Tree picker (SAF) so the user can grant access
+   * to any storage volume (SD card, USB, Downloads, …).
+   */
+  async openFolder(): Promise<{ success: boolean; name?: string; uri?: string; path?: string }> {
+    try {
+      // Dynamic import keeps web builds from crashing
+      const { registerPlugin } = await import('@capacitor/core');
+      const SafStorage = registerPlugin<{
+        openDocumentTree: () => Promise<{ uri: string; name: string; path?: string }>;
+        listPersistedTrees: () => Promise<{ trees: Array<{ uri: string; name: string; path?: string }> }>;
+      }>('SafStorage');
+      const res = await SafStorage.openDocumentTree();
+      if (!res?.uri) return { success: false };
+      return {
+        success: true,
+        name: res.name || 'Storage',
+        uri: res.uri,
+        path: res.path,
+      };
+    } catch (e) {
+      console.warn('[AndroidFileSystem] openFolder/SAF failed', e);
+      return { success: false };
+    }
+  }
+
+  /** List previously granted SAF trees (persistable URI permissions). */
+  async listSafTrees(): Promise<Array<{ uri: string; name: string; path?: string }>> {
+    try {
+      const { registerPlugin } = await import('@capacitor/core');
+      const SafStorage = registerPlugin<{
+        listPersistedTrees: () => Promise<{ trees: Array<{ uri: string; name: string; path?: string }> }>;
+      }>('SafStorage');
+      const res = await SafStorage.listPersistedTrees();
+      return res?.trees || [];
+    } catch {
+      return [];
+    }
   }
 
   /**

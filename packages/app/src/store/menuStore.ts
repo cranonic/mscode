@@ -32,6 +32,8 @@ export interface MenuGroup {
 
 export interface MenuState {
   isOpen: boolean;
+  /** True while exit animation plays — host should keep menu mounted. */
+  isClosing: boolean;
   position: { x: number; y: number };
   items: MenuItem[];
   dynamicHistory: Record<string, MenuItem[]>;
@@ -39,6 +41,8 @@ export interface MenuState {
   openMenu: (menuId: string, x: number, y: number, defaultItems?: MenuGroup[] | MenuItem[]) => void;
   openMenuDirect: (x: number, y: number, items: MenuItem[]) => void;
   closeMenu: () => void;
+  /** Immediate teardown without animation (e.g. app background). */
+  forceCloseMenu: () => void;
 
   registeredMenus: Record<string, MenuItem[]>;
   registerMenuItem: (menuPath: string, item: MenuItem) => void;
@@ -119,8 +123,12 @@ const mergeMenuItem = (existing: MenuItem, incoming: MenuItem): MenuItem => {
 
 // ─── STORE IMPLEMENTATION ──────────────────────────────────────────────────
 
+let closeTimer: ReturnType<typeof setTimeout> | null = null;
+const MENU_EXIT_MS = 100;
+
 export const useMenuStore = create<MenuState>((set, _get) => ({
   isOpen: false,
+  isClosing: false,
   position: { x: 0, y: 0 },
   items: [],
   registeredMenus: {},
@@ -128,6 +136,8 @@ export const useMenuStore = create<MenuState>((set, _get) => ({
   dynamicHistory: {}, // for only developer tools like menu page
 
   openMenu: (menuId, x, y, defaultItems = []) => set((state) => {
+    if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+
     
     // SILENT SNIFFER
     let updatedHistory = state.dynamicHistory;
@@ -157,7 +167,8 @@ export const useMenuStore = create<MenuState>((set, _get) => ({
     const resolvedItems = getResolvedMenu(menuId, defaultItems);
     
     return { 
-      isOpen: true, 
+      isOpen: true,
+      isClosing: false,
       position: { x, y }, 
       items: resolvedItems,
       dynamicHistory: updatedHistory 
@@ -165,12 +176,27 @@ export const useMenuStore = create<MenuState>((set, _get) => ({
   }),
 
   openMenuDirect: (x, y, items) => {
+    if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
     if (items.length > 0) {
-      set({ isOpen: true, position: { x, y }, items });
+      set({ isOpen: true, isClosing: false, position: { x, y }, items });
     }
   },
 
-  closeMenu: () => set({ isOpen: false }),
+  closeMenu: () => {
+    const { isOpen, isClosing } = _get();
+    if (!isOpen || isClosing) return;
+    set({ isClosing: true });
+    if (closeTimer) clearTimeout(closeTimer);
+    closeTimer = setTimeout(() => {
+      closeTimer = null;
+      set({ isOpen: false, isClosing: false, items: [] });
+    }, MENU_EXIT_MS);
+  },
+
+  forceCloseMenu: () => {
+    if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+    set({ isOpen: false, isClosing: false, items: [] });
+  },
 
   // Using Smart Merge System
   registerMenuItem: (menuPath, item) => {

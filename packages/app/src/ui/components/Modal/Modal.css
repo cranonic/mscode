@@ -1,0 +1,176 @@
+/* src/ui/components/Modal/Modal.css */
+
+/* ── Backdrop ── */
+.ms-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--ms-bg-main, #1e1e1e) 35%, rgba(0, 0, 0, 0.55));
+  opacity: 0;
+  animation: ms-modal-backdrop-in 0.18s ease forwards;
+}
+
+.ms-modal-backdrop.ms-modal-backdrop--closing {
+  animation: ms-modal-backdrop-out 0.15s ease forwards;
+  pointer-events: none;
+}
+
+/* Full-screen page mode: no dim center, solid surface */
+.ms-modal-backdrop.ms-modal-backdrop--page {
+  align-items: stretch;
+  justify-content: stretch;
+  background: var(--ms-bg-main);
+  padding: 0;
+}
+
+@keyframes ms-modal-backdrop-in {
+  to { opacity: 1; }
+}
+@keyframes ms-modal-backdrop-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* ── Dialog (type=modal) — Android-ish scale + fade ── */
+.ms-modal-dialog {
+  background: var(--ms-bg-main);
+  border: 1px solid var(--ms-border-light);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 88vh;
+  box-shadow: 0 12px 40px var(--ms-shadow, rgba(0, 0, 0, 0.45));
+  display: flex;
+  flex-direction: column;
+  color: var(--ms-text-main);
+  transform: translateY(12px) scale(0.96);
+  opacity: 0;
+  animation: ms-modal-dialog-in 0.2s cubic-bezier(0.2, 0.9, 0.25, 1) forwards;
+}
+
+.ms-modal-dialog.ms-modal-dialog--closing {
+  animation: ms-modal-dialog-out 0.14s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+@keyframes ms-modal-dialog-in {
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes ms-modal-dialog-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+
+/* ── Page (type=page) — full screen, slide up like Android activity ── */
+.ms-modal-page {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--ms-bg-main);
+  display: flex;
+  flex-direction: column;
+  color: var(--ms-text-main);
+  transform: translateY(8%);
+  opacity: 0.92;
+  animation: ms-modal-page-in 0.22s cubic-bezier(0.2, 0.85, 0.25, 1) forwards;
+}
+
+.ms-modal-page.ms-modal-page--closing {
+  animation: ms-modal-page-out 0.16s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+@keyframes ms-modal-page-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes ms-modal-page-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0.9;
+    transform: translateY(6%);
+  }
+}
+
+/* ── Shared chrome ── */
+.ms-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ms-border-light);
+  background: var(--ms-bg-side);
+  flex-shrink: 0;
+}
+
+.ms-modal-page .ms-modal-header {
+  /* status-bar friendly top bar */
+  padding-top: max(12px, env(safe-area-inset-top, 0px));
+}
+
+.ms-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ms-text-main);
+}
+
+.ms-modal-close {
+  cursor: pointer;
+  opacity: 0.75;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+}
+.ms-modal-close:hover {
+  opacity: 1;
+  background: var(--ms-icon-hover-bg, rgba(127, 127, 127, 0.2));
+}
+
+.ms-modal-body {
+  padding: 0;
+  font-size: 13px;
+  color: var(--ms-text-main);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.ms-modal-dialog .ms-modal-body {
+  min-height: 120px;
+  max-height: calc(80vh - 100px);
+}
+
+.ms-modal-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--ms-border-light);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  background: var(--ms-bg-side);
+  flex-shrink: 0;
+  padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+}

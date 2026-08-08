@@ -63,7 +63,8 @@ const trimSeparators = (items: MenuItem[]): MenuItem[] =>
     );
 
 export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested, openSide = 'right' }) => {
-  const { closeMenu } = useMenuStore(); 
+  const closeMenu = useMenuStore(s => s.closeMenu);
+  const isClosing = useMenuStore(s => s.isClosing); 
   
   const menuRef = useRef<HTMLDivElement>(null);
   const [adjustedStyle, setAdjustedStyle] = useState<React.CSSProperties>(style || {});
@@ -223,7 +224,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested
 
       <div 
         ref={menuRef} 
-        className="ms-context-menu" 
+        className={`ms-context-menu${isClosing ? ' ms-context-menu--closing' : ''}`} 
         style={{ ...adjustedStyle, overflow: 'visible', transformOrigin }} 
       >
         {trimSeparators(items).map((item, index) => {

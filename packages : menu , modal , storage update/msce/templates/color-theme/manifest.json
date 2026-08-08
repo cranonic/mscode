@@ -1,0 +1,27 @@
+{
+  "id":          "{{EXT_ID}}",
+  "name":        "{{EXT_NAME}}",
+  "version":     "{{VERSION}}",
+  "description": "{{EXT_DESC}}",
+  "category":    "Themes",
+  "tags":        ["theme", "color-theme", "{{CMD_PREFIX}}", "customization"],
+  "icon":        "assets/logo.png",
+  "iconLetter":  "{{ICON_LETTER}}",
+  "readme":      "README.md",
+  "changelog":   "CHANGELOG.md",
+  "license":     "LICENSE.txt",
+  "contributes": {
+    "themes": [
+      {
+        "label":   "{{EXT_NAME}} Dark",
+        "uiTheme": "vs-dark",
+        "path":    "./themes/theme-dark.json"
+      },
+      {
+        "label":   "{{EXT_NAME}} Light",
+        "uiTheme": "vs",
+        "path":    "./themes/theme-light.json"
+      }
+    ]
+  }
+}

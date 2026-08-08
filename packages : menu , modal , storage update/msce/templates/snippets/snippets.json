@@ -1,0 +1,18 @@
+{
+  "Console Log": {
+    "prefix": "clg",
+    "body": [
+      "console.log(${1:object});"
+    ],
+    "description": "Outputs a message to the web console"
+  },
+  "Arrow Function": {
+    "prefix": "afn",
+    "body": [
+      "const ${1:name} = (${2:params}) => {",
+      "\t${0}",
+      "};"
+    ],
+    "description": "Creates an arrow function expression"
+  }
+}

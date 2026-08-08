@@ -4,5 +4,6 @@ packages/msce
 .vercel
 .keystore
 Trust
-packages (2)
+packages : alpine proot -v
+packages  menu , modal , storage update
 key.note

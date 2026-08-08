@@ -49,29 +49,94 @@ export const FilePickerModal: React.FC = () => {
     }
   }, [isOpen, options]);
 
-  // ── 2. Load Roots ──
-  useEffect(() => {
-    const loadRoots = async () => {
-      const roots: FileStat[] = [{ name: 'Internal Storage', path: '/storage/emulated/0', isDirectory: true }];
+  // ── 2. Load Roots (internal + SAF document trees) ──
+  const loadRoots = async () => {
+    const roots: FileStat[] = [
+      { name: 'Internal Storage', path: '/storage/emulated/0', isDirectory: true },
+    ];
+    try {
+      const uriRes = await Filesystem.getUri({ directory: Directory.Data, path: '' });
+      const dataPath = uriRes.uri.replace('file://', '');
+      const projectsPath = dataPath + '/projects';
       try {
-        const uriRes = await Filesystem.getUri({ directory: Directory.Data, path: '' });
-        const dataPath = uriRes.uri.replace('file://', '');
-        const projectsPath = dataPath + '/projects'; 
-        try { await Filesystem.stat({ path: projectsPath }); } catch { await Filesystem.mkdir({ path: projectsPath, recursive: true }); }
-        roots.push({ name: 'MS Projects', path: projectsPath, isDirectory: true });
-        roots.push({ name: 'MS System (Data)', path: dataPath, isDirectory: true });
-      } catch (e) {
-        roots.push({ name: 'MS Projects', path: '/data/data/com.editor.mscode/files/projects', isDirectory: true });
+        await Filesystem.stat({ path: projectsPath });
+      } catch {
+        await Filesystem.mkdir({ path: projectsPath, recursive: true });
       }
-      try {
-        const termuxPath = '/data/data/com.termux/files/home';
-        await fs.readDir(termuxPath);
-        roots.push({ name: 'Termux (Home)', path: termuxPath, isDirectory: true });
-      } catch (e) {}
-      setRootStorages(roots);
-    };
+      roots.push({ name: 'MS Projects', path: projectsPath, isDirectory: true });
+      roots.push({ name: 'MS System (Data)', path: dataPath, isDirectory: true });
+    } catch {
+      roots.push({
+        name: 'MS Projects',
+        path: '/data/data/com.editor.mscode/files/projects',
+        isDirectory: true,
+      });
+    }
+
+    // User-added SAF trees (persistable). Prefer real path when Android resolves one.
+    try {
+      const trees =
+        typeof (fs as any).listSafTrees === 'function'
+          ? await (fs as any).listSafTrees()
+          : [];
+      for (const t of trees || []) {
+        const path = t.path || t.uri;
+        if (!path) continue;
+        if (roots.some((r) => r.path === path)) continue;
+        roots.push({
+          name: t.name || 'External Storage',
+          path,
+          isDirectory: true,
+        });
+      }
+    } catch (e) {
+      console.warn('[FilePicker] SAF list failed', e);
+    }
+
+    // Local bookmarks from previous Add Storage (path-only)
+    try {
+      const raw = localStorage.getItem('mscode.extraStorages');
+      if (raw) {
+        const extra = JSON.parse(raw) as Array<{ name: string; path: string }>;
+        for (const e of extra) {
+          if (!e?.path) continue;
+          if (roots.some((r) => r.path === e.path)) continue;
+          roots.push({ name: e.name || 'Storage', path: e.path, isDirectory: true });
+        }
+      }
+    } catch {}
+
+    setRootStorages(roots);
+  };
+
+  useEffect(() => {
     if (isOpen) loadRoots();
   }, [isOpen]);
+
+  /** Open Android Document Tree picker and register the volume as a root. */
+  const handleAddStorage = async () => {
+    try {
+      const res = await (fs as any).openFolder?.();
+      if (!res?.success) return;
+      const path = res.path || res.uri;
+      if (!path) return;
+      // Persist path-based roots for next open
+      if (res.path) {
+        try {
+          const raw = localStorage.getItem('mscode.extraStorages');
+          const list: Array<{ name: string; path: string }> = raw ? JSON.parse(raw) : [];
+          if (!list.some((x) => x.path === res.path)) {
+            list.push({ name: res.name || 'Storage', path: res.path });
+            localStorage.setItem('mscode.extraStorages', JSON.stringify(list));
+          }
+        } catch {}
+      }
+      await loadRoots();
+      if (res.path) setCurrentPath(res.path);
+    } catch (e) {
+      console.error('[FilePicker] Add Storage failed', e);
+    }
+  };
 
   // ── 3. Read Files & Manage Root View ──
   const refreshFiles = () => {
@@ -298,7 +363,8 @@ export const FilePickerModal: React.FC = () => {
 
   return (
     <Modal 
-      isOpen={isOpen} 
+      isOpen={isOpen}
+      type="page" 
       title={options.title || (options.mode === 'saveAs' ? 'Save As...' : 'Select File')} 
       iconName={options.icon || 'folder'}
       onClose={() => closePicker(null)}
@@ -311,6 +377,7 @@ export const FilePickerModal: React.FC = () => {
           allowCreate={options.allowCreate !== false}
           onGoUp={handleGoUp}
           onRefresh={refreshFiles}
+          onAddStorage={handleAddStorage}
           onCreateFile={() => setInlineEdit({ isNew: true, isFolder: false, initialName: 'NewFile.txt', targetPath: currentPath })}
           onCreateFolder={() => setInlineEdit({ isNew: true, isFolder: true, initialName: 'NewFolder', targetPath: currentPath })}
         />

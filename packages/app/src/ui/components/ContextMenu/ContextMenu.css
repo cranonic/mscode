@@ -2,7 +2,10 @@
 
 .ms-context-menu-overlay {
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   background-color: transparent;
   z-index: 100009;
 }
@@ -10,21 +13,30 @@
 .ms-context-menu {
   background-color: var(--ms-bg-side);
   border: 1px solid var(--ms-menu-border);
-  box-shadow: 0 4px 6px var(--ms-shadow);
+  box-shadow: 0 4px 12px var(--ms-shadow);
   color: var(--ms-text-main);
   border-radius: 4px;
-  padding: 0;
+  padding: 4px 0;
   min-width: 220px;
   font-size: 13px;
   z-index: 100010;
   text-align: start;
-  transition: opacity 1s ease; 
+  opacity: 0;
+  transform: scale(0.96);
+  will-change: opacity, transform;
+  /* snappy open — ~120ms */
+  animation: ms-menu-in 0.12s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
 }
 
-@keyframes ms-menu-fade-in {
+.ms-context-menu.ms-context-menu--closing {
+  animation: ms-menu-out 0.1s cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes ms-menu-in {
   0% {
     opacity: 0;
-    transform: scale(0.97);
+    transform: scale(0.96);
   }
   100% {
     opacity: 1;
@@ -32,20 +44,32 @@
   }
 }
 
+@keyframes ms-menu-out {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
 .ms-context-menu-item {
   display: flex;
   align-items: center;
-  padding: 4px 10px;
+  padding: 6px 12px;
   cursor: pointer;
+  user-select: none;
 }
 
-/* Disabled (Immutable) Items */
 .ms-context-menu-item.disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-.ms-context-menu-item:hover {
+.ms-context-menu-item:hover:not(.disabled),
+.ms-context-menu-item.active-sub:not(.disabled) {
   background-color: var(--ms-menu-hover-bg);
   color: var(--ms-text-bright);
 }

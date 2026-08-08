@@ -1,0 +1,22 @@
+{
+  "id":          "{{EXT_ID}}",
+  "name":        "{{EXT_NAME}}",
+  "version":     "{{VERSION}}",
+  "description": "{{EXT_DESC}}",
+  "category":    "Themes",
+  "tags":        ["icons", "theme", "{{CMD_PREFIX}}", "icon-theme", "customization"],
+  "icon":        "assets/logo.png",
+  "iconLetter":  "{{ICON_LETTER}}",
+  "readme":      "README.md",
+  "changelog":   "CHANGELOG.md",
+  "license":     "LICENSE.txt",
+  "contributes": {
+    "iconThemes": [
+      {
+        "id":    "{{EXT_ID}}",
+        "label": "{{EXT_NAME}}",
+        "path":  "./data/icon-theme.json"
+      }
+    ]
+  }
+}

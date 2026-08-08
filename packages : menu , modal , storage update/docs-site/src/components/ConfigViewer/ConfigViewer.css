@@ -1,0 +1,55 @@
+/* src/components/ConfigViewer/ConfigViewer.css */
+.cv-root   { }
+.cv-title  { font-size: 16px; font-weight: 600; color: var(--ms-text-bright); margin: 0 0 4px; }
+.cv-count  { font-size: 12px; color: var(--ms-text-faded); margin: 0 0 16px; }
+.cv-empty  { color: var(--ms-text-faded); font-size: 13px; }
+
+.cv-list { display: flex; flex-direction: column; gap: 2px; }
+
+.cv-row {
+  border: 1px solid var(--ms-border-light);
+  border-radius: 5px;
+  padding: 10px 14px;
+  background: var(--ms-bg-side);
+  transition: border-color .15s;
+}
+.cv-row:hover { border-color: var(--ms-border-dark); }
+
+.cv-row-header {
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; gap: 8px;
+}
+.cv-row-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.cv-id {
+  font-family: 'Cascadia Code', monospace; font-size: 12.5px;
+  color: var(--ms-settings-link-color);
+}
+.cv-type {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 3px; letter-spacing: .4px;
+}
+.cv-type--string  { background: rgba(206,145,120,.15); color: #ce9178; }
+.cv-type--number  { background: rgba(181,206,168,.15); color: #b5cea8; }
+.cv-type--boolean { background: rgba(86,156,214,.15);  color: #569cd6; }
+.cv-type--object  { background: rgba(78,201,176,.15);  color: #4ec9b0; }
+.cv-type--array   { background: rgba(220,220,170,.15); color: #dcdcaa; }
+
+.cv-default-label { font-size: 11px; color: var(--ms-text-faded); }
+.cv-default { background: var(--ms-code-bg); color: var(--ms-code-fg); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+
+.cv-chevron { color: var(--ms-text-faded); transition: transform .2s; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.cv-chevron--open { transform: rotate(180deg); }
+
+.cv-desc {
+  font-size: 13px; color: var(--ms-text-faded);
+  margin: 6px 0 0; line-height: 1.5;
+}
+
+.cv-enum-list {
+  margin-top: 8px; display: flex; flex-direction: column; gap: 4px;
+  padding-left: 12px; border-left: 2px solid var(--ms-border-light);
+}
+.cv-enum-item  { display: flex; align-items: baseline; gap: 10px; }
+.cv-enum-val   { font-family: monospace; font-size: 12px; color: var(--ms-code-fg); background: var(--ms-code-bg); padding: 1px 5px; border-radius: 3px; }
+.cv-enum-desc  { font-size: 12px; color: var(--ms-text-faded); }

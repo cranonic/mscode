@@ -1,0 +1,38 @@
+/* src/components/TabView/TabView.css */
+.tv-root {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--ms-border-light);
+  border-radius: 8px; overflow: hidden;
+  background: var(--ms-bg-main);
+}
+.tv-strip {
+  display: flex;
+  border-bottom: 1px solid var(--ms-border-light);
+  background: var(--ms-bg-side);
+  overflow-x: auto;
+}
+.tv-strip::-webkit-scrollbar { height: 2px; }
+.tv-strip::-webkit-scrollbar-thumb { background: var(--ms-border-dark); }
+
+.tv-tab {
+  padding: 10px 20px;
+  font-size: 13px; font-weight: 500;
+  color: var(--ms-text-faded);
+  background: none; border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer; white-space: nowrap;
+  transition: color .15s, border-color .15s;
+}
+.tv-tab:hover                { color: var(--ms-text-main); }
+.tv-tab--active {
+  color: var(--ms-text-bright);
+  border-bottom-color: var(--ms-accent);
+}
+.tv-body {
+  padding: 20px 24px;
+  min-height: 240px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+.tv-body::-webkit-scrollbar       { width: 6px; }
+.tv-body::-webkit-scrollbar-thumb { background: var(--ms-border-dark); border-radius: 3px; }

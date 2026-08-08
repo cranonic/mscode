@@ -1,0 +1,47 @@
+{
+  "id":          "{{EXT_ID}}",
+  "name":        "{{EXT_NAME}}",
+  "version":     "{{VERSION}}",
+  "description": "{{EXT_DESC}}",
+  "category":    "Snippets",
+  "tags":        ["snippets", "productivity", "autocomplete"],
+  "icon":        "assets/logo.png",
+  "iconLetter":  "{{ICON_LETTER}}",
+  
+  // Note: Pure snippet extensions don't need a JavaScript entry point.
+  // The CLI engine will automatically detect this and package only the static assets.
+  
+  "readme":      "README.md",
+  "changelog":   "CHANGELOG.md",
+  "license":     "LICENSE.txt",
+
+  "contributes": {
+    // 1. External Snippets
+    "snippets": [
+      {
+        "language": "javascript",
+        "path": "./snippets/javascript.json"
+      }
+    ]
+
+    // 2. Inline Snippets
+    // You can also define snippets directly inside this manifest without using an external file!
+    // Just replace the string path with an object mapping.
+    // "snippets" : [
+    //   {
+    //     "language" : "javascript",
+    //     "path" : {
+    //       "Console Log": {
+    //         "prefix": "clg",
+    //         "body": [
+    //           "console.log(${1:object});"
+    //         ],
+    //         "description": "Outputs a message to the web console"
+    //       },
+    //       // ... more
+    //     }
+    //   }
+    // ]
+
+  }
+}

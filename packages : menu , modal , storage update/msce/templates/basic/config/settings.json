@@ -1,0 +1,24 @@
+{
+  "{{CMD_PREFIX}}.enable": {
+    "type": "boolean",
+    "defaultValue": true,
+    "title": "Enable {{EXT_NAME}}",
+    "description": "Controls whether the {{EXT_NAME}} extension is active or completely disabled in the current workspace.",
+    "markdownDescription": "Controls whether the **{{EXT_NAME}}** extension is active. When disabled, all associated commands (like `{{CMD_PREFIX}}.helloWorld`) will be unregistered gracefully.",
+    "scope": "workspace",
+    "tags": ["extension", "{{CMD_PREFIX}}"]
+  },
+  "{{CMD_PREFIX}}.logLevel": {
+    "type": "select",
+    "defaultValue": "info",
+    "title": "{{EXT_NAME}}: Log Level",
+    "description": "Configure the verbosity of diagnostic logs sent to the Extension Host output channel.",
+    "options": [
+      { "value": "debug", "label": "Debug", "description": "Print all internal execution metrics and sandbox hooks." },
+      { "value": "info",  "label": "Info",  "description": "Standard informational logs and successful triggers." },
+      { "value": "error", "label": "Error", "description": "Only flash critical runtime exceptions and failure stack traces." }
+    ],
+    "scope": "window",
+    "tags": ["extension", "logging"]
+  }
+}

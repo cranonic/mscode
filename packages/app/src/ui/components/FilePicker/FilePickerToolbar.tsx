@@ -10,24 +10,46 @@ interface ToolbarProps {
   onCreateFile: () => void;
   onCreateFolder: () => void;
   onRefresh: () => void;
+  /** Show "Add Storage" (SAF document tree) when on ROOT. */
+  onAddStorage?: () => void;
 }
 
-export const FilePickerToolbar: React.FC<ToolbarProps> = ({ currentPath, allowCreate, onGoUp, onCreateFile, onCreateFolder, onRefresh }) => {
+export const FilePickerToolbar: React.FC<ToolbarProps> = ({
+  currentPath,
+  allowCreate,
+  onGoUp,
+  onCreateFile,
+  onCreateFolder,
+  onRefresh,
+  onAddStorage,
+}) => {
   return (
     <div className="ms-filepicker-toolbar">
-      <div 
-        onClick={onGoUp} 
-        style={{ cursor: currentPath === 'ROOT' ? 'not-allowed' : 'pointer', opacity: currentPath === 'ROOT' ? 0.4 : 1, padding: '4px', borderRadius: '4px' }}
+      <div
+        onClick={onGoUp}
+        style={{
+          cursor: currentPath === 'ROOT' ? 'not-allowed' : 'pointer',
+          opacity: currentPath === 'ROOT' ? 0.4 : 1,
+          padding: '4px',
+          borderRadius: '4px',
+        }}
         title="Go Up"
       >
         <Icon name="arrow-up" size={16} />
       </div>
-      
+
       <div className="ms-filepicker-breadcrumb">
         {currentPath === 'ROOT' ? 'Computer / Workspaces' : currentPath}
       </div>
 
-      <div style={{ display: 'flex', gap: '4px' }}>
+      <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+        {currentPath === 'ROOT' && onAddStorage && (
+          <InputAction
+            icon={<Icon name="root-folder-opened" size={16} />}
+            onClick={onAddStorage}
+            title="Add Storage (Document Tree)"
+          />
+        )}
         {allowCreate && currentPath !== 'ROOT' && (
           <>
             <InputAction icon={<Icon name="new-file" size={16} />} onClick={onCreateFile} />

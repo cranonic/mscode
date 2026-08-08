@@ -1,7 +1,10 @@
 // src/ui/components/Modal/Modal.tsx
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Icon } from '../Icon/IconRegistry';
-import type { IconName } from '../Icon/IconRegistry'; 
+import type { IconName } from '../Icon/IconRegistry';
+import './Modal.css';
+
+export type ModalPresentation = 'modal' | 'page';
 
 /**
  * Configuration schema for the MS Code Native Modal Component.
@@ -13,12 +16,14 @@ export interface ModalProps {
   /** Primary header title string displayed at the top left of the modal wrapper. */
   title: string;
 
-  /** * Optional icon token from the Codicon registry to be positioned right before the header title.
+  /**
+   * Optional icon token from the Codicon registry to be positioned right before the header title.
    * @example 'info', 'gear', 'warning'
    */
-  iconName?: IconName | string; 
+  iconName?: IconName | string;
 
-  /** * Triggers immediately when clicking the close (X) icon button or hitting the `Escape` key.
+  /**
+   * Triggers immediately when clicking the close (X) icon button or hitting the `Escape` key.
    * Use this boundary frame callback to revert the `isOpen` state flag to false.
    */
   onClose: () => void;
@@ -26,91 +31,105 @@ export interface ModalProps {
   /** Inside markup nodes rendered straight within the scrollable content container body view layer. */
   children: React.ReactNode;
 
-  /** * Target action components (like Buttons) to append sequentially inside the sticky lower bottom panel zone.
-   * @example 
-   * ```tsx
-   * <div style={{ display: 'flex', gap: '8px' }}>
-   * <Button label="Cancel" variant="secondary" onClick={onClose} />
-   * <Button label="Save Changes" onClick={handleSave} />
-   * </div>
-   * ```
+  /**
+   * Target action components (like Buttons) to append sequentially inside the sticky lower bottom panel zone.
    */
   footerActions?: React.ReactNode;
+
+  /**
+   * Presentation mode:
+   * - `'modal'` (default) — centered dialog card
+   * - `'page'` — full-screen surface with Android activity-style slide
+   */
+  type?: ModalPresentation;
+
+  /** Optional extra class on the dialog/page shell. */
+  className?: string;
 }
 
-/**
- * Native MS Code Modal overlay Dialog Box context.
- * Adapts to active dark/light IDE styling matrices automatically.
- * * Supports focus escape loops on pressing the **ESC** key natively.
- * * @example
- * ```tsx
- * const { Modal, Button, InputBox } = mscode.ui.components;
- * const [showModal, setShowModal] = useState(true);
- * * <Modal 
- * isOpen={showModal} 
- * title="Create Project Workspace" 
- * iconName="new-folder"
- * onClose={() => setShowModal(false)}
- * footerActions={
- * <>
- * <Button label="Close" onClick={() => setShowModal(false)} />
- * <Button label="Confirm" onClick={handleConfirmClick} />
- * </>
- * }
- * >
- * <div style={{ padding: '16px' }}>
- * <InputBox placeholder="Enter repo layout workspace name..." value={name} onChange={setName} />
- * </div>
- * </Modal>
- * ```
- */
-export const Modal: React.FC<ModalProps> = ({ isOpen, title, iconName, onClose, children, footerActions }) => {
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    if (isOpen) window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
-  }, [isOpen, onClose]);
+const EXIT_MS = 160;
 
-  if (!isOpen) return null;
+/**
+ * Native MS Code Modal / Page overlay.
+ * Uses theme CSS variables (`--ms-bg-main`, `--ms-border-light`, …).
+ */
+export const Modal: React.FC<ModalProps> = ({
+  isOpen,
+  title,
+  iconName,
+  onClose,
+  children,
+  footerActions,
+  type = 'modal',
+  className = '',
+}) => {
+  const [mounted, setMounted] = useState(isOpen);
+  const [closing, setClosing] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setMounted(true);
+      setClosing(false);
+      return;
+    }
+    if (!mounted) return;
+    setClosing(true);
+    const t = setTimeout(() => {
+      setMounted(false);
+      setClosing(false);
+    }, EXIT_MS);
+    return () => clearTimeout(t);
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen && !closing) onClose();
+    };
+    if (mounted) window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [mounted, isOpen, closing, onClose]);
+
+  if (!mounted) return null;
+
+  const isPage = type === 'page';
+  const shellClass = isPage
+    ? `ms-modal-page${closing ? ' ms-modal-page--closing' : ''} ${className}`.trim()
+    : `ms-modal-dialog${closing ? ' ms-modal-dialog--closing' : ''} ${className}`.trim();
 
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100002, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      
-      {/* Top Thin Bar & Box Design */}
-      <div style={{ 
-        backgroundColor: 'var(--ms-bg-main)', 
-        border: '1px solid var(--ms-border-light)', 
-        borderTop: '0.1px solid rgba(85, 85, 85, 0.533)',
-        borderRadius: '6px', 
-        width: '90%', 
-        maxWidth: '500px', 
-        boxShadow: '0 8px 24px rgba(0,0,0,0.4)', 
-        display: 'flex', 
-        flexDirection: 'column' 
-      }}>
-        
-        {/* Header (Icon + Title) */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 15px', borderBottom: '1px solid var(--ms-border-light)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {iconName && <Icon name={iconName} size={16} />}
-            <span style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--ms-text-main)' }}>{title}</span>
+    <div
+      className={[
+        'ms-modal-backdrop',
+        isPage ? 'ms-modal-backdrop--page' : '',
+        closing ? 'ms-modal-backdrop--closing' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      onMouseDown={(e) => {
+        // click outside closes only for dialog mode
+        if (!isPage && e.target === e.currentTarget && !closing) onClose();
+      }}
+    >
+      <div
+        className={shellClass}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="ms-modal-header">
+          <div className="ms-modal-title">
+            {iconName && <Icon name={iconName as any} size={16} />}
+            <span>{title}</span>
           </div>
-          <div style={{ cursor: 'pointer', opacity: 0.7 }} onClick={onClose}>
+          <div className="ms-modal-close" onClick={() => !closing && onClose()} title="Close">
             <Icon name="close" size={16} />
           </div>
         </div>
 
-        {/* Body*/}
-        <div style={{ padding: '0', fontSize: '13px', color: 'var(--ms-text-main)', overflowY: 'auto', minHeight: '120px', maxHeight: '80vh' }}>
-          {children}
-        </div>
+        <div className="ms-modal-body">{children}</div>
 
-        {/* Footer */}
-        {footerActions && (
-          <div style={{ padding: '10px 15px', borderTop: '1px solid var(--ms-border-light)', display: 'flex', justifyContent: 'flex-end', gap: '8px', backgroundColor: 'var(--ms-bg-side)' }}>
-            {footerActions}
-          </div>
-        )}
+        {footerActions && <div className="ms-modal-footer">{footerActions}</div>}
       </div>
     </div>
   );

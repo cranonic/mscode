@@ -1,0 +1,10 @@
+/* src/components/VersionStatus/VersionStatus.css */
+.vs-badge {
+  font-size: 11px; font-weight: 600;
+  padding: 3px 10px; border-radius: 12px;
+  white-space: nowrap;
+}
+.vs-badge--checking { background: rgba(255,255,255,.07); color: var(--ms-text-faded); }
+.vs-badge--new      { background: rgba(78,201,176,.15);  color: #4ec9b0; }
+.vs-badge--ok       { background: rgba(0,122,204,.15);   color: var(--ms-accent); }
+.vs-badge--conflict { background: rgba(244,71,71,.15);   color: #f47171; cursor: help; }

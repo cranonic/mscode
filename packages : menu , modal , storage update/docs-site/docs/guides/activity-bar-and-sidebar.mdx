@@ -1,0 +1,286 @@
+---
+id: activity-bar-and-sidebar
+title: Activity Bar and Sidebar API
+sidebar_label: Activity Bar & Sidebar
+sidebar_position: 8
+description: A comprehensive guide to contributing views, panels, and actions to the Mono Studio Activity Bar and Sidebar ecosystem.
+---
+
+# Activity Bar and Sidebar API
+
+In Mono Studio (MS Code), the user interface is structured around primary navigation and contextual workflows. The **Activity Bar** is the vertical strip of icons located on the far edge of the window, used to switch between different major views. The **Sidebar** is the primary expandable container that displays the content associated with the active Activity Bar item.
+
+
+This guide will take you from a basic understanding of declarative UI contributions to mastering the dynamic, React-driven Sidebar API.
+
+## Architectural Overview: The Hybrid System
+
+Mono Studio utilizes a **Hybrid Registration System** for UI contributions. 
+
+1. **Declarative Contribution (`manifest.json`):** Allows the IDE to parse and render your Activity Bar icons immediately upon application boot, before your extension's JavaScript engine has even initialized. This ensures a seamless, flicker-free startup experience.
+2. **Programmatic Registration (`main.js`):** Allows your extension to dynamically inject Native React components, handle state changes, and evaluate conditional `when` clauses at runtime.
+
+To achieve optimal performance and user experience, extensions should utilize both methods in tandem.
+
+---
+
+## Level 1: Declarative Registration
+
+The simplest method to add an icon to the Activity Bar is via your extension's `manifest.json` (or `package.json`). By defining your contribution here, Mono Studio reserves the space for your icon immediately.
+
+Add the following to your manifest under the `contributes` block:
+
+```json
+{
+  "contributes": {
+    "activityBar": [
+      {
+        "id": "mono-ai-assistant",
+        "title": "AI Copilot Workspace",
+        "icon": "sparkle",
+        "position": "top",
+        "priority": 90
+      }
+    ]
+  }
+}
+
+```
+
+### Contribution Properties
+
+* **`id`**: A unique identifier for your view.
+* **`title`**: The text displayed on hover and as the default Sidebar header.
+* **`icon`**: A valid Codicon string identifier.
+* **`position`**: Accepts `"top"` or `"bottom"`. Bottom items are typically reserved for settings, accounts, or global actions.
+* **`priority`**: Determines the sorting order. Lower numbers appear higher in the list.
+
+*Note: Clicking a declaratively registered icon will open a blank Sidebar panel until you programmatically register its content.*
+
+---
+
+## Level 2: Programmatic Activity Bar Registration
+
+If your extension requires dynamic evaluation—such as only showing the Activity Bar icon when a specific file is open—you must bypass the manifest and register the item programmatically via the `window` API.
+
+```javascript
+import { window } from '@mscode/api';
+
+export function activate(context) {
+    const activityItem = window.registerActivityBarItem({
+        id: 'database-explorer',
+        title: 'Database Explorer',
+        icon: 'database',
+        position: 'top',
+        priority: 100,
+        openSidebarContent: true, // Instructs the IDE to expand the Sidebar upon click
+        when: 'isWorkspaceOpen'   // Conditionally display only if a folder is open
+    });
+
+    context.subscriptions.push(activityItem);
+}
+
+```
+
+---
+
+## Level 3: Building the Sidebar Panel
+
+Once your Activity Bar icon exists (either declaratively or programmatically), you must define the structure of the Sidebar panel it corresponds to.
+
+A **Sidebar Panel** (`SidebarPanelDef`) consists of an optional static header and an array of **Sections** (`SidebarSectionDef`). Each section operates as a native `Collapsible` accordion that can host Pure React components.
+
+You must link your Sidebar Panel to your Activity Bar item by ensuring the `activityBarId` exactly matches the ID of the registered icon.
+
+```jsx
+import React from 'react';
+import { window } from '@mscode/api';
+
+// A Pure React Component to act as the section's content
+const DiagnosticView = () => {
+    return (
+        <div style={{ padding: '12px', color: 'var(--ms-text-normal)' }}>
+            <p>System diagnostics are running normally.</p>
+        </div>
+    );
+};
+
+export function activate(context) {
+    const sidebarRegistration = window.sidebar.registerSidebarPanel({
+        // This ID MUST match the ID from your manifest.json or registerActivityBarItem
+        activityBarId: 'mono-ai-assistant', 
+        sections: [
+            {
+                id: 'ai-chat-section',
+                title: 'CHAT INTERFACE',
+                defaultExpanded: true,
+                fillHeight: true, // Forces this section to consume all available vertical space
+                content: () => <DiagnosticView />
+            },
+            {
+                id: 'ai-history-section',
+                title: 'HISTORY',
+                defaultExpanded: false,
+                content: () => <div style={{ padding: '12px' }}>No previous conversations.</div>
+            }
+        ]
+    });
+
+    context.subscriptions.push(sidebarRegistration);
+}
+
+```
+
+---
+
+## Level 4: Advanced Section Management
+
+The `window.sidebar` API exposes methods to dynamically modify the Sidebar structure without requiring a full re-render. This is critical for complex extensions that need to alter the UI based on state changes.
+
+### Dynamically Adding and Removing Sections
+
+You can inject new sections into an existing panel on the fly.
+
+```javascript
+// Add a temporary section during a specific workflow
+const tempSection = window.sidebar.addSection('mono-ai-assistant', {
+    id: 'ai-processing-status',
+    title: 'PROCESSING STATUS',
+    content: () => <div>Analyzing local workspace vectors...</div>
+});
+
+// Remove it when the process finishes
+setTimeout(() => {
+    tempSection.dispose();
+}, 5000);
+
+```
+
+### Action Injection (Header Buttons)
+
+You can inject action buttons (icons) directly into a section's header or the main panel header using `sidebar.addAction`. This utilizes the `menuId` generator to ensure precise targeting.
+
+```javascript
+const targetMenu = window.sidebar.menuId.section('mono-ai-assistant', 'ai-chat-section');
+
+const refreshAction = window.sidebar.addAction(targetMenu, {
+    id: 'refresh-ai-context',
+    icon: 'refresh',
+    order: 1,
+    onClick: () => {
+        console.log('Refreshing AI Context...');
+    }
+});
+
+```
+
+---
+
+## Level 5: The Masterclass (A Complete Implementation)
+
+The following example demonstrates a comprehensive implementation of an AI Chat Copilot extension. It utilizes declarative manifest routing (assumed), programmatic UI rendering, React state management, and the native `@mscode/ui` component library.
+
+```jsx
+// src/main.jsx
+import React, { useState } from 'react';
+import { window, commands } from '@mscode/api';
+import { Button, InputBox, RichText } from '@mscode/ui';
+
+// ─── REACT UI COMPONENT ─────────────────────────────────────────────────────
+
+const AIChatInterface = () => {
+    const [messages, setMessages] = useState([
+        { role: 'system', text: "How can I assist you with your code today?" }
+    ]);
+    const [input, setInput] = useState("");
+
+    const handleSend = () => {
+        if (!input.trim()) return;
+        
+        // Append user message
+        const newMessages = [...messages, { role: 'user', text: input }];
+        setMessages(newMessages);
+        setInput("");
+
+        // Simulate AI Network Response
+        setTimeout(() => {
+            setMessages(prev => [...prev, { 
+                role: 'system', 
+                text: "I have analyzed your request. Please check the Output Channel for the compilation results." 
+            }]);
+        }, 1000);
+    };
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            
+            {/* Scrollable Message History */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {messages.map((msg, idx) => (
+                    <div key={idx} style={{ 
+                        alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                        backgroundColor: msg.role === 'user' ? 'var(--ms-button-bg)' : 'var(--ms-bg-input)',
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        maxWidth: '90%'
+                    }}>
+                        <RichText text={msg.text} />
+                    </div>
+                ))}
+            </div>
+
+            {/* Fixed Input Area */}
+            <div style={{ padding: '12px', borderTop: '1px solid var(--ms-border-color)' }}>
+                <InputBox 
+                    value={input} 
+                    onChange={setInput} 
+                    placeholder="Ask Mono AI..." 
+                    rightOutsideIcons={
+                        <Button 
+                            icon="send" 
+                            onClick={handleSend} 
+                            disabled={!input.trim()} 
+                            customStyle={{ marginLeft: '8px' }}
+                        />
+                    }
+                />
+            </div>
+        </div>
+    );
+};
+
+// ─── EXTENSION LIFECYCLE ────────────────────────────────────────────────────
+
+export function activate(context) {
+    // We assume 'mono-ai-assistant-sidebar' was declared in manifest.json.
+    // We immediately bind the React layout to that registered ID.
+    
+    const panelRegistration = window.sidebar.registerSidebarPanel({
+        activityBarId: 'mono-ai-assistant-sidebar',
+        header: {
+            title: 'MONO AI COPILOT',
+            actions: [
+                { id: 'clear-chat', icon: 'clear-all', onClick: () => window.showInformationMessage('Chat cleared.') }
+            ]
+        },
+        sections: [
+            {
+                id: 'chat-view',
+                title: '', // Empty string hides the collapsible header, making it a static block
+                fillHeight: true,
+                content: () => <AIChatInterface />
+            }
+        ]
+    });
+
+    // Provide a command to programmatically force the sidebar open
+    const focusCommand = commands.registerCommand('openai-chat.focusPanel', () => {
+        window.sidebar.focusPanel('mono-ai-assistant-sidebar');
+    });
+
+    context.subscriptions.push(panelRegistration, focusCommand);
+}
+
+export function deactivate() {}
+
+```

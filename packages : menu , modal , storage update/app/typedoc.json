@@ -1,0 +1,41 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+
+  "entryPoints": [
+    "../msce/shared/types"
+  ],
+  "entryPointStrategy": "expand",
+  
+  // ── TypeDoc options ───────────────────────────────────────────────────────
+
+  "out": "../docs-site/docs/api",
+  "plugin": ["typedoc-plugin-markdown"],
+  "theme":  "markdown",
+
+  "name":             "MS Code Extension API",
+  "readme":           "none",
+  
+  "entryFileName": "index",
+  "hideBreadcrumbs": true,
+  "hidePageHeader": true,
+  
+  
+  "outputFileStrategy": "modules",
+  "cleanOutputDir": true,
+  "categorizeByGroup": true,
+  "defaultCategory":  "Other",
+
+  // Exclude internal implementation files even if accidentally imported
+  "exclude": [
+    "**/node_modules/**",
+    "**/*.test.ts",
+    "**/_helpers.ts",
+    "**/dev/**",
+    "**/mock*",
+    "**/Mock*"
+  ],
+
+  "excludePrivate":  true,
+  "excludeInternal": true,
+  "excludeExternals": false
+}

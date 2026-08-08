@@ -1,0 +1,27 @@
+/* src/components/UploadButton/UploadButton.css */
+.ub-root { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+
+.ub-message {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 13px; padding: 10px 14px;
+  border-radius: 5px; line-height: 1.5;
+}
+.ub-message--error    { background: rgba(244, 71,71,.12); color: #f47171; border: 1px solid rgba(244,71,71,.25); }
+.ub-message--success  { background: rgba(78,201,176,.12); color: #4ec9b0; border: 1px solid rgba(78,201,176,.25); }
+.ub-message--conflict { background: rgba(255,167,38,.10); color: #ffa726; border: 1px solid rgba(255,167,38,.25); }
+.ub-message code      { background: rgba(0,0,0,.3); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+
+.ub-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 28px;
+  background: var(--ms-accent);
+  color: #fff; font-size: 14px; font-weight: 600;
+  border: none; border-radius: 5px; cursor: pointer;
+  transition: background .15s, opacity .15s;
+  width: 100%;
+}
+.ub-btn:hover:not(:disabled) { background: #1a8ad4; }
+.ub-btn:disabled { opacity: .45; cursor: not-allowed; background: var(--ms-input-bg); color: var(--ms-text-faded); }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.ub-spin { animation: spin .7s linear infinite; }

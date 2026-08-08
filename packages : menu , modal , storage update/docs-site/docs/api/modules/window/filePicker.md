@@ -1,0 +1,857 @@
+# modules/window/filePicker
+
+## Interfaces
+
+### FileFilter
+
+Defined in: modules/window/filePicker.d.ts:9
+
+A named group of file extensions for the type-filter dropdown.
+Use an empty `extensions` array to mean "All Files".
+
+#### Properties
+
+##### extensions
+
+> **extensions**: `string`[]
+
+Defined in: modules/window/filePicker.d.ts:13
+
+Extensions without the leading dot, e.g. ['ts', 'tsx']. Empty = all files.
+
+##### label
+
+> **label**: `string`
+
+Defined in: modules/window/filePicker.d.ts:11
+
+Label shown in the filter Select, e.g. "TypeScript Files"
+
+***
+
+### MultiPickerOptions
+
+Defined in: modules/window/filePicker.d.ts:53
+
+#### Extends
+
+- `Omit`\<[`PickerOptions`](#pickeroptions), `"mode"`\>
+
+#### Properties
+
+##### allowCreate?
+
+> `optional` **allowCreate?**: `boolean`
+
+Defined in: modules/window/filePicker.d.ts:48
+
+Show the "New File" and "New Folder" toolbar buttons.
+Defaults to true; set false to hide them.
+
+###### Inherited from
+
+[`PickerOptions`](#pickeroptions).[`allowCreate`](#allowcreate-1)
+
+##### buttonText?
+
+> `optional` **buttonText?**: `string`
+
+Defined in: modules/window/filePicker.d.ts:30
+
+Override the confirm-button label.
+
+###### Inherited from
+
+[`PickerOptions`](#pickeroptions).[`buttonText`](#buttontext-1)
+
+##### defaultName?
+
+> `optional` **defaultName?**: `string`
+
+Defined in: modules/window/filePicker.d.ts:40
+
+Pre-filled filename for saveAs mode.
+
+###### Inherited from
+
+[`PickerOptions`](#pickeroptions).[`defaultName`](#defaultname-1)
+
+##### defaultPath?
+
+> `optional` **defaultPath?**: `string`
+
+Defined in: modules/window/filePicker.d.ts:38
+
+Starting directory. Defaults to 'ROOT'.
+
+###### Inherited from
+
+[`PickerOptions`](#pickeroptions).[`defaultPath`](#defaultpath-1)
+
+##### fileNamePlaceholder?
+
+> `optional` **fileNamePlaceholder?**: `string`
+
+Defined in: modules/window/filePicker.d.ts:42
+
+Placeholder text for the saveAs filename input.
+
+###### Inherited from
+
+[`PickerOptions`](#pickeroptions).[`fileNamePlaceholder`](#filenameplaceholder-1)
+
+##### filters?
+
+> `optional` **filters?**: [`FileFilter`](#filefilter)[]
+
+Defined in: modules/window/filePicker.d.ts:33
+
+File-type filters rendered as a Select in the footer. First entry is selected by default.
+
+###### Inherited from
+
+[`PickerOptions`](#pickeroptions).[`filters`](#filters-1)
+
+##### icon?
+
+> `optional` **icon?**: `string`
+
+Defined in: modules/window/filePicker.d.ts:28
+
+Header icon name from IconRegistry.
+
+###### Inherited from
+
+[`PickerOptions`](#pickeroptions).[`icon`](#icon-1)
+
+##### mode
+
+> **mode**: `"multiFile"`
+
+Defined in: modules/window/filePicker.d.ts:56
+
+* Interaction mode is strictly locked to `multiFile`.
+
+##### requiredFiles?
+
+> `optional` **requiredFiles?**: `string`[]
+
+Defined in: modules/window/filePicker.d.ts:35
+
+Folder-mode gate: folder is only selectable when it contains every one of these filenames.
+
+###### Inherited from
+
+[`PickerOptions`](#pickeroptions).[`requiredFiles`](#requiredfiles-1)
+
+##### showHidden?
+
+> `optional` **showHidden?**: `boolean`
+
+Defined in: modules/window/filePicker.d.ts:50
+
+Show dotfiles (names starting with '.'). Defaults to false.
+
+###### Inherited from
+
+[`PickerOptions`](#pickeroptions).[`showHidden`](#showhidden-1)
+
+##### title?
+
+> `optional` **title?**: `string`
+
+Defined in: modules/window/filePicker.d.ts:26
+
+Modal title (auto-derived from mode when omitted).
+
+###### Inherited from
+
+[`PickerOptions`](#pickeroptions).[`title`](#title-1)
+
+***
+
+### PickerOptions
+
+Defined in: modules/window/filePicker.d.ts:16
+
+#### Properties
+
+##### allowCreate?
+
+> `optional` **allowCreate?**: `boolean`
+
+Defined in: modules/window/filePicker.d.ts:48
+
+Show the "New File" and "New Folder" toolbar buttons.
+Defaults to true; set false to hide them.
+
+##### buttonText?
+
+> `optional` **buttonText?**: `string`
+
+Defined in: modules/window/filePicker.d.ts:30
+
+Override the confirm-button label.
+
+##### defaultName?
+
+> `optional` **defaultName?**: `string`
+
+Defined in: modules/window/filePicker.d.ts:40
+
+Pre-filled filename for saveAs mode.
+
+##### defaultPath?
+
+> `optional` **defaultPath?**: `string`
+
+Defined in: modules/window/filePicker.d.ts:38
+
+Starting directory. Defaults to 'ROOT'.
+
+##### fileNamePlaceholder?
+
+> `optional` **fileNamePlaceholder?**: `string`
+
+Defined in: modules/window/filePicker.d.ts:42
+
+Placeholder text for the saveAs filename input.
+
+##### filters?
+
+> `optional` **filters?**: [`FileFilter`](#filefilter)[]
+
+Defined in: modules/window/filePicker.d.ts:33
+
+File-type filters rendered as a Select in the footer. First entry is selected by default.
+
+##### icon?
+
+> `optional` **icon?**: `string`
+
+Defined in: modules/window/filePicker.d.ts:28
+
+Header icon name from IconRegistry.
+
+##### mode
+
+> **mode**: `"file"` \| `"folder"` \| `"saveAs"`
+
+Defined in: modules/window/filePicker.d.ts:23
+
+Interaction mode:
+- `file`      → pick one existing file
+- `folder`    → navigate then confirm
+- `saveAs`    → choose directory + name
+
+##### requiredFiles?
+
+> `optional` **requiredFiles?**: `string`[]
+
+Defined in: modules/window/filePicker.d.ts:35
+
+Folder-mode gate: folder is only selectable when it contains every one of these filenames.
+
+##### showHidden?
+
+> `optional` **showHidden?**: `boolean`
+
+Defined in: modules/window/filePicker.d.ts:50
+
+Show dotfiles (names starting with '.'). Defaults to false.
+
+##### title?
+
+> `optional` **title?**: `string`
+
+Defined in: modules/window/filePicker.d.ts:26
+
+Modal title (auto-derived from mode when omitted).
+
+## References
+
+### ActivityBarItemOptions
+
+Re-exports [ActivityBarItemOptions](activityBar.md#activitybaritemoptions)
+
+***
+
+### app
+
+Re-exports [app](../app/app/namespaces/app.md)
+
+***
+
+### authentication
+
+Re-exports [authentication](../authentication/authentication/namespaces/authentication.md)
+
+***
+
+### BookmarkFolder
+
+Re-exports [BookmarkFolder](../workspace/recent.md#bookmarkfolder)
+
+***
+
+### CommandMetadata
+
+Re-exports [CommandMetadata](../commands/commands/index.md#commandmetadata)
+
+***
+
+### commands
+
+Re-exports [commands](../commands/commands/namespaces/commands.md)
+
+***
+
+### CommitOptions
+
+Re-exports [CommitOptions](../git/git/index.md#commitoptions)
+
+***
+
+### ConfigurationProperty
+
+Re-exports [ConfigurationProperty](../workspace/configuration.md#configurationproperty)
+
+***
+
+### CopyOptions
+
+Re-exports [CopyOptions](../fs/filesystem.md#copyoptions)
+
+***
+
+### Diagnostic
+
+Re-exports [Diagnostic](../languages/diagnostics.md#diagnostic)
+
+***
+
+### DiagnosticCollection
+
+Re-exports [DiagnosticCollection](../languages/diagnostics.md#diagnosticcollection)
+
+***
+
+### DiagnosticSeverity
+
+Re-exports [DiagnosticSeverity](../languages/diagnostics.md#diagnosticseverity)
+
+***
+
+### Disposable
+
+Re-exports [Disposable](../../core/globals/index.md#disposable)
+
+***
+
+### DocumentSymbol
+
+Re-exports [DocumentSymbol](../languages/symbols.md#documentsymbol)
+
+***
+
+### ExtensionContext
+
+Re-exports [ExtensionContext](../../core/globals/index.md#extensioncontext)
+
+***
+
+### ExtensionInfo
+
+Re-exports [ExtensionInfo](../extensions/extensions/index.md#extensioninfo)
+
+***
+
+### extensions
+
+Re-exports [extensions](../extensions/extensions/namespaces/extensions.md)
+
+***
+
+### FileDecoration
+
+Re-exports [FileDecoration](fileDecorations.md#filedecoration)
+
+***
+
+### FileStat
+
+Re-exports [FileStat](../fs/filesystem.md#filestat)
+
+***
+
+### FileSystemAPI
+
+Re-exports [FileSystemAPI](../fs/filesystem.md#filesystemapi)
+
+***
+
+### FindOptions
+
+Re-exports [FindOptions](../search/search/index.md#findoptions)
+
+***
+
+### fs
+
+Re-exports [fs](../fs/filesystem.md#fs)
+
+***
+
+### git
+
+Re-exports [git](../git/git/namespaces/git/index.md)
+
+***
+
+### GitBranch
+
+Re-exports [GitBranch](../git/git/index.md#gitbranch)
+
+***
+
+### GitChangedFile
+
+Re-exports [GitChangedFile](../git/git/index.md#gitchangedfile)
+
+***
+
+### GitCommit
+
+Re-exports [GitCommit](../git/git/index.md#gitcommit)
+
+***
+
+### GitFileStatus
+
+Re-exports [GitFileStatus](../git/git/index.md#gitfilestatus)
+
+***
+
+### GitHubUser
+
+Re-exports [GitHubUser](../authentication/authentication/index.md#githubuser)
+
+***
+
+### GitRepository
+
+Re-exports [GitRepository](../git/git/index.md#gitrepository)
+
+***
+
+### GitSortMode
+
+Re-exports [GitSortMode](../git/git/index.md#gitsortmode)
+
+***
+
+### GitStash
+
+Re-exports [GitStash](../git/git/index.md#gitstash)
+
+***
+
+### IConfigurationSection
+
+Re-exports [IConfigurationSection](../workspace/configuration.md#iconfigurationsection)
+
+***
+
+### IconThemeDefinition
+
+Re-exports [IconThemeDefinition](../themes/themes/index.md#iconthemedefinition)
+
+***
+
+### IconThemeMap
+
+Re-exports [IconThemeMap](../themes/themes/index.md#iconthememap)
+
+***
+
+### InputBoxOptions
+
+Re-exports [InputBoxOptions](quickPick.md#inputboxoptions)
+
+***
+
+### languages
+
+Re-exports [languages](../../core/globals/namespaces/languages.md)
+
+***
+
+### lsp
+
+Re-exports [lsp](../lsp/lsp/namespaces/lsp.md)
+
+***
+
+### LspServerConfig
+
+Re-exports [LspServerConfig](../lsp/lsp/index.md#lspserverconfig)
+
+***
+
+### MenuItem
+
+Re-exports [MenuItem](../menus/menus/index.md#menuitem)
+
+***
+
+### menus
+
+Re-exports [menus](../menus/menus/namespaces/menus.md)
+
+***
+
+### ModalOptions
+
+Re-exports [ModalOptions](modal.md#modaloptions)
+
+***
+
+### MSCodeUIColors
+
+Re-exports [MSCodeUIColors](../themes/themes/index.md#mscodeuicolors)
+
+***
+
+### NotificationAction
+
+Re-exports [NotificationAction](notification.md#notificationaction)
+
+***
+
+### OutputChannel
+
+Re-exports [OutputChannel](output.md#outputchannel)
+
+***
+
+### Position
+
+Re-exports [Position](editor.md#position)
+
+***
+
+### ProgressNotification
+
+Re-exports [ProgressNotification](notification.md#progressnotification)
+
+***
+
+### QuickPickItem
+
+Re-exports [QuickPickItem](quickPick.md#quickpickitem)
+
+***
+
+### QuickPickOptions
+
+Re-exports [QuickPickOptions](quickPick.md#quickpickoptions)
+
+***
+
+### RecentWorkspace
+
+Re-exports [RecentWorkspace](../workspace/recent.md#recentworkspace)
+
+***
+
+### ReplaceOptions
+
+Re-exports [ReplaceOptions](../search/search/index.md#replaceoptions)
+
+***
+
+### ResolvedIcon
+
+Re-exports [ResolvedIcon](../themes/themes/index.md#resolvedicon)
+
+***
+
+### search
+
+Re-exports [search](../search/search/namespaces/search.md)
+
+***
+
+### SearchFileResult
+
+Re-exports [SearchFileResult](../search/search/index.md#searchfileresult)
+
+***
+
+### SearchMatch
+
+Re-exports [SearchMatch](../search/search/index.md#searchmatch)
+
+***
+
+### Selection
+
+Re-exports [Selection](editor.md#selection)
+
+***
+
+### SettingOption
+
+Re-exports [SettingOption](../workspace/configuration.md#settingoption)
+
+***
+
+### SettingType
+
+Re-exports [SettingType](../workspace/configuration.md#settingtype)
+
+***
+
+### SidebarPanelDef
+
+Re-exports [SidebarPanelDef](sidebar.md#sidebarpaneldef)
+
+***
+
+### SidebarPanelHeader
+
+Re-exports [SidebarPanelHeader](sidebar.md#sidebarpanelheader)
+
+***
+
+### SidebarSectionContent
+
+Re-exports [SidebarSectionContent](sidebar.md#sidebarsectioncontent)
+
+***
+
+### SidebarSectionContext
+
+Re-exports [SidebarSectionContext](sidebar.md#sidebarsectioncontext)
+
+***
+
+### SidebarSectionDef
+
+Re-exports [SidebarSectionDef](sidebar.md#sidebarsectiondef)
+
+***
+
+### SidebarState
+
+Re-exports [SidebarState](sidebar.md#sidebarstate)
+
+***
+
+### SilentSearchOptions
+
+Re-exports [SilentSearchOptions](../search/search/index.md#silentsearchoptions)
+
+***
+
+### StashOptions
+
+Re-exports [StashOptions](../git/git/index.md#stashoptions)
+
+***
+
+### StatusBarAlignment
+
+Re-exports [StatusBarAlignment](statusBar.md#statusbaralignment)
+
+***
+
+### StatusBarItemController
+
+Re-exports [StatusBarItemController](statusBar.md#statusbaritemcontroller)
+
+***
+
+### StatusBarItemOptions
+
+Re-exports [StatusBarItemOptions](statusBar.md#statusbaritemoptions)
+
+***
+
+### SymbolKind
+
+Re-exports [SymbolKind](../languages/symbols.md#symbolkind)
+
+***
+
+### SymbolProvider
+
+Re-exports [SymbolProvider](../languages/symbols.md#symbolprovider)
+
+***
+
+### Tab
+
+Re-exports [Tab](tab.md#tab)
+
+***
+
+### TabDiffData
+
+Re-exports [TabDiffData](tab.md#tabdiffdata-1)
+
+***
+
+### TabOptions
+
+Re-exports [TabOptions](tab.md#taboptions)
+
+***
+
+### TabType
+
+Re-exports [TabType](tab.md#tabtype-1)
+
+***
+
+### TaskExecution
+
+Re-exports [TaskExecution](../tasks/tasks/index.md#taskexecution)
+
+***
+
+### TaskOptions
+
+Re-exports [TaskOptions](../tasks/tasks/index.md#taskoptions)
+
+***
+
+### tasks
+
+Re-exports [tasks](../tasks/tasks/namespaces/tasks.md)
+
+***
+
+### Terminal
+
+Re-exports [Terminal](terminal.md#terminal)
+
+***
+
+### TerminalExitStatus
+
+Re-exports [TerminalExitStatus](terminal.md#terminalexitstatus-1)
+
+***
+
+### TerminalOptions
+
+Re-exports [TerminalOptions](terminal.md#terminaloptions)
+
+***
+
+### termis
+
+Re-exports [termis](../termis/termis/namespaces/termis.md)
+
+***
+
+### TermisView
+
+Re-exports [TermisView](../termis/termis/index.md#termisview)
+
+***
+
+### TextDocument
+
+Re-exports [TextDocument](editor.md#textdocument)
+
+***
+
+### TextEditor
+
+Re-exports [TextEditor](editor.md#texteditor)
+
+***
+
+### TextEditorEdit
+
+Re-exports [TextEditorEdit](editor.md#texteditoredit-1)
+
+***
+
+### TextEditorOptions
+
+Re-exports [TextEditorOptions](editor.md#texteditoroptions-1)
+
+***
+
+### ThemeDefinition
+
+Re-exports [ThemeDefinition](../themes/themes/index.md#themedefinition)
+
+***
+
+### themes
+
+Re-exports [themes](../themes/themes/namespaces/themes/index.md)
+
+***
+
+### TokenColor
+
+Re-exports [TokenColor](../themes/themes/index.md#tokencolor)
+
+***
+
+### TreeDataProvider
+
+Re-exports [TreeDataProvider](treeView.md#treedataprovider)
+
+***
+
+### TreeItem
+
+Re-exports [TreeItem](treeView.md#treeitem)
+
+***
+
+### TreeView
+
+Re-exports [TreeView](treeView.md#treeview)
+
+***
+
+### TreeViewOptions
+
+Re-exports [TreeViewOptions](treeView.md#treeviewoptions)
+
+***
+
+### window
+
+Re-exports [window](../../core/globals/namespaces/window/index.md)
+
+***
+
+### workspace
+
+Re-exports [workspace](../../core/globals/namespaces/workspace.md)
+
+***
+
+### WorkspaceConfiguration
+
+Re-exports [WorkspaceConfiguration](../workspace/configuration.md#workspaceconfiguration)
+
+***
+
+### WorkspaceFolder
+
+Re-exports [WorkspaceFolder](../workspace/workspace.md#workspacefolder)
+
+***
+
+### WriteOptions
+
+Re-exports [WriteOptions](../fs/filesystem.md#writeoptions)
