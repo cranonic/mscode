@@ -321,6 +321,8 @@ public class InitScriptWriter {
         sb.append("alias 'clang++'=_mscode_clangxx\n");
         sb.append("tcc() { [ -f \"$PREFIX/bin/tcc\" ] && _mscode_compile \"$PREFIX/bin/tcc\" \"$@\"; }\n");
         // run: absolute path + chmod +x, then proot (sdcard is mount-noexec)
+        // sdcardfs is always noexec — chmod on /storage is a no-op.
+        // Copy into app TMPDIR (supports +x), run via linker64, delete copy.
         sb.append("run() {\n");
         sb.append("  if [ $# -lt 1 ]; then\n");
         sb.append("    echo 'usage: run <binary> [args…]' >&2\n");
@@ -336,8 +338,20 @@ public class InitScriptWriter {
         sb.append("    echo \"run: not found: $_run_bin\" >&2\n");
         sb.append("    return 127\n");
         sb.append("  fi\n");
-        sb.append("  chmod +x \"$_run_bin\" 2>/dev/null\n");
-        sb.append("  _mscode_proot \"$_run_bin\" \"$@\"\n");
+        sb.append("  _tmpd=\"${TMPDIR:-$PREFIX/tmp}\"\n");
+        sb.append("  mkdir -p \"$_tmpd\"\n");
+        sb.append("  _run_copy=\"$_tmpd/mscode_run_$$\"\n");
+        sb.append("  cp \"$_run_bin\" \"$_run_copy\" || return 1\n");
+        sb.append("  chmod 755 \"$_run_copy\" 2>/dev/null\n");
+        sb.append("  if [ -n \"$MSCODE_LINKER\" ]; then\n");
+        sb.append("    \"$MSCODE_LINKER\" \"$_run_copy\" \"$@\"\n");
+        sb.append("    _st=$?\n");
+        sb.append("  else\n");
+        sb.append("    _mscode_proot \"$_run_copy\" \"$@\"\n");
+        sb.append("    _st=$?\n");
+        sb.append("  fi\n");
+        sb.append("  rm -f \"$_run_copy\"\n");
+        sb.append("  return $_st\n");
         sb.append("}\n");
         sb.append("\n");
 
