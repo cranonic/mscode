@@ -10,25 +10,27 @@ import { usePaletteStore } from '@/store/paletteStore';
 import { useQuickKeyboardStore } from '@/store/quickKeyboardStore'; 
 import { useEditorViewStateStore } from '@/features/editor/store/editorViewStateStore';
 import { useNotificationStore } from '@/store/notificationStore';
-import { useTermisStore } from '@/features/termis/store/termisStore';
 import { useProblemsStore } from '@/features/termis/components/problems/store/problemsStore';
+import { commands } from '@/core/extensionAPI/registry/commandRegistry';
+import { useTermisStore } from '@/features/termis/store/termisStore';
 
-/** Open termis bottom panel on the Problems view (status-bar error/warn click). */
+/** Open Termis tab + Problems view (same as termisActions / Ctrl+Shift+M). */
 function openProblemsPanel() {
   try {
-    const termis = useTermisStore.getState() as any;
-    // Common shapes across revisions
-    if (typeof termis.setActiveView === 'function') termis.setActiveView('problems');
-    if (typeof termis.setVisible === 'function') termis.setVisible(true);
-    if (typeof termis.show === 'function') termis.show();
-    if (typeof termis.setOpen === 'function') termis.setOpen(true);
-    if (typeof termis.open === 'function') termis.open();
-    // Some builds use a panel visibility flag
-    if ('isOpen' in termis && typeof termis.setState === 'function') {
-      termis.setState({ isOpen: true, activeView: 'problems' });
+    if (typeof (commands as any).executeCommand === 'function') {
+      (commands as any).executeCommand('termis.open.problems');
+      return;
     }
-  } catch {
-    /* termis not ready */
+    // Fallback mirrors termisActions.openTermisView('problems')
+    useTabStore.getState().addTab({
+      id: 'terminal-main',
+      type: 'termis',
+      title: 'Termis',
+      icon: 'terminal',
+    } as any);
+    useTermisStore.getState().setActiveView('problems');
+  } catch (e) {
+    console.warn('[statusBar] openProblemsPanel failed', e);
   }
 }
 
