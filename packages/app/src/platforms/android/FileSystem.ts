@@ -89,6 +89,7 @@ export class AndroidFileSystem implements IFileSystem {
         name: res.name || 'Storage',
         uri: res.uri,
         path: res.path,
+        useSaf: !!(res as any).useSaf || !res.path,
       };
     } catch (e) {
       console.warn('[AndroidFileSystem] openFolder/SAF failed', e);
@@ -97,15 +98,44 @@ export class AndroidFileSystem implements IFileSystem {
   }
 
   /** List previously granted SAF trees (persistable URI permissions). */
-  async listSafTrees(): Promise<Array<{ uri: string; name: string; path?: string }>> {
+  async listSafTrees(): Promise<Array<{ uri: string; name: string; path?: string; useSaf?: boolean }>> {
     try {
       const { registerPlugin } = await import('@capacitor/core');
       const SafStorage = registerPlugin<{
-        listPersistedTrees: () => Promise<{ trees: Array<{ uri: string; name: string; path?: string }> }>;
+        listPersistedTrees: () => Promise<{ trees: Array<{ uri: string; name: string; path?: string; useSaf?: boolean }> }>;
       }>('SafStorage');
       const res = await SafStorage.listPersistedTrees();
       return res?.trees || [];
     } catch {
+      return [];
+    }
+  }
+
+  private async getSaf() {
+    const { registerPlugin } = await import('@capacitor/core');
+    return registerPlugin<{
+      listChildren: (opts: { uri: string; childUri?: string }) => Promise<{
+        files: Array<{ name: string; isDirectory: boolean; uri: string; path: string }>;
+      }>;
+    }>('SafStorage');
+  }
+
+  /** List a SAF tree / document URI via DocumentFile (cross-app storage). */
+  async listSafChildren(uri: string, childUri?: string): Promise<FileStat[]> {
+    try {
+      const Saf = await this.getSaf();
+      const res = await Saf.listChildren({ uri, childUri });
+      const files = (res?.files || []).map((f) => ({
+        name: f.name,
+        path: f.uri || f.path,
+        isDirectory: !!f.isDirectory,
+      }));
+      return files.sort((a, b) => {
+        if (a.isDirectory === b.isDirectory) return a.name.localeCompare(b.name);
+        return a.isDirectory ? -1 : 1;
+      });
+    } catch (e) {
+      console.warn('[AndroidFileSystem] listSafChildren failed', e);
       return [];
     }
   }
@@ -122,6 +152,10 @@ export class AndroidFileSystem implements IFileSystem {
    * @returns {Promise<FileStat[]>} Array containing sorted tracking states for files and subdirectories.
    */
   async readDir(path: string): Promise<FileStat[]> {
+    // SAF content:// (Termux, SD tree without real path, nested SAF docs)
+    if (path.startsWith('content://')) {
+      return this.listSafChildren(path);
+    }
     try {
       const actualPath = this.getFullPath(path);
       const result = await Filesystem.readdir({ path: actualPath });

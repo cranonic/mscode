@@ -8,6 +8,11 @@
   bottom: 0;
   background-color: transparent;
   z-index: 100009;
+  /* Ignore the finger-up / leftover events from the long-press that opened the menu */
+  pointer-events: none;
+}
+.ms-context-menu-overlay.ms-context-menu-overlay--armed {
+  pointer-events: auto;
 }
 
 .ms-context-menu {
@@ -29,7 +34,7 @@
 }
 
 .ms-context-menu.ms-context-menu--closing {
-  /* animation: ms-menu-out 0.1s cubic-bezier(0.2, 0, 0, 1); */
+  /* animation: ms-menu-out 0.1s cubic-bezier(0.2, 0, 0, 1);  */
   pointer-events: none;
 }
 

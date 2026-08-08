@@ -109,8 +109,16 @@ export const FilePickerModal: React.FC = () => {
           ? await (fs as any).listSafTrees()
           : [];
       for (const t of trees || []) {
-        let path = t.path || (t.uri ? resolveContentUri(t.uri) : '');
-        if (!path || path.startsWith('content://')) continue;
+        const useSaf = !!(t as any).useSaf || !t.path;
+        let path = useSaf
+          ? (t.uri || '')
+          : (t.path || (t.uri ? resolveContentUri(t.uri) : ''));
+        if (!path) continue;
+        // Drop foreign absolute paths that cannot be read by Capacitor
+        if (!path.startsWith('content://') && path.includes('/data/data/') && !path.includes('com.editor.mscode')) {
+          path = t.uri || path;
+        }
+        if (!path) continue;
         if (roots.some((r) => r.path === path)) continue;
         roots.push({
           name: t.name || 'External Storage',
@@ -147,16 +155,20 @@ export const FilePickerModal: React.FC = () => {
     try {
       const res = await (fs as any).openFolder?.();
       if (!res?.success) return;
-      let path = res.path || (res.uri ? resolveContentUri(res.uri) : '');
-      if (!path || path.startsWith('content://')) {
-        console.warn('[FilePicker] SAF returned no filesystem path', res);
+      // Foreign app data (Termux etc.) must keep content:// — plain path is sandboxed
+      const useSaf = !!(res as any).useSaf || !res.path;
+      const path = useSaf
+        ? (res.uri as string)
+        : (res.path || (res.uri ? resolveContentUri(res.uri) : ''));
+      if (!path) {
+        console.warn('[FilePicker] SAF returned nothing usable', res);
         return;
       }
       try {
         const raw = localStorage.getItem('mscode.extraStorages');
-        const list: Array<{ name: string; path: string }> = raw ? JSON.parse(raw) : [];
-        if (!list.some((x) => x.path === path)) {
-          list.push({ name: res.name || 'Storage', path });
+        const list: Array<{ name: string; path: string; uri?: string }> = raw ? JSON.parse(raw) : [];
+        if (!list.some((x) => x.path === path || (res.uri && x.uri === res.uri))) {
+          list.push({ name: res.name || 'Storage', path, uri: res.uri });
           localStorage.setItem('mscode.extraStorages', JSON.stringify(list));
         }
       } catch {}
@@ -170,15 +182,11 @@ export const FilePickerModal: React.FC = () => {
   // ── 3. Read Files & Manage Root View ──
   const refreshFiles = () => {
     if (currentPath !== 'ROOT') {
-      const path = resolveContentUri(currentPath);
-      if (path !== currentPath && !path.startsWith('content://')) {
-        setCurrentPath(path);
-      }
-      if (path.startsWith('content://')) {
+      // content:// handled by AndroidFileSystem.listSafChildren
+      fs.readDir(currentPath).then(res => setAllItems(res || [])).catch((err) => {
+        console.warn('[FilePicker] readDir', currentPath, err);
         setAllItems([]);
-        return;
-      }
-      fs.readDir(path).then(res => setAllItems(res || [])).catch(() => setAllItems([]));
+      });
     }
   };
 

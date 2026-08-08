@@ -48,6 +48,15 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   const [subPosition, setSubPosition] = useState<'right' | 'left'>('right');
   /** Nested menus: keep translate on outer node so scale animation does not wipe it. */
   const [nestedOffset, setNestedOffset] = useState({ x: 0, y: 0 });
+  const [overlayArmed, setOverlayArmed] = useState(false);
+
+  // Long-press open: the same gesture's mouseup/click must not dismiss immediately
+  useEffect(() => {
+    if (isNested) return;
+    setOverlayArmed(false);
+    const t = setTimeout(() => setOverlayArmed(true), 280);
+    return () => clearTimeout(t);
+  }, [isNested, items]);
 
   const transformOrigin = openSide === 'left' ? 'top right' : 'top left';
 
@@ -256,15 +265,15 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
     <>
       {!isNested && (
         <div
-          className="ms-context-menu-overlay"
-          onMouseDown={(e) => {
+          className={`ms-context-menu-overlay${overlayArmed ? ' ms-context-menu-overlay--armed' : ''}`}
+          onClick={(e) => {
             e.stopPropagation();
-            closeMenu();
+            if (overlayArmed) closeMenu();
           }}
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            closeMenu();
+            if (overlayArmed) closeMenu();
           }}
         />
       )}
