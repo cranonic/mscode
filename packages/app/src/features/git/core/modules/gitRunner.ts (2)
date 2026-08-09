@@ -33,14 +33,16 @@ export function isSharedStorage(path: string): boolean {
 
 function isPermissionError(msg: string): boolean {
   const m = (msg || '').toLowerCase();
-  // Only hard write failures — do NOT treat generic git errors as permission
   return (
     m.includes('permission denied') ||
     m.includes('operation not permitted') ||
     m.includes('read-only file system') ||
     m.includes('read only file system') ||
-    (m.includes('unable to write') && m.includes('.git')) ||
-    (m.includes('cannot mkdir') && m.includes('.git'))
+    m.includes('unable to create') ||
+    m.includes('cannot mkdir') ||
+    m.includes('failed to create') ||
+    m.includes('invalid path') ||
+    m.includes('not a directory') && m.includes('.git')
   );
 }
 
@@ -288,11 +290,7 @@ export async function run(command: string, cwd: string, hideLog = false): Promis
   return new Promise((resolve, reject) => {
     let output = '';
     const safeCommand = `-c safe.directory="*" ${command}`;
-    // Prefer real path — /storage/emulated/0 works when app has storage access.
-    // /sdcard is only an alias; do not force virtual/shared storage.
-    const safeCwd = cwd.startsWith('/storage/emulated/0')
-      ? cwd
-      : cwd.replace('/sdcard', '/storage/emulated/0');
+    const safeCwd     = cwd.replace('/storage/emulated/0', '/sdcard');
 
     const execution = taskManager.execute(`git ${safeCommand}`, safeCwd, (data) => {
       output += data;

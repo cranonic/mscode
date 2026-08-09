@@ -291,20 +291,32 @@ public class InitScriptWriter {
 
         // ── Compilers via proot so plain `clang hello.c -o hello` works ──
         // linker64 cannot satisfy clang's -cc1 re-exec (absolute path error).
-        sb.append("_mscode_proot() {\n");
+                sb.append("_mscode_proot() {\n");
         sb.append("  if [ -z \"$MSCODE_PROOT\" ] || [ ! -f \"$MSCODE_PROOT\" ]; then\n");
         sb.append("    echo 'mscode: libproot.so missing (MSCODE_PROOT)' >&2\n");
         sb.append("    return 127\n");
         sb.append("  fi\n");
-        sb.append("  \"$MSCODE_PROOT\" --link2symlink --kill-on-exit -0 -r / \\\n");
-        sb.append("    -b /system -b /data -b /dev -b /proc -b /sys \\\n");
-        sb.append("    -b /storage -b /sdcard -b /apex \\\n");
-        sb.append("    -b \"${TMPDIR:-$PREFIX/tmp}:/data/data/com.termux/files/usr/tmp\" \\\n");
-        sb.append("    -b \"${TMPDIR:-$PREFIX/tmp}:/tmp\" \\\n");
-        sb.append("    -w \"$PWD\" \\\n");
-        sb.append("    \"$@\"\n");
+        sb.append("  # First arg is guest binary — must exist on host (proot -r / sees host paths)\n");
+        sb.append("  if [ -n \"$1\" ] && [ ! -e \"$1\" ]; then\n");
+        sb.append("    echo \"mscode: binary not found: $1\" >&2\n");
+        sb.append("    echo \"mscode: install with: pkg install clang ndk-sysroot\" >&2\n");
+        sb.append("    return 127\n");
+        sb.append("  fi\n");
+        sb.append("  # Explicit binds + PATH so guest is not PATH=(null)\n");
+        sb.append("  env PATH=\"${PATH:-/system/bin:/system/xbin:$PREFIX/bin}\" \\\n");
+        sb.append("      PREFIX=\"$PREFIX\" TMPDIR=\"${TMPDIR:-$PREFIX/tmp}\" HOME=\"$HOME\" \\\n");
+        sb.append("      LD_LIBRARY_PATH=\"${LD_LIBRARY_PATH:-$PREFIX/lib}\" \\\n");
+        sb.append("      ANDROID_DATA=/data ANDROID_ROOT=/system \\\n");
+        sb.append("    \"$MSCODE_PROOT\" --link2symlink --kill-on-exit -0 -r / \\\n");
+        sb.append("      -b /system -b /data -b /dev -b /proc -b /sys \\\n");
+        sb.append("      -b /storage -b /sdcard -b /apex \\\n");
+        sb.append("      -b \"$PREFIX\" \\\n");
+        sb.append("      -b \"${TMPDIR:-$PREFIX/tmp}:/data/data/com.termux/files/usr/tmp\" \\\n");
+        sb.append("      -b \"${TMPDIR:-$PREFIX/tmp}:/tmp\" \\\n");
+        sb.append("      -w \"$PWD\" \\\n");
+        sb.append("      \"$@\"\n");
         sb.append("}\n");
-        // Pull the argument that follows -o (space form only, not -ofile)
+// Pull the argument that follows -o (space form only, not -ofile)
         sb.append("_mscode_dash_o() {\n");
         sb.append("  _prev=\n");
         sb.append("  _o=\n");
@@ -326,7 +338,13 @@ public class InitScriptWriter {
         sb.append("  return $_st\n");
         sb.append("}\n");
         // mksh: function names cannot contain '+' — use alias for clang++
-        sb.append("clang() { _mscode_compile \"$PREFIX/bin/clang\" \"$@\"; }\n");
+        sb.append("clang() {\n");
+        sb.append("  if [ ! -f \"$PREFIX/bin/clang\" ]; then\n");
+        sb.append("    echo 'clang not installed — run: pkg install clang ndk-sysroot' >&2\n");
+        sb.append("    return 127\n");
+        sb.append("  fi\n");
+        sb.append("  _mscode_compile \"$PREFIX/bin/clang\" \"$@\"\n");
+        sb.append("}\n");
         sb.append("_mscode_clangxx() { _mscode_compile \"$PREFIX/bin/clang++\" \"$@\"; }\n");
         sb.append("alias 'clang++'=_mscode_clangxx\n");
         sb.append("tcc() { [ -f \"$PREFIX/bin/tcc\" ] && _mscode_compile \"$PREFIX/bin/tcc\" \"$@\"; }\n");
@@ -384,7 +402,8 @@ public class InitScriptWriter {
         sb.append("    echo \"export ANDROID_DATA=/data\"\n");
         sb.append("    echo \"export ANDROID_ROOT=/system\"\n");
         sb.append("    echo 'bb() { [ $# -lt 1 ] && return 1; local a=\"$1\"; shift; ( exec -a \"$a\" \"$BUSYBOX\" \"$@\" ); }'\n");
-        sb.append("    echo '_mscode_proot() { \"$MSCODE_PROOT\" --link2symlink --kill-on-exit -0 -r / -b /system -b /data -b /dev -b /proc -b /sys -b /storage -b /sdcard -b /apex -b \"${TMPDIR:-$PREFIX/tmp}:/data/data/com.termux/files/usr/tmp\" -b \"${TMPDIR:-$PREFIX/tmp}:/tmp\" -w \"$PWD\" \"$@\"; }'\n");
+        sb.append("    echo '_mscode_proot() { env PATH=\"$PATH\" PREFIX=\"$PREFIX\" \"$MSCODE_PROOT\" --link2symlink --kill-on-exit -0 -r / -b /system -b /data -b /dev -b /proc -b /sys -b /storage -b /sdcard -b /apex -b \"$PREFIX\" -b \"${TMPDIR:-$PREFIX/tmp}:/tmp\" -w \"$PWD\" \"$@\"; }'
+");
         sb.append("    echo 'clang() { _mscode_proot \"$PREFIX/bin/clang\" \"$@\"; }'\n");
         sb.append("    echo '_mscode_clangxx() { _mscode_proot \"$PREFIX/bin/clang++\" \"$@\"; }'\n");
         sb.append("    echo \"alias 'clang++'=_mscode_clangxx\"\n");
