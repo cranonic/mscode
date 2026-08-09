@@ -73,7 +73,20 @@ export const FilePickerModal: React.FC = () => {
         const rel = docId.slice('primary:'.length);
         return rel ? `/storage/emulated/0/${rel}` : '/storage/emulated/0';
       }
-      if (docId.startsWith('raw:')) return docId.slice(4);
+      if (docId.startsWith('raw:')) {
+        const rawPath = docId.slice(4);
+        // Foreign app-private storage (e.g. Termux's /data/data/com.termux/...)
+        // is only reachable through SAF/DocumentsContract, never through the
+        // regular Filesystem API — even with All Files Access granted. If we
+        // strip this down to a plain path, readDir() stops routing through
+        // listSafChildren() and Filesystem.readdir() fails as if the folder
+        // doesn't exist. Keep the content:// URI in that case.
+        const isForeignAppData =
+          (rawPath.startsWith('/data/data/') || rawPath.startsWith('/data/user/')) &&
+          !rawPath.includes('/com.editor.mscode/');
+        if (isForeignAppData) return pathOrUri;
+        return rawPath;
+      }
     } catch { /* ignore */ }
     return pathOrUri;
   };

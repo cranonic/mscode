@@ -19,6 +19,9 @@ export interface ContextMenuProps {
   /** Flag signaling if the current component instance is spawned as a child sub-menu flyout. */
   isNested?: boolean;
 
+  /** True while the exit animation should play (forwarded from the store's isClosing). */
+  isClosing?: boolean;
+
   /**
    * The side from which this menu was spawned by its parent item.
    * Used to anchor the CSS scale animation to the correct origin point.
@@ -62,13 +65,15 @@ const trimSeparators = (items: MenuItem[]): MenuItem[] =>
       item.type !== 'separator' || arr.slice(idx + 1).some(r => r.type !== 'separator')
     );
 
-export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested, openSide = 'right' }) => {
+export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested, isClosing, openSide = 'right' }) => {
   // Selector (not the whole store) so this component only re-renders when
   // closeMenu itself changes identity — not on every unrelated store mutation
   // (e.g. registerMenuItem calls happening anywhere else in the app).
   const closeMenu = useMenuStore((s) => s.closeMenu);
   
   const menuRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const exitFallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Root menu MUST be position:fixed for `top`/`left` to work and for its z-index to
   // actually apply (z-index is ignored on position:static elements). Without this,
   // the full-screen overlay (which IS positioned) paints above the menu and eats the
@@ -87,6 +92,27 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested
   // • Main menu (openSide default 'right') → scales from top-left
   // • Sub-menu spawned to the left         → scales from top-right
   const transformOrigin = openSide === 'left' ? 'top right' : 'top left';
+
+  // ─── 0. INSTANT-CLOSE SAFEGUARD (root menu only) ────────────────────────
+  // If the exit animation is effectively zero-length (duration 0, or no
+  // animation at all), don't wait on `animationend` -- some browsers are
+  // inconsistent about firing that event for a 0s animation. Checking the
+  // computed style here, synchronously before paint, guarantees the close
+  // is genuinely instant with zero perceptible lag whenever the stylesheet
+  // says it should be, and still defers to the animationend handler below
+  // for any real (>0s) exit animation.
+  useLayoutEffect(() => {
+    if (isNested || !isClosing) return;
+    const el = panelRef.current;
+    if (!el) return;
+    const computed = getComputedStyle(el);
+    const hasNoExitAnimation =
+      computed.animationName === 'none' ||
+      computed.animationDuration.split(',').every((d) => parseFloat(d) === 0);
+    if (hasNoExitAnimation) {
+      useMenuStore.getState().finalizeClose();
+    }
+  }, [isClosing, isNested]);
 
   // ─── 1. BOUNDARY LOGIC & SMART OVERLAP ───────────────────────────────────
   // useLayoutEffect fires synchronously after DOM mutations and before the
@@ -119,7 +145,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested
 
         // Horizontal Check with Smart Overlap (Minimum 10% touch, no blind centering)
         const parentItem = menuRef.current.parentElement?.closest('.ms-context-menu-item');
-        const parentMenu = parentItem?.closest('.ms-context-menu');
+        const parentMenu = parentItem?.closest('.ms-context-menu-shell');
 
         if (parentItem && parentMenu) {
           const parentItemRect = parentItem.getBoundingClientRect();
@@ -276,10 +302,23 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested
         <div className="ms-context-menu-overlay" />
       )}
 
-      <div 
-        ref={menuRef} 
-        className="ms-context-menu" 
-        style={{ ...adjustedStyle, overflow: 'visible', transformOrigin }} 
+      <div
+        ref={menuRef}
+        className="ms-context-menu-shell"
+        style={adjustedStyle}
+      >
+      <div
+        ref={panelRef}
+        className={`ms-context-menu${isClosing ? ' ms-context-menu--closing' : ''}`}
+        style={{ overflow: 'visible', transformOrigin }}
+        onAnimationEnd={() => {
+          // Only the root menu owns the store's isOpen/isClosing lifecycle;
+          // a nested submenu's own animationend (e.g. its opening animation)
+          // must never tear down the whole menu tree.
+          if (!isNested && isClosing) {
+            useMenuStore.getState().finalizeClose();
+          }
+        }}
       >
         {trimSeparators(items).map((item, index) => {
           if (item.type === 'separator') return <div key={`sep-${item.id}-${index}`} className="ms-menu-separator" />;
@@ -339,6 +378,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested
                   <ContextMenu
                     items={trimSeparators(item.children)}
                     isNested={true}
+                    isClosing={isClosing}
                     style={{ position: 'relative', left: 'auto', top: 'auto' }}
                     openSide={subPosition}
                   />
@@ -347,6 +387,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested
             </div>
           );
         })}
+      </div>
       </div>
     </>
   );

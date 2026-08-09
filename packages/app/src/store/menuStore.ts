@@ -1,3 +1,4 @@
+
 // src/store/menuStore.ts
 
 import { create } from 'zustand';
@@ -41,6 +42,14 @@ export interface MenuState {
   openMenu: (menuId: string, x: number, y: number, defaultItems?: MenuGroup[] | MenuItem[]) => void;
   openMenuDirect: (x: number, y: number, items: MenuItem[]) => void;
   closeMenu: () => void;
+  /**
+   * Actually tears the menu down (isOpen:false, items cleared). Called by
+   * ContextMenu.tsx's `onAnimationEnd` the instant the exit animation
+   * finishes — whatever duration that animation has, including 0ms or none
+   * at all. This is what makes close latency track the stylesheet exactly,
+   * instead of a hand-maintained JS timer that can drift out of sync with it.
+   */
+  finalizeClose: () => void;
   /** Immediate teardown without animation (e.g. app background). */
   forceCloseMenu: () => void;
 
@@ -123,8 +132,16 @@ const mergeMenuItem = (existing: MenuItem, incoming: MenuItem): MenuItem => {
 
 // ─── STORE IMPLEMENTATION ──────────────────────────────────────────────────
 
-let closeTimer: ReturnType<typeof setTimeout> | null = null;
-const MENU_EXIT_MS = 100;
+let closeSafetyTimer: ReturnType<typeof setTimeout> | null = null;
+// Backstop only -- NOT the thing that actually times the close. The real
+// close is driven by ContextMenu.tsx calling finalizeClose() from its
+// `onAnimationEnd`, the instant the exit animation finishes, whatever its
+// duration is (150ms, 0ms, or -- since a zero-duration animation still
+// fires the event -- effectively instant). This timer only fires as a
+// safety net if that event never arrives for some reason (e.g. someone
+// swaps `animation: none` in instead of a 0s duration, so no animation
+// ever runs and no animationend event is ever dispatched).
+const CLOSE_SAFETY_FALLBACK_MS = 400;
 
 export const useMenuStore = create<MenuState>((set, _get) => ({
   isOpen: false,
@@ -136,7 +153,7 @@ export const useMenuStore = create<MenuState>((set, _get) => ({
   dynamicHistory: {}, // for only developer tools like menu page
 
   openMenu: (menuId, x, y, defaultItems = []) => set((state) => {
-    if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+    if (closeSafetyTimer) { clearTimeout(closeSafetyTimer); closeSafetyTimer = null; }
 
     
     // SILENT SNIFFER
@@ -176,7 +193,7 @@ export const useMenuStore = create<MenuState>((set, _get) => ({
   }),
 
   openMenuDirect: (x, y, items) => {
-    if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+    if (closeSafetyTimer) { clearTimeout(closeSafetyTimer); closeSafetyTimer = null; }
     if (items.length > 0) {
       set({ isOpen: true, isClosing: false, position: { x, y }, items });
     }
@@ -185,16 +202,41 @@ export const useMenuStore = create<MenuState>((set, _get) => ({
   closeMenu: () => {
     const { isOpen, isClosing } = _get();
     if (!isOpen || isClosing) return;
-    set({ isClosing: true });
-    if (closeTimer) clearTimeout(closeTimer);
-    closeTimer = setTimeout(() => {
-      closeTimer = null;
+
+    // Exit duration from CSS (--ms-menu-exit-ms). Default 0 = Android-native
+    // instant dismiss — no isClosing frame, no animationend wait, no 400ms safety.
+    let exitMs = 0;
+    try {
+      const raw = getComputedStyle(document.documentElement)
+        .getPropertyValue('--ms-menu-exit-ms')
+        .trim();
+      if (raw) exitMs = parseFloat(raw) || 0;
+    } catch { /* SSR / no DOM */ }
+
+    if (exitMs <= 0) {
+      if (closeSafetyTimer) { clearTimeout(closeSafetyTimer); closeSafetyTimer = null; }
       set({ isOpen: false, isClosing: false, items: [] });
-    }, MENU_EXIT_MS);
+      return;
+    }
+
+    // Animated exit path (only when --ms-menu-exit-ms > 0)
+    set({ isClosing: true });
+    if (closeSafetyTimer) clearTimeout(closeSafetyTimer);
+    closeSafetyTimer = setTimeout(() => {
+      closeSafetyTimer = null;
+      set({ isOpen: false, isClosing: false, items: [] });
+    }, Math.max(exitMs + 50, CLOSE_SAFETY_FALLBACK_MS));
+  },
+
+  finalizeClose: () => {
+    if (closeSafetyTimer) { clearTimeout(closeSafetyTimer); closeSafetyTimer = null; }
+    const { isOpen, isClosing } = _get();
+    if (!isOpen && !isClosing) return; // already finalized (e.g. safety timer beat us to it)
+    set({ isOpen: false, isClosing: false, items: [] });
   },
 
   forceCloseMenu: () => {
-    if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+    if (closeSafetyTimer) { clearTimeout(closeSafetyTimer); closeSafetyTimer = null; }
     set({ isOpen: false, isClosing: false, items: [] });
   },
 

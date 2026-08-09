@@ -111,20 +111,25 @@ export class AndroidFileSystem implements IFileSystem {
     }
   }
 
-  private async getSaf() {
-    const { registerPlugin } = await import('@capacitor/core');
-    return registerPlugin<{
-      listChildren: (opts: { uri: string; childUri?: string }) => Promise<{
-        files: Array<{ name: string; isDirectory: boolean; uri: string; path: string }>;
-      }>;
-    }>('SafStorage');
-  }
-
   /** List a SAF tree / document URI via DocumentFile (cross-app storage). */
   async listSafChildren(uri: string, childUri?: string): Promise<FileStat[]> {
     try {
-      const Saf = await this.getSaf();
-      const res = await Saf.listChildren({ uri, childUri });
+      // NOTE: never `return` a registerPlugin(...) proxy from an `async`
+      // function and then `await` the result — an async function's return
+      // value is passed through the Promise resolution algorithm, which
+      // checks for a callable `.then`. Capacitor's plugin proxy answers any
+      // property access (including `.then`) with a bridge-call stub, so it
+      // gets treated as a thenable and Android tries to invoke a native
+      // "then" method that doesn't exist → "SafStorage.then() is not
+      // implemented on android". Register + call it inline instead, the
+      // same way openFolder()/listSafTrees() already do it correctly.
+      const { registerPlugin } = await import('@capacitor/core');
+      const SafStorage = registerPlugin<{
+        listChildren: (opts: { uri: string; childUri?: string }) => Promise<{
+          files: Array<{ name: string; isDirectory: boolean; uri: string; path: string }>;
+        }>;
+      }>('SafStorage');
+      const res = await SafStorage.listChildren({ uri, childUri });
       const files = (res?.files || []).map((f) => ({
         name: f.name,
         path: f.uri || f.path,

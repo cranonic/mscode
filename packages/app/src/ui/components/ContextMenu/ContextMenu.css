@@ -1,5 +1,10 @@
 /* src/ui/components/ContextMenu/ContextMenu.css */
 
+:root {
+  /* Set > 0 (e.g. 120) to enable exit scale/fade. 0 = instant unmount. */
+  --ms-menu-exit-ms: 0.0;
+}
+
 .ms-context-menu-overlay {
   position: fixed;
   top: 0;
@@ -8,6 +13,26 @@
   bottom: 0;
   background-color: transparent;
   z-index: 100009;
+  /* Ignore leftover events from the long-press that opened the menu */
+  pointer-events: none;
+}
+.ms-context-menu-overlay.ms-context-menu-overlay--armed {
+  pointer-events: auto;
+}
+
+/*
+ * Position-only wrapper. Carries whatever left/top (root) or translate()
+ * boundary-clamp offset (submenu) React computes, and NEVER carries the
+ * scale animation. Keeping it untransformed means:
+ *  - getBoundingClientRect() on this element (see ContextMenu.tsx's
+ *    useLayoutEffect) always reports the real, un-scaled box, even while
+ *    the inner .ms-context-menu panel is mid open/close animation.
+ *  - its own transform: translate(...) is never fought over by the CSS
+ *    keyframe animation below (which only ever touches the inner panel's
+ *    transform), so the boundary correction actually stays visible.
+ */
+.ms-context-menu-shell {
+  z-index: 100010;
 }
 
 .ms-context-menu {
@@ -19,24 +44,28 @@
   padding: 4px 0;
   min-width: 220px;
   font-size: 13px;
-  z-index: 100010;
   text-align: start;
-  opacity: 0;
-  transform: scale(0.96);
+  
+  /* Android Material Design style origin - change to 'top right' if your menu opens on the right */
+  transform-origin: top right; 
+  
+  opacity: 1;
+  transform: scale(1);
   will-change: opacity, transform;
-  /* snappy open — ~120ms */
-  animation: ms-menu-in 400ms cubic-bezier(0.2, 0, 0, 1);
+  /* Material Design entering easing curve */
+  animation: ms-menu-in 0.2s cubic-bezier(0.0, 0.0, 0.2, 1) forwards; 
 }
 
 .ms-context-menu.ms-context-menu--closing {
-  /* animation: ms-menu-out 0.1s cubic-bezier(0.2, 0, 0, 1);  */
+  animation: ms-menu-out calc(var(--ms-menu-exit-ms, 0) * 1ms)
+    cubic-bezier(0.4, 0, 1, 1) forwards;
   pointer-events: none;
 }
 
 @keyframes ms-menu-in {
   0% {
     opacity: 0;
-    transform: scale(0.96);
+    transform: scale(0.8); /* Android menus typically scale up from 80% */
   }
   100% {
     opacity: 1;
@@ -51,9 +80,10 @@
   }
   100% {
     opacity: 0;
-    transform: scale(0.96);
+    transform: scale(0.8);
   }
 }
+
 
 .ms-context-menu-item {
   display: flex;

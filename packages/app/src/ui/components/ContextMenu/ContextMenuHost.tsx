@@ -17,6 +17,7 @@ export const ContextMenuHost: React.FC = () => {
   return (
     <ContextMenu
       items={items}
+      isClosing={isClosing}
       style={{
         position: 'fixed',
         left: position.x,
