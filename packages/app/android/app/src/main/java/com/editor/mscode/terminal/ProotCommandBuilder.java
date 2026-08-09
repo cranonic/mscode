@@ -19,10 +19,6 @@ import java.util.Map;
  *  from writable app storage when targetSdkVersion is higher than 28.
  *  $PREFIX/bin is on PATH for packages that were made executable via the
  *  bootstrap / package installer path (linker or nativeLibraryDir copy).
- *
- * Background jobs do NOT source mscode_env.sh (busybox applet functions call
- * $BUSYBOX and break after APK updates with "can't execute: Is a directory").
- * Interactive sessions still use ENV= init script with full wrappers.
  */
 public class ProotCommandBuilder {
 
@@ -59,6 +55,11 @@ public class ProotCommandBuilder {
 
     // ─── Terminal session command ─────────────────────────────────────────────
 
+    /**
+     * Full command for an interactive PTY session.
+     *
+     * @param initScriptPath  Per-session init shell script (sets PS1, cd, etc.)
+     */
     public String[] buildSessionCommand(String initScriptPath) {
         if (useNative) {
             return buildNativeSessionCommand(initScriptPath);
@@ -69,6 +70,8 @@ public class ProotCommandBuilder {
     /**
      * Native session: /system/bin/sh -i
      * Init script is sourced via ENV= (see buildNativeSessionEnv).
+     * Busybox applets: bb ls  (uses exec -a to fix argv[0]).
+     * $PREFIX/bin is on PATH when bootstrap is installed.
      */
     public String[] buildNativeSessionCommand(String initScriptPath) {
         List<String> cmd = new ArrayList<>();
@@ -86,8 +89,11 @@ public class ProotCommandBuilder {
         return cmd.toArray(new String[0]);
     }
 
-    // ─── Background ───────────────────────────────────────────────────────────
-
+    /**
+     * Full command for backgroundExecute() — no PTY, no init script.
+     *
+     * @param shellCommand  The sh -c command to run.
+     */
     public String[] buildBackgroundCommand(String shellCommand) {
         if (useNative) {
             return buildNativeBackgroundCommand(shellCommand);
@@ -95,59 +101,35 @@ public class ProotCommandBuilder {
         return buildProotBackgroundCommand(shellCommand);
     }
 
-    /**
-     * Clean background shell — no mscode_env.sh.
-     * Interactive terminal keeps full wrappers via ENV= init script.
-     * runpfx helper runs $PREFIX/bin tools via linker64 when not +x.
-     * PATH never includes nativeLibraryDir (directory of .so files).
-     * /storage and /sdcard remain accessible as normal host paths.
-     */
     public String[] buildNativeBackgroundCommand(String shellCommand) {
         List<String> cmd = new ArrayList<>();
+        // Never use libbusybox.so as argv[0] — /system/bin/sh -c only
         cmd.add("/system/bin/sh");
         cmd.add("-c");
-
+        String envFile = filesDir + "/mscode_env.sh";
+        // Source env for pkg / PREFIX wrappers, then hard-reset PATH.
+        // nativeLibraryDir must NOT be on PATH (directory of .so →
+        // "can't execute: Is a directory" for empty/bad commands).
+        // Unset busybox coreutils functions so mkdir/find use /system/bin toybox.
         String safePrefix = prefixPath.replace("'", "'\\''");
         String safeTmp = tmpPath.replace("'", "'\\''");
         String safeHome = homePath.replace("'", "'\\''");
-        String safeLib = nativeLibDir.replace("'", "'\\''");
-
         StringBuilder w = new StringBuilder();
         w.append("MSCODE_BANNER_SHOWN=1; ");
-        w.append("export HOME='").append(safeHome).append("'; ");
-        w.append("export TMPDIR='").append(safeTmp).append("'; ");
-        w.append("export PREFIX='").append(safePrefix).append("'; ");
-        w.append("export TERMUX_PREFIX='").append(safePrefix).append("'; ");
-        // system + PREFIX only — sdcard/git use real /storage paths, not virtual
+        w.append("[ -f '").append(envFile).append("' ] && . '").append(envFile).append("'; ");
         w.append("export PATH=\"/system/bin:/system/xbin:")
          .append(safePrefix).append("/bin:")
          .append(safePrefix).append("/bin/applets\"; ");
-        w.append("export LD_LIBRARY_PATH=\"")
-         .append(safePrefix).append("/lib:")
-         .append(safeLib).append("\"; ");
-        w.append("export ANDROID_DATA=/data ANDROID_ROOT=/system ANDROID_STORAGE=/storage; ");
-        w.append("export SSL_CERT_FILE='").append(safePrefix).append("/etc/tls/cert.pem'; ");
-        w.append("export CURL_CA_BUNDLE=\"$SSL_CERT_FILE\"; ");
-        w.append("export MSCODE_PROOT='")
-         .append(prootPath.replace("'", "'\\''")).append("'; ");
-        w.append("MSCODE_LINKER=/system/bin/linker64; ");
-        w.append("[ -x /system/bin/linker64 ] || MSCODE_LINKER=/system/bin/linker; ");
-        w.append("export MSCODE_LINKER; ");
-        // Run PREFIX binary: direct if +x, else linker64 (targetSdk>28 noexec)
-        w.append("runpfx() {");
-        w.append(" _n=\"$1\"; shift;");
-        w.append(" _b=\"$PREFIX/bin/$_n\";");
-        w.append(" if [ ! -f \"$_b\" ]; then");
-        w.append("  command -v \"$_n\" >/dev/null 2>&1 && { \"$_n\" \"$@\"; return $?; };");
-        w.append("  return 127;");
-        w.append(" fi;");
-        w.append(" if [ -x \"$_b\" ]; then \"$_b\" \"$@\";");
-        w.append(" else \"$MSCODE_LINKER\" \"$_b\" \"$@\"; fi;");
-        w.append(" }; ");
+        w.append("export PREFIX='").append(safePrefix).append("'; ");
+        w.append("export TMPDIR='").append(safeTmp).append("'; ");
+        w.append("export HOME='").append(safeHome).append("'; ");
+        w.append("for _c in find wc tr sort head basename mkdir rm ls cp mv cat uname chmod touch grep sed awk; do unset -f $_c 2>/dev/null; done; ");
+        w.append("unalias -a 2>/dev/null; ");
         w.append(shellCommand);
         cmd.add(w.toString());
         return cmd.toArray(new String[0]);
     }
+
 
     private String[] buildProotBackgroundCommand(String shellCommand) {
         List<String> cmd = new ArrayList<>();
@@ -159,12 +141,16 @@ public class ProotCommandBuilder {
         return cmd.toArray(new String[0]);
     }
 
+    /** Expose environment variables for ProcessBuilder / streamBackgroundExecute. */
     public Map<String, String> getProotEnv() {
         return buildBackgroundEnvMap();
     }
 
     // ─── Environment ─────────────────────────────────────────────────────────
 
+    /**
+     * Environment for PTY sessions (full set).
+     */
     public String[] buildSessionEnv() {
         return buildSessionEnv(null);
     }
@@ -181,9 +167,7 @@ public class ProotCommandBuilder {
     }
 
     /**
-     * Interactive session env. nativeLibDir stays on PATH only for loading .so
-     * via dynamic linker lookup when needed; prefer system + PREFIX for commands.
-     * Init script (ENV=) provides bb/pkg/elf wrappers.
+     * @param initScriptPath  if non-null, set ENV= so interactive sh sources it
      */
     public String[] buildNativeSessionEnv(String initScriptPath) {
         List<String> env = new ArrayList<>();
@@ -192,11 +176,12 @@ public class ProotCommandBuilder {
         env.add("PREFIX=" + prefixPath);
         env.add("TERM=xterm-256color");
         env.add("LANG=C.UTF-8");
-        // PREFIX first, then system — do NOT put nativeLibDir first (dir of .so)
+        // $PREFIX/bin first so installed packages win over system tools
         env.add("PATH=" + prefixPath + "/bin:" + prefixPath + "/bin/applets:"
-                + "/system/bin:/system/xbin:" + nativeLibDir);
+                + nativeLibDir + ":/system/bin:/system/xbin");
         env.add("LD_LIBRARY_PATH=" + prefixPath + "/lib:" + nativeLibDir);
         env.add("BUSYBOX=" + busyboxPath);
+        // Termux compatibility aliases
         env.add("TERMUX_PREFIX=" + prefixPath);
         env.add("TERMUX_VERSION=mscode");
         env.add("ANDROID_DATA=/data");
@@ -205,8 +190,8 @@ public class ProotCommandBuilder {
         env.add("TERMINFO=" + prefixPath + "/share/terminfo");
         env.add("SSL_CERT_FILE=" + prefixPath + "/etc/tls/cert.pem");
         env.add("CURL_CA_BUNDLE=" + prefixPath + "/etc/tls/cert.pem");
+        // proot binary lives in nativeLibraryDir (executable) — used only for compilers
         env.add("MSCODE_PROOT=" + prootPath);
-        env.add("MSCODE_LINKER=/system/bin/linker64");
         env.add("PROOT_LOADER=" + nativeLibDir + "/libproot-loader.so");
         File l32e = new File(nativeLibDir, "libproot-loader32.so");
         if (l32e.exists()) {
@@ -214,6 +199,7 @@ public class ProotCommandBuilder {
         }
         env.add("PROOT_TMP_DIR=" + tmpPath);
         if (initScriptPath != null && !initScriptPath.isEmpty()) {
+            // mksh (Android /system/bin/sh) sources $ENV for interactive shells
             env.add("ENV=" + initScriptPath);
         }
         return env.toArray(new String[0]);
@@ -225,6 +211,10 @@ public class ProotCommandBuilder {
         return env.toArray(new String[0]);
     }
 
+    /**
+     * Environment map for ProcessBuilder-based background execution.
+     * Call pb.environment().clear() first, then putAll(this).
+     */
     public Map<String, String> buildBackgroundEnvMap() {
         if (useNative) {
             return buildNativeEnvMap();
@@ -234,48 +224,46 @@ public class ProotCommandBuilder {
 
     public Map<String, String> buildNativeEnvMap() {
         Map<String, String> map = new java.util.LinkedHashMap<>();
-        map.put("HOME", homePath);
-        map.put("TMPDIR", tmpPath);
-        map.put("PREFIX", prefixPath);
-        map.put("TERM", "xterm-256color");
-        map.put("LANG", "C.UTF-8");
-        // Real host paths — /storage/emulated/0 works for git/compress when permitted
-        map.put("PATH", "/system/bin:/system/xbin:" + prefixPath + "/bin:"
-                + prefixPath + "/bin/applets");
+        map.put("HOME",            homePath);
+        map.put("TMPDIR",          tmpPath);
+        map.put("PREFIX",          prefixPath);
+        map.put("TERM",            "xterm-256color");
+        map.put("LANG",            "C.UTF-8");
+        map.put("PATH", "/system/bin:/system/xbin:" + prefixPath + "/bin:" + prefixPath + "/bin/applets");
         map.put("LD_LIBRARY_PATH", prefixPath + "/lib:" + nativeLibDir);
-        map.put("BUSYBOX", busyboxPath);
-        map.put("TERMUX_PREFIX", prefixPath);
-        map.put("TERMUX_VERSION", "mscode");
-        map.put("ANDROID_DATA", "/data");
-        map.put("ANDROID_ROOT", "/system");
+        map.put("BUSYBOX",         busyboxPath);
+        map.put("TERMUX_PREFIX",   prefixPath);
+        map.put("TERMUX_VERSION",  "mscode");
+        map.put("ANDROID_DATA",    "/data");
+        map.put("ANDROID_ROOT",    "/system");
         map.put("ANDROID_STORAGE", "/storage");
-        map.put("TERMINFO", prefixPath + "/share/terminfo");
-        map.put("SSL_CERT_FILE", prefixPath + "/etc/tls/cert.pem");
-        map.put("CURL_CA_BUNDLE", prefixPath + "/etc/tls/cert.pem");
-        map.put("MSCODE_PROOT", prootPath);
-        map.put("MSCODE_LINKER", "/system/bin/linker64");
-        map.put("PROOT_LOADER", nativeLibDir + "/libproot-loader.so");
+        map.put("TERMINFO",        prefixPath + "/share/terminfo");
+        map.put("SSL_CERT_FILE",   prefixPath + "/etc/tls/cert.pem");
+        map.put("CURL_CA_BUNDLE",  prefixPath + "/etc/tls/cert.pem");
+        // Compiler helper: proot from nativeLibraryDir bypasses noexec on $PREFIX
+        map.put("MSCODE_PROOT",    prootPath);
+        map.put("PROOT_LOADER",    nativeLibDir + "/libproot-loader.so");
         File l32 = new File(nativeLibDir, "libproot-loader32.so");
         if (l32.exists()) {
             map.put("PROOT_LOADER32", l32.getAbsolutePath());
         }
-        map.put("PROOT_TMP_DIR", tmpPath);
+        map.put("PROOT_TMP_DIR",   tmpPath);
         return map;
     }
 
     private Map<String, String> buildProotEnvMap() {
         Map<String, String> map = new java.util.LinkedHashMap<>();
-        map.put("PROOT_LOADER", nativeLibDir + "/libproot-loader.so");
+        map.put("PROOT_LOADER",    nativeLibDir + "/libproot-loader.so");
         File l32 = new File(nativeLibDir, "libproot-loader32.so");
         if (l32.exists()) {
             map.put("PROOT_LOADER32", l32.getAbsolutePath());
         }
-        map.put("PROOT_TMP_DIR", tmpPath);
-        map.put("HOME", "/root");
-        map.put("TMPDIR", tmpPath);
-        map.put("TERM", "xterm-256color");
-        map.put("LANG", "C.UTF-8");
-        map.put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+        map.put("PROOT_TMP_DIR",   tmpPath);
+        map.put("HOME",            "/root");
+        map.put("TMPDIR",          tmpPath);
+        map.put("TERM",            "xterm-256color");
+        map.put("LANG",            "C.UTF-8");
+        map.put("PATH",            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
         map.put("LD_LIBRARY_PATH", nativeLibDir);
         return map;
     }
@@ -317,7 +305,14 @@ public class ProotCommandBuilder {
         cmd.add("-b"); cmd.add(tmpPath + ":/dev/shm");
     }
 
+    /**
+     * Build a shell snippet that runs {@code guestCmd} under proot with host root (-r /).
+     * proot intercepts execve → can load ELF from non-executable $PREFIX (targetSdk>28).
+     * Used for clang/tcc/gcc only — interactive shell stays native.
+     */
     public String wrapWithProot(String guestCmd) {
+        // Minimal binds: keep paths identical to host so $PREFIX paths stay valid.
+        // Termux packages hardcode /data/data/com.termux/files/usr/tmp — bind our tmp.
         String termuxTmp = "/data/data/com.termux/files/usr/tmp";
         return "\"" + prootPath + "\""
             + " --link2symlink --kill-on-exit -0 -r /"
@@ -343,6 +338,7 @@ public class ProotCommandBuilder {
         env.add("HOME=/root");
         env.add("TERM=xterm-256color");
         env.add("LANG=C.UTF-8");
+        env.add("PS1=\\[\\e[1;32m\\]\\h\\[\\e[0m\\]:\\[\\e[1;34m\\]$(pwd | awk -F/ \'{if (NF>3) print \"../\"$(NF-1)\"/\"$NF; else if (NF>=2) print $(NF-1)\"/\"$NF; else print $0}\')\\[\\e[0m\\]\\$ ");
         env.add("TMPDIR=" + tmpPath);
         env.add("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
         env.add("LD_LIBRARY_PATH=" + nativeLibDir);
