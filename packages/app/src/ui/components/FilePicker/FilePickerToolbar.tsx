@@ -55,6 +55,8 @@ interface ToolbarProps {
   /** Mark mode active — show Cancel mark. */
   markMode?: boolean;
   onCancelMark?: () => void;
+  /** Compress selected items (mark mode). */
+  onCompress?: () => void;
   /** Max icons before overflow into ⋮ menu (default 4). */
   maxOverflow?: number;
 }
@@ -88,6 +90,7 @@ export const FilePickerToolbar: React.FC<ToolbarProps> = ({
   onClearSelection,
   markMode = false,
   onCancelMark,
+  onCompress,
   maxOverflow = 4,
 }) => {
   const openMenu = useMenuStore((s) => s.openMenuDirect);
@@ -95,8 +98,23 @@ export const FilePickerToolbar: React.FC<ToolbarProps> = ({
 
   const breadcrumb = formatPickerPath(currentPath, pathSegments);
 
-  const openSortMenu = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const openSortMenu = (e?: React.MouseEvent | React.SyntheticEvent) => {
+    e?.stopPropagation?.();
+    // InputAction often fires without usable clientX/Y — anchor under the button
+    let x = 0;
+    let y = 0;
+    const target = (e?.currentTarget || e?.target) as HTMLElement | null;
+    if (target && typeof target.getBoundingClientRect === 'function') {
+      const r = target.getBoundingClientRect();
+      x = r.left;
+      y = r.bottom + 4;
+    } else if (e && 'clientX' in e && typeof (e as React.MouseEvent).clientX === 'number') {
+      x = (e as React.MouseEvent).clientX;
+      y = (e as React.MouseEvent).clientY;
+    } else {
+      x = Math.round(window.innerWidth / 2 - 110);
+      y = 72;
+    }
     const items: MenuItem[] = [
       {
         id: 'sort-name-asc',
@@ -117,7 +135,7 @@ export const FilePickerToolbar: React.FC<ToolbarProps> = ({
         onClick: () => onSortMode('type'),
       },
     ];
-    openMenu(e.clientX, e.clientY, items);
+    openMenu(x, y, items);
   };
 
   const actions: ActionDef[] = useMemo(() => {
@@ -128,6 +146,15 @@ export const FilePickerToolbar: React.FC<ToolbarProps> = ({
         icon: 'close',
         title: 'Cancel mark',
         onClick: () => onCancelMark(),
+        show: true,
+      });
+    }
+    if (markMode && onCompress && selectedCount > 0) {
+      list.push({
+        id: 'compress',
+        icon: 'file-zip',
+        title: 'Compress…',
+        onClick: () => onCompress(),
         show: true,
       });
     }
@@ -210,6 +237,8 @@ export const FilePickerToolbar: React.FC<ToolbarProps> = ({
     showHidden,
     sortMode,
     markMode,
+    selectedCount,
+    onCompress,
   ]);
 
   // Primary icons (maxOverflow) + overflow ⋮ for the rest
