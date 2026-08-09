@@ -103,33 +103,58 @@ public class ProotCommandBuilder {
 
     public String[] buildNativeBackgroundCommand(String shellCommand) {
         List<String> cmd = new ArrayList<>();
-        // Never use libbusybox.so as argv[0] — /system/bin/sh -c only
         cmd.add("/system/bin/sh");
         cmd.add("-c");
+
         String envFile = filesDir + "/mscode_env.sh";
-        // Source env for pkg / PREFIX wrappers, then hard-reset PATH.
-        // nativeLibraryDir must NOT be on PATH (directory of .so →
-        // "can't execute: Is a directory" for empty/bad commands).
-        // Unset busybox coreutils functions so mkdir/find use /system/bin toybox.
         String safePrefix = prefixPath.replace("'", "'\\''");
         String safeTmp = tmpPath.replace("'", "'\\''");
         String safeHome = homePath.replace("'", "'\\''");
+        String safeLib = nativeLibDir.replace("'", "'\\''");
+        String safeEnv = envFile.replace("'", "'\\''");
+
         StringBuilder w = new StringBuilder();
         w.append("MSCODE_BANNER_SHOWN=1; ");
-        w.append("[ -f '").append(envFile).append("' ] && . '").append(envFile).append("'; ");
+        w.append("export HOME='").append(safeHome).append("'; ");
+        w.append("export TMPDIR='").append(safeTmp).append("'; ");
+        w.append("export PREFIX='").append(safePrefix).append("'; ");
+        w.append("export TERMUX_PREFIX='").append(safePrefix).append("'; ");
         w.append("export PATH=\"/system/bin:/system/xbin:")
          .append(safePrefix).append("/bin:")
          .append(safePrefix).append("/bin/applets\"; ");
-        w.append("export PREFIX='").append(safePrefix).append("'; ");
-        w.append("export TMPDIR='").append(safeTmp).append("'; ");
-        w.append("export HOME='").append(safeHome).append("'; ");
-        w.append("for _c in find wc tr sort head basename mkdir rm ls cp mv cat uname chmod touch grep sed awk; do unset -f $_c 2>/dev/null; done; ");
+        w.append("export LD_LIBRARY_PATH=\"")
+         .append(safePrefix).append("/lib:")
+         .append(safeLib).append("\"; ");
+        w.append("export ANDROID_DATA=/data ANDROID_ROOT=/system ANDROID_STORAGE=/storage; ");
+        w.append("export SSL_CERT_FILE='").append(safePrefix).append("/etc/tls/cert.pem'; ");
+        w.append("export CURL_CA_BUNDLE=\"$SSL_CERT_FILE\"; ");
+        w.append("MSCODE_LINKER=/system/bin/linker64; ");
+        w.append("[ -x /system/bin/linker64 ] || MSCODE_LINKER=/system/bin/linker; ");
+        w.append("export MSCODE_LINKER; ");
+        // Source shared env so zip()/elf/pkg/mscode_wrap exist (file refreshed by streamBackgroundExecute)
+        w.append("[ -f '").append(safeEnv).append("' ] && . '").append(safeEnv).append("'; ");
+        // Re-assert PATH after env (env may put nativeLibDir first)
+        w.append("export PATH=\"/system/bin:/system/xbin:")
+         .append(safePrefix).append("/bin:")
+         .append(safePrefix).append("/bin/applets\"; ");
+        // Toybox-first: drop busybox coreutils functions; keep zip/node/python/elf/pkg
+        w.append("for _c in ls cat cp mv rm mkdir rmdir grep find head tail wc uname ");
+        w.append("chmod chown sed sort cut tr uniq basename dirname pwd echo printf sleep date touch ");
+        w.append("ln readlink stat du df ps kill id which xargs tee md5sum base64 gzip diff ");
+        w.append("yes true false test env printenv seq expr realpath mktemp clear; do ");
+        w.append("unset -f $_c 2>/dev/null; done; ");
         w.append("unalias -a 2>/dev/null; ");
+        // runpfx fallback if wrapper missing
+        w.append("runpfx() {");
+        w.append(" _n=\"$1\"; shift; _b=\"$PREFIX/bin/$_n\";");
+        w.append(" if type \"$_n\" >/dev/null 2>&1; then \"$_n\" \"$@\"; return $?; fi;");
+        w.append(" if [ -f \"$_b\" ]; then");
+        w.append("  if [ -x \"$_b\" ]; then \"$_b\" \"$@\"; else \"$MSCODE_LINKER\" \"$_b\" \"$@\"; fi;");
+        w.append("  return $?; fi; return 127; }; ");
         w.append(shellCommand);
         cmd.add(w.toString());
         return cmd.toArray(new String[0]);
     }
-
 
     private String[] buildProotBackgroundCommand(String shellCommand) {
         List<String> cmd = new ArrayList<>();

@@ -418,6 +418,21 @@ public class TerminalForegroundService extends Service {
     ) {
         new Thread(() -> {
             try {
+                // Guarantee native bins + mscode_env.sh so zip()/elf wrappers exist
+                // even when no interactive terminal session was ever opened.
+                synchronized (rootfsLock) {
+                    try {
+                        rootfs.ensureNativeBinaries();
+                    } catch (Exception e) {
+                        emitLog("bg ensureNativeBinaries: " + e.getMessage());
+                    }
+                    try {
+                        if (scriptWriter != null) scriptWriter.writeSharedEnv();
+                    } catch (Exception e) {
+                        emitLog("bg writeSharedEnv: " + e.getMessage());
+                    }
+                }
+
                 ProcessBuilder pb = new ProcessBuilder(cmd);
                 pb.environment().clear();
                 if (env != null) pb.environment().putAll(env);
