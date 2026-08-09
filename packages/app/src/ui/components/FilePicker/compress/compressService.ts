@@ -1,11 +1,15 @@
 /**
- * Compress engine — safe cwd, content:// path resolve, pkg check/install,
- * progress without shell division (JS computes %).
+ * Compress engine.
+ *
+ * CRITICAL: shellCommand must be the raw script body — NOT `sh -c "..."`.
+ * ProotCommandBuilder.buildNativeBackgroundCommand already runs:
+ *   /system/bin/sh -c <shellCommand>
+ * Wrapping again causes the OUTER sh to expand $OUT/$bin/… to empty
+ * before the real script runs.
  *
  * Markers:
  *   __MS_PHASE__ checking | installing | compressing
- *   __MS_PROGRESS__ <pct>           — absolute 0–100
- *   __MS_PROGRESS__ <current> <total> — JS computes percent
+ *   __MS_PROGRESS__ <pct>  OR  <current> <total>
  *   __MS_STATUS__ <text>
  */
 
@@ -59,12 +63,25 @@ export function isContentUri(p: string): boolean {
   return typeof p === 'string' && p.startsWith('content://');
 }
 
+function isForeignAppPath(p: string): boolean {
+  if (!p.startsWith('/data/data/') && !p.startsWith('/data/user/')) return false;
+  return p.indexOf('com.editor.mscode') < 0;
+}
+
 export function safeShellCwd(preferred: string, fallbackTmp?: string): string {
   const resolved = shellPathFromUri(preferred);
-  if (resolved && !isContentUri(resolved) && resolved.startsWith('/')) {
+  if (
+    resolved &&
+    !isContentUri(resolved) &&
+    resolved.startsWith('/') &&
+    !isForeignAppPath(resolved)
+  ) {
     return resolved;
   }
-  return fallbackTmp || '/data/local/tmp';
+  if (fallbackTmp && fallbackTmp.startsWith('/') && !isContentUri(fallbackTmp)) {
+    return fallbackTmp;
+  }
+  return '/data/local/tmp';
 }
 
 export function depsForFormat(format: ArchiveFormat): {
@@ -93,13 +110,28 @@ export function buildCompressPlan(
   options: CompressOptions,
   opts?: { tmpDir?: string },
 ): CompressPlan {
-  const fileName = ensureArchiveExtension(options.archiveName.trim() || 'archive', options.format);
+  const fileName = ensureArchiveExtension(
+    options.archiveName.trim() || 'archive',
+    options.format,
+  );
   const outputDirRaw = options.outputDir.replace(/\/$/, '') || '.';
   const outputDir = shellPathFromUri(outputDirRaw);
+
+  const tmpFallback =
+    opts?.tmpDir &&
+    opts.tmpDir.startsWith('/') &&
+    !isContentUri(opts.tmpDir) &&
+    !isForeignAppPath(opts.tmpDir)
+      ? opts.tmpDir
+      : '/data/local/tmp';
+
+  // Never write into Termux / foreign app-private storage
   const writableOutDir =
-    !isContentUri(outputDir) && outputDir.startsWith('/')
+    !isContentUri(outputDir) &&
+    outputDir.startsWith('/') &&
+    !isForeignAppPath(outputDir)
       ? outputDir
-      : shellPathFromUri(opts?.tmpDir || '') || '/data/local/tmp';
+      : tmpFallback;
 
   const outputPath = writableOutDir.replace(/\/$/, '') + '/' + fileName;
   const sources = options.sources.map((s) => shellPathFromUri(s.path));
@@ -108,25 +140,48 @@ export function buildCompressPlan(
   const format = options.format;
   const { bins, packages } = depsForFormat(format);
 
-  const listParts = sources.map((p) => {
-    if (isContentUri(p)) {
-      return 'echo "__MS_STATUS__ Skip unreadable URI" >&2';
+  const listParts: string[] = [];
+  for (const p of sources) {
+    if (isContentUri(p) || isForeignAppPath(p)) {
+      // Shell of this app cannot read other apps' private data
+      listParts.push(
+        'echo "__MS_STATUS__ Skip inaccessible path (permission)" >&2',
+      );
+      continue;
     }
     const hidden = includeHidden ? '' : " -not -path '*/.*' ";
-    return (
-      'if [ -d ' + q(p) + ' ]; then /system/bin/find ' + q(p) + hidden + ' -type f 2>/dev/null || find ' + q(p) + hidden + ' -type f 2>/dev/null; ' +
-      'elif [ -e ' + q(p) + ' ]; then printf \'%s\\n\' ' + q(p) + '; fi'
+    listParts.push(
+      'if [ -d ' +
+        q(p) +
+        ' ]; then /system/bin/find ' +
+        q(p) +
+        hidden +
+        ' -type f 2>/dev/null || find ' +
+        q(p) +
+        hidden +
+        ' -type f 2>/dev/null; ' +
+        'elif [ -e ' +
+        q(p) +
+        ' ]; then printf \'%s\\n\' ' +
+        q(p) +
+        '; fi',
     );
-  });
+  }
   const listCmd = listParts.join('; ');
 
   const pwdZip = options.password ? ' -P ' + q(options.password) : '';
-  const zipLevel = options.method === 'store' || level === 0 ? '-0' : '-' + String(level);
+  const zipLevel =
+    options.method === 'store' || level === 0 ? '-0' : '-' + String(level);
   const pwd7z = options.password ? ' -p' + q(options.password) : '';
   const solid = options.solid ? ' -ms=on' : ' -ms=off';
 
   let mode = 'zip';
-  if (format === 'tar' || format === 'tar.gz' || format === 'tar.bz2' || format === 'tar.xz') {
+  if (
+    format === 'tar' ||
+    format === 'tar.gz' ||
+    format === 'tar.bz2' ||
+    format === 'tar.xz'
+  ) {
     mode = 'tar';
   } else if (format === '7z') {
     mode = '7z';
@@ -137,11 +192,19 @@ export function buildCompressPlan(
   if (format === 'tar.bz2') tarFlags = '-cjf';
   if (format === 'tar.xz') tarFlags = '-cJf';
 
+  // Space-separated quoted bin names for `for bin in ...`
   const binArr = bins.map((b) => q(b)).join(' ');
 
   const L: string[] = [];
+  // Prefer system tools; drop dead busybox function wrappers from mscode_env.sh
   L.push('export PATH="/system/bin:/system/xbin:${PREFIX:-}/bin:${PATH:-}"');
-  L.push('unalias find wc tr sort head basename mkdir rm zip tar 7z gzip bzip2 xz 2>/dev/null || true');
+  L.push('unset BUSYBOX 2>/dev/null || true');
+  L.push(
+    'for _c in find wc tr sort head basename mkdir rm ls cp mv cat; do unset -f $_c 2>/dev/null; done',
+  );
+  L.push(
+    'unalias find wc tr sort head basename mkdir rm zip tar 7z gzip bzip2 xz 2>/dev/null || true',
+  );
   L.push('');
   L.push('OUT=' + q(outputPath));
   L.push('OUTDIR=' + q(writableOutDir));
@@ -175,7 +238,9 @@ export function buildCompressPlan(
   L.push('    *) INSTALL_LIST="$INSTALL_LIST $miss" ;;');
   L.push('  esac');
   L.push('done');
-  L.push("INSTALL_LIST=$(printf '%s\\n' $INSTALL_LIST | sort -u | tr '\\n' ' ')");
+  L.push(
+    "INSTALL_LIST=$(printf '%s\\n' $INSTALL_LIST | sort -u | tr '\\n' ' ')",
+  );
   L.push("INSTALL_LIST=$(echo \"$INSTALL_LIST\" | sed 's/^ *//;s/ *$//')");
   L.push('');
   L.push('if [ -n "$INSTALL_LIST" ]; then');
@@ -191,7 +256,9 @@ export function buildCompressPlan(
   L.push('      N_P=$((N_P + 1))');
   L.push('      echo "__MS_STATUS__ Installing $pkg ($N_P/$TOTAL_P)…"');
   L.push('      echo "__MS_PROGRESS__ $N_P $TOTAL_P"');
-  L.push('      pkg install "$pkg" 2>&1 | while IFS= read -r line || [ -n "$line" ]; do');
+  L.push(
+    '      pkg install "$pkg" 2>&1 | while IFS= read -r line || [ -n "$line" ]; do',
+  );
   L.push('        [ -z "$line" ] && continue');
   L.push('        echo "__MS_STATUS__ [$pkg] $line"');
   L.push('      done || true');
@@ -215,14 +282,18 @@ export function buildCompressPlan(
   L.push('echo "__MS_PHASE__ compressing"');
   L.push('echo "__MS_PROGRESS__ 0"');
   L.push('echo "__MS_STATUS__ Preparing compress…"');
-  L.push('mkdir -p "$OUTDIR" 2>/dev/null || /system/bin/mkdir -p "$OUTDIR" || true');
+  L.push(
+    'mkdir -p "$OUTDIR" 2>/dev/null || /system/bin/mkdir -p "$OUTDIR" || true',
+  );
   L.push('rm -f "$OUT" 2>/dev/null || true');
   L.push('LIST="${TMPDIR:-/data/local/tmp}/mscode_compress_$$.list"');
   L.push('{ ' + listCmd + '; } > "$LIST" 2>/dev/null || true');
   L.push("TOTAL=$(wc -l < \"$LIST\" 2>/dev/null | tr -d ' \\t')");
   L.push('case "$TOTAL" in \'\'|*[!0-9]*) TOTAL=0 ;; esac');
   L.push('if [ -z "$TOTAL" ] || [ "$TOTAL" -lt 1 ]; then');
-  L.push('  echo "__MS_STATUS__ No readable files to compress (check path permissions)"');
+  L.push(
+    '  echo "__MS_STATUS__ No readable files to compress (use Internal Storage / sdcard paths)"',
+  );
   L.push('  echo "__MS_PROGRESS__ 100"');
   L.push('  rm -f "$LIST"');
   L.push('  exit 1');
@@ -241,7 +312,9 @@ export function buildCompressPlan(
   L.push('    echo "__MS_PROGRESS__ 100"');
   L.push('    exit $EC');
   L.push('  fi');
-  L.push('  echo "__MS_STATUS__ Done — $TOTAL file(s) → $(basename "$OUT")"');
+  L.push(
+    '  echo "__MS_STATUS__ Done — $TOTAL file(s) → $(basename "$OUT")"',
+  );
   L.push('  echo "__MS_PROGRESS__ 100"');
   L.push('  exit 0');
   L.push('fi');
@@ -254,34 +327,52 @@ export function buildCompressPlan(
   L.push('  echo "__MS_STATUS__ [$N/$TOTAL] $BASE"');
   L.push('  echo "__MS_PROGRESS__ $N $TOTAL"');
   L.push('  if [ "$MODE" = "7z" ]; then');
-  L.push('    7z a -t7z -mx=' + String(level) + solid + pwd7z + ' "$OUT" "$f" >/dev/null 2>&1 || true');
+  L.push(
+    '    7z a -t7z -mx=' +
+      String(level) +
+      solid +
+      pwd7z +
+      ' "$OUT" "$f" >/dev/null 2>&1 || true',
+  );
   L.push('  else');
   L.push('    rel="$f"');
   L.push('    case "$f" in');
   L.push('      "$OUTDIR"/*) rel="${f#$OUTDIR/}" ;;');
   L.push('    esac');
-  L.push('    (cd "$OUTDIR" && zip -q ' + zipLevel + pwdZip + ' "$OUT" "$rel") 2>/dev/null || \\');
-  L.push('    zip -q ' + zipLevel + pwdZip + ' "$OUT" "$f" 2>/dev/null || true');
+  L.push(
+    '    (cd "$OUTDIR" && zip -q ' +
+      zipLevel +
+      pwdZip +
+      ' "$OUT" "$rel") 2>/dev/null || \\',
+  );
+  L.push(
+    '    zip -q ' + zipLevel + pwdZip + ' "$OUT" "$f" 2>/dev/null || true',
+  );
   L.push('  fi');
   L.push('done < "$LIST"');
   L.push('rm -f "$LIST"');
-  L.push('echo "__MS_STATUS__ Done — $TOTAL file(s) → $(basename "$OUT")"');
+  L.push(
+    'echo "__MS_STATUS__ Done — $TOTAL file(s) → $(basename "$OUT")"',
+  );
   L.push('echo "__MS_PROGRESS__ 100"');
   L.push('test -e "$OUT"');
 
   const script = L.join('\n');
   const cwd = safeShellCwd(writableOutDir, opts?.tmpDir);
 
-// The native side (ProotCommandBuilder.buildNativeBackgroundCommand) already 
-// runs this as "sh -c <this>" using an array-based ProcessBuilder — 
-// wrapping it again here as sh -c "..." causes it to fall into the 
-// intermediate shell's double-quote parsing, leading to premature expansion 
-// of all $VAR in the script into empty values. Therefore, send the raw 
-// script as-is and do not wrap it again.
-
+  // RAW script only — native already does /system/bin/sh -c
   const shellCommand = script;
+
   const summary =
-    'Compress ' + options.sources.length + ' item(s) → ' + fileName + ' (' + format + ', level ' + level + ')';
+    'Compress ' +
+    options.sources.length +
+    ' item(s) → ' +
+    fileName +
+    ' (' +
+    format +
+    ', level ' +
+    level +
+    ')';
 
   return {
     outputPath,
@@ -315,12 +406,12 @@ export function parseCompressOutput(
       }
       continue;
     }
-    // "current total" form — percent computed in JS (no shell division)
     const p2 = line.match(/__MS_PROGRESS__\s+(\d+)\s+(\d+)/);
     if (p2) {
       const cur = parseInt(p2[1], 10);
       const tot = parseInt(p2[2], 10);
-      percent = tot > 0 ? Math.min(100, Math.max(0, Math.round((cur * 100) / tot))) : 0;
+      percent =
+        tot > 0 ? Math.min(100, Math.max(0, Math.round((cur * 100) / tot))) : 0;
       continue;
     }
     const p1 = line.match(/__MS_PROGRESS__\s+(\d+)\s*$/);
