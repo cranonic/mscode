@@ -68,13 +68,19 @@ export const FilePickerModal: React.FC = () => {
       const m = pathOrUri.match(/\/tree\/([^?#]+)/);
       if (!m) return pathOrUri;
       let docId = decodeURIComponent(m[1]);
-      if (docId.startsWith('/')) return docId;
+      let rawPath: string | null = null;
       if (docId.startsWith('primary:')) {
         const rel = docId.slice('primary:'.length);
         return rel ? `/storage/emulated/0/${rel}` : '/storage/emulated/0';
       }
       if (docId.startsWith('raw:')) {
-        const rawPath = docId.slice(4);
+        rawPath = docId.slice(4);
+      } else if (docId.startsWith('/')) {
+        // Termux's own SAF provider hands back bare-path doc IDs like
+        // '/data/data/com.termux/files/home' — no 'raw:' prefix at all.
+        rawPath = docId;
+      }
+      if (rawPath) {
         // Foreign app-private storage (e.g. Termux's /data/data/com.termux/...)
         // is only reachable through SAF/DocumentsContract, never through the
         // regular Filesystem API — even with All Files Access granted. If we
@@ -84,8 +90,7 @@ export const FilePickerModal: React.FC = () => {
         const isForeignAppData =
           (rawPath.startsWith('/data/data/') || rawPath.startsWith('/data/user/')) &&
           !rawPath.includes('/com.editor.mscode/');
-        if (isForeignAppData) return pathOrUri;
-        return rawPath;
+        return isForeignAppData ? pathOrUri : rawPath;
       }
     } catch { /* ignore */ }
     return pathOrUri;
