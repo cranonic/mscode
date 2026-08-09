@@ -212,7 +212,7 @@ class TaskManager {
         NativeTerminal.streamBackgroundExecute({
           sessionId,
           command: wrapped,
-          cwd: safeCwd || undefined,
+          cwd: safeCwd,
         });
       } else {
         // Fallback simulation mock grid rendering data sets on web browser sandbox footprints
