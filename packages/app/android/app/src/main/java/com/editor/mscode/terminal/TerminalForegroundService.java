@@ -422,8 +422,25 @@ public class TerminalForegroundService extends Service {
                 pb.environment().clear();
                 if (env != null) pb.environment().putAll(env);
 
-                if (cwd != null && !cwd.isEmpty()) pb.directory(new File(cwd));
-                else pb.directory(new File(rootfs.getHomePath()));
+                // ProcessBuilder.directory must be a real filesystem path.
+                // content:// (SAF) or missing dirs → fall back to app home/tmp.
+                File workDir = null;
+                if (cwd != null && !cwd.isEmpty()
+                        && !cwd.startsWith("content:")
+                        && !cwd.startsWith("content://")) {
+                    File cand = new File(cwd);
+                    if (cand.isDirectory()) workDir = cand;
+                }
+                if (workDir == null) {
+                    try {
+                        File tmp = new File(rootfs.getTmpPath());
+                        if (!tmp.exists()) tmp.mkdirs();
+                        workDir = tmp.isDirectory() ? tmp : new File(rootfs.getHomePath());
+                    } catch (Exception ignored) {
+                        workDir = new File(rootfs.getHomePath());
+                    }
+                }
+                pb.directory(workDir);
                 pb.redirectErrorStream(true);
 
                 Process process = pb.start();

@@ -1,9 +1,11 @@
 /**
- * Compress engine — pkg check/install then progress-aware pack.
+ * Compress engine — safe cwd, content:// → real path when encoded,
+ * pkg check/install, then pack with progress markers.
+ *
  * Markers:
  *   __MS_PHASE__ checking | installing | compressing
  *   __MS_PROGRESS__ <0-100>
- *   __MS_STATUS__ <human text>
+ *   __MS_STATUS__ <text>
  */
 
 import type { ArchiveFormat, CompressOptions } from './compressTypes';
@@ -16,14 +18,66 @@ export interface CompressPlan {
   shellCommand: string;
   summary: string;
   options: CompressOptions;
+  /** Always a real filesystem directory (never content://) */
   cwd: string;
-  /** Packages that may be installed before pack */
   requiredPackages: string[];
 }
 
 const q = (p: string) => `"${String(p).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
-/** Map format → binaries + pkg names (Termux-style). */
+/**
+ * content:// tree/document URIs often embed a real path in the doc id
+ * (Termux, raw:, primary:). ProcessBuilder cannot use content:// as cwd.
+ */
+export function shellPathFromUri(pathOrUri: string): string {
+  if (!pathOrUri || pathOrUri === 'ROOT') return pathOrUri;
+  if (!pathOrUri.startsWith('content://')) return pathOrUri;
+  try {
+    const doc = pathOrUri.match(/\/document\/([^?#]+)/);
+    if (doc) {
+      const decoded = decodeURIComponent(doc[1]);
+      if (decoded.startsWith('/')) return decoded;
+      if (decoded.startsWith('raw:')) return decoded.slice(4);
+      if (decoded.startsWith('primary:')) {
+        const rel = decoded.slice('primary:'.length);
+        return rel ? `/storage/emulated/0/${rel}` : '/storage/emulated/0';
+      }
+    }
+    const tree = pathOrUri.match(/\/tree\/([^/?#]+)/);
+    if (tree) {
+      const decoded = decodeURIComponent(tree[1]);
+      if (decoded.startsWith('/')) return decoded;
+      if (decoded.startsWith('raw:')) return decoded.slice(4);
+      if (decoded.startsWith('primary:')) {
+        const rel = decoded.slice('primary:'.length);
+        return rel ? `/storage/emulated/0/${rel}` : '/storage/emulated/0';
+      }
+    }
+  } catch {
+    /* keep original */
+  }
+  return pathOrUri;
+}
+
+export function isContentUri(p: string): boolean {
+  return typeof p === 'string' && p.startsWith('content://');
+}
+
+/** Real dir for ProcessBuilder — never content:// */
+export function safeShellCwd(preferred: string, fallbackTmp?: string): string {
+  const resolved = shellPathFromUri(preferred);
+  if (resolved && !isContentUri(resolved) && resolved.startsWith('/')) {
+    return resolved;
+  }
+  // App-private tmp candidates (background job must chdir somewhere real)
+  const candidates = [
+    fallbackTmp,
+    typeof process !== 'undefined' ? undefined : undefined,
+  ].filter(Boolean) as string[];
+  // shell will also export TMPDIR from env; use generic Android-ish defaults
+  return candidates[0] || '/data/local/tmp';
+}
+
 export function depsForFormat(format: ArchiveFormat): {
   bins: string[];
   packages: string[];
@@ -46,20 +100,36 @@ export function depsForFormat(format: ArchiveFormat): {
   }
 }
 
-export function buildCompressPlan(options: CompressOptions): CompressPlan {
+export function buildCompressPlan(
+  options: CompressOptions,
+  opts?: { tmpDir?: string },
+): CompressPlan {
   const fileName = ensureArchiveExtension(options.archiveName.trim() || 'archive', options.format);
-  const outputDir = options.outputDir.replace(/\/$/, '') || '.';
-  const outputPath = `${outputDir}/${fileName}`;
-  const sources = options.sources.map((s) => s.path);
+  const outputDirRaw = options.outputDir.replace(/\/$/, '') || '.';
+  const outputDir = shellPathFromUri(outputDirRaw);
+  // If still content://, write archive under tmp and report path
+  const writableOutDir =
+    !isContentUri(outputDir) && outputDir.startsWith('/')
+      ? outputDir
+      : shellPathFromUri(opts?.tmpDir || '') || '/data/local/tmp';
+
+  const outputPath = `${writableOutDir.replace(/\/$/, '')}/${fileName}`;
+
+  // Source paths for shell (best-effort real paths)
+  const sources = options.sources.map((s) => shellPathFromUri(s.path));
   const level = options.level;
   const includeHidden = options.includeHidden;
   const format = options.format;
   const { bins, packages } = depsForFormat(format);
 
   const listParts = sources.map((p) => {
+    if (isContentUri(p)) {
+      // Cannot walk content:// from shell — skip with warning marker
+      return `echo "__MS_STATUS__ Skip unreadable URI (use real path): ${p.replace(/"/g, '')}" >&2`;
+    }
     const hidden = includeHidden ? '' : ` -not -path '*/.*' `;
     return (
-      `if [ -d ${q(p)} ]; then find ${q(p)}${hidden} -type f 2>/dev/null; ` +
+      `if [ -d ${q(p)} ]; then /system/bin/find ${q(p)}${hidden} -type f 2>/dev/null || find ${q(p)}${hidden} -type f 2>/dev/null; ` +
       `elif [ -e ${q(p)} ]; then printf '%s\\n' ${q(p)}; fi`
     );
   });
@@ -82,13 +152,16 @@ export function buildCompressPlan(options: CompressOptions): CompressPlan {
   if (format === 'tar.bz2') tarFlags = '-cjf';
   if (format === 'tar.xz') tarFlags = '-cJf';
 
-  // Package list for shell (space-separated names + parallel bin checks)
-  // const pkgArr = packages.map((p) => q(p)).join(' ');
   const binArr = bins.map((b) => q(b)).join(' ');
 
+  // Prefer toybox/system tools — avoid broken libbusybox.so PATH aliases
   const script = `
+# Prefer system + PREFIX; avoid dead native-lib busybox applet paths
+export PATH="/system/bin:/system/xbin:\${PREFIX:-}/bin:\${PATH:-}"
+unalias find wc tr sort head basename mkdir rm zip tar 7z gzip bzip2 xz 2>/dev/null || true
+
 OUT=${q(outputPath)}
-OUTDIR=${q(outputDir)}
+OUTDIR=${q(writableOutDir)}
 MODE=${q(mode)}
 TARFLAGS=${q(tarFlags)}
 
@@ -108,7 +181,6 @@ for bin in ${binArr}; do
   fi
 done
 
-# Map missing bins → packages (simple 1:1 / known aliases)
 INSTALL_LIST=""
 for miss in $NEED_PKGS; do
   case "$miss" in
@@ -121,8 +193,8 @@ for miss in $NEED_PKGS; do
     *) INSTALL_LIST="$INSTALL_LIST $miss" ;;
   esac
 done
-# uniq
-INSTALL_LIST=$(echo "$INSTALL_LIST" | tr ' ' '\\n' | sort -u | tr '\\n' ' ' | sed 's/^ *//;s/ *$//')
+INSTALL_LIST=$(printf '%s\\n' $INSTALL_LIST | sort -u | tr '\\n' ' ')
+INSTALL_LIST=$(echo "$INSTALL_LIST" | sed 's/^ *//;s/ *$//')
 
 # ── Phase 2: installing (if needed) ────────────────────────────
 if [ -n "$INSTALL_LIST" ]; then
@@ -130,42 +202,32 @@ if [ -n "$INSTALL_LIST" ]; then
   echo "__MS_PROGRESS__ 0"
   echo "__MS_STATUS__ Packages to install: $INSTALL_LIST"
 
-  # Prefer pkg (MS Code / Termux-style)
+  TOTAL_P=0
+  for _ in $INSTALL_LIST; do TOTAL_P=$((TOTAL_P + 1)); done
+  if [ "$TOTAL_P" -lt 1 ]; then TOTAL_P=1; fi
+
+  N_P=0
   if command -v pkg >/dev/null 2>&1; then
-    TOTAL_P=$(echo "$INSTALL_LIST" | wc -w | tr -d ' ')
-    N_P=0
     for pkg in $INSTALL_LIST; do
-      N_P=$((N_P+1))
+      N_P=$((N_P + 1))
       PCT=$((N_P * 100 / TOTAL_P))
       [ "$PCT" -gt 99 ] && PCT=99
       echo "__MS_STATUS__ Installing $pkg ($N_P/$TOTAL_P)…"
       echo "__MS_PROGRESS__ $PCT"
       pkg install "$pkg" 2>&1 | while IFS= read -r line || [ -n "$line" ]; do
         [ -z "$line" ] && continue
-        # surface last meaningful line only via status
         echo "__MS_STATUS__ [$pkg] $line"
       done || true
-      # ensure binary attempt even if pkg echoed errors
       echo "__MS_STATUS__ Installed $pkg"
     done
   else
-    echo "__MS_STATUS__ pkg not found — trying apt-get…"
-    for pkg in $INSTALL_LIST; do
-      echo "__MS_STATUS__ apt install $pkg…"
-      apt-get install -y "$pkg" 2>&1 | while IFS= read -r line || [ -n "$line" ]; do
-        [ -z "$line" ] && continue
-        echo "__MS_STATUS__ [$pkg] $line"
-      done || true
-    done
-    echo "__MS_PROGRESS__ 100"
+    echo "__MS_STATUS__ pkg not found — tools may be missing"
   fi
 
-  # Re-check
   echo "__MS_STATUS__ Verifying tools…"
   for bin in ${binArr}; do
     if ! command -v "$bin" >/dev/null 2>&1; then
-      echo "__MS_STATUS__ Still missing: $bin"
-      echo "__MS_PHASE__ checking"
+      echo "__MS_STATUS__ Still missing: $bin — install via: pkg install …"
       echo "__MS_PROGRESS__ 100"
       exit 127
     fi
@@ -174,19 +236,18 @@ if [ -n "$INSTALL_LIST" ]; then
   echo "__MS_PROGRESS__ 100"
 fi
 
-# ── Phase 3: compressing (always starts at 0%) ─────────────────
+# ── Phase 3: compressing ───────────────────────────────────────
 echo "__MS_PHASE__ compressing"
 echo "__MS_PROGRESS__ 0"
 echo "__MS_STATUS__ Preparing compress…"
 
-mkdir -p "$OUTDIR"
+mkdir -p "$OUTDIR" 2>/dev/null || /system/bin/mkdir -p "$OUTDIR" || true
 rm -f "$OUT" 2>/dev/null || true
-LIST=/tmp/mscode_compress_$$.list
-echo "__MS_STATUS__ Scanning files…"
+LIST="\${TMPDIR:-/data/local/tmp}/mscode_compress_$$.list"
 { ${listCmd}; } > "$LIST" 2>/dev/null || true
-TOTAL=$(wc -l < "$LIST" | tr -d ' ')
+TOTAL=$(wc -l < "$LIST" 2>/dev/null | tr -d ' ')
 if [ -z "$TOTAL" ] || [ "$TOTAL" -lt 1 ]; then
-  echo "__MS_STATUS__ No files to compress"
+  echo "__MS_STATUS__ No readable files to compress (check path permissions)"
   echo "__MS_PROGRESS__ 100"
   rm -f "$LIST"
   exit 1
@@ -236,6 +297,9 @@ echo "__MS_PROGRESS__ 100"
 test -e "$OUT"
 `.trim();
 
+  // cwd for ProcessBuilder: must exist on disk
+  const cwd = safeShellCwd(writableOutDir, opts?.tmpDir);
+
   const shellCommand = `sh -c ${q(script)}`;
   const summary = `Compress ${options.sources.length} item(s) → ${fileName} (${format}, level ${level})`;
 
@@ -244,13 +308,16 @@ test -e "$OUT"
     shellCommand,
     summary,
     options,
-    cwd: outputDir,
+    cwd,
     requiredPackages: packages,
   };
 }
 
-export async function prepareCompress(options: CompressOptions): Promise<CompressPlan> {
-  return buildCompressPlan(options);
+export async function prepareCompress(
+  options: CompressOptions,
+  opts?: { tmpDir?: string },
+): Promise<CompressPlan> {
+  return buildCompressPlan(options, opts);
 }
 
 export function parseCompressOutput(
@@ -264,10 +331,7 @@ export function parseCompressOutput(
       const p = ph[1] as CompressPhase;
       if (p === 'checking' || p === 'installing' || p === 'compressing') {
         phase = p;
-        // compress phase always resets progress UI to 0 when entered
-        if (p === 'compressing' || p === 'installing') {
-          percent = 0;
-        }
+        if (p === 'compressing' || p === 'installing') percent = 0;
       }
       continue;
     }
@@ -277,9 +341,7 @@ export function parseCompressOutput(
       continue;
     }
     const s = line.match(/__MS_STATUS__\s+(.*)/);
-    if (s) {
-      status = s[1].trim();
-    }
+    if (s) status = s[1].trim();
   }
   return { percent, status, phase };
 }

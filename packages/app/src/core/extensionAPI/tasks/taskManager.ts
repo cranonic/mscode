@@ -201,8 +201,19 @@ class TaskManager {
       });
 
       if (Capacitor.isNativePlatform()) {
-        const wrapped = `cd "${cwd}" && ${cmd}`;
-        NativeTerminal.streamBackgroundExecute({ sessionId, command: wrapped, cwd });
+        // content:// is invalid for ProcessBuilder.directory
+        const safeCwd =
+          cwd && !cwd.startsWith('content:') && cwd.startsWith('/')
+            ? cwd
+            : '';
+        const wrapped = safeCwd
+          ? `cd "${safeCwd}" 2>/dev/null || cd "\${TMPDIR:-/data/local/tmp}"; ${cmd}`
+          : cmd;
+        NativeTerminal.streamBackgroundExecute({
+          sessionId,
+          command: wrapped,
+          cwd: safeCwd || undefined,
+        });
       } else {
         // Fallback simulation mock grid rendering data sets on web browser sandbox footprints
         setTimeout(() => {

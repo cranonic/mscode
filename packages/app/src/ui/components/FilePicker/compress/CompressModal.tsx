@@ -131,7 +131,15 @@ export const CompressModal: React.FC<CompressModalProps> = ({
 
     let plan: CompressPlan;
     try {
-      plan = await prepareCompress({ ...opts, sources, outputDir });
+      const tmpHint =
+        (typeof window !== 'undefined' &&
+          ((window as any).__MSCODE_TMPDIR ||
+            (window as any).mscode?.tmpDir)) ||
+        undefined;
+      plan = await prepareCompress(
+        { ...opts, sources, outputDir },
+        { tmpDir: tmpHint },
+      );
     } catch (e: any) {
       setError(e?.message || 'Failed to prepare archive.');
       setBusy(false);
@@ -145,9 +153,14 @@ export const CompressModal: React.FC<CompressModalProps> = ({
       /* ignore */
     }
 
+    // Never pass content:// as cwd — plan.cwd is already sanitized
+    const runCwd =
+      plan.cwd && !plan.cwd.startsWith('content:')
+        ? plan.cwd
+        : '/data/local/tmp';
     const { result, kill } = taskManager.execute(
       plan.shellCommand,
-      plan.cwd || outputDir || '/',
+      runCwd,
       (chunk) => {
         const next = parseCompressOutput(chunk, progressState.current);
         progressState.current = next;
