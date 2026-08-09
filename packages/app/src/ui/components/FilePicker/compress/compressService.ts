@@ -83,7 +83,7 @@ export function buildCompressPlan(options: CompressOptions): CompressPlan {
   if (format === 'tar.xz') tarFlags = '-cJf';
 
   // Package list for shell (space-separated names + parallel bin checks)
-  const pkgArr = packages.map((p) => q(p)).join(' ');
+  // const pkgArr = packages.map((p) => q(p)).join(' ');
   const binArr = bins.map((b) => q(b)).join(' ');
 
   const script = `

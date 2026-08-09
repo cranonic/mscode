@@ -795,7 +795,7 @@ export const FilePickerModal: React.FC = () => {
         sources={compressSources}
         outputDir={currentPath === 'ROOT' ? '/storage/emulated/0' : currentPath}
         onClose={() => setCompressOpen(false)}
-        onComplete={async (plan, exitCode) => {
+        onComplete={async (_plan, exitCode) => {
           if (exitCode === 0) {
             try { refreshFiles(); } catch {}
           }
