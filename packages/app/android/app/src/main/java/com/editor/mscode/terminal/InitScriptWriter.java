@@ -402,14 +402,14 @@ public class InitScriptWriter {
         sb.append("    echo \"export ANDROID_DATA=/data\"\n");
         sb.append("    echo \"export ANDROID_ROOT=/system\"\n");
         sb.append("    echo 'bb() { [ $# -lt 1 ] && return 1; local a=\"$1\"; shift; ( exec -a \"$a\" \"$BUSYBOX\" \"$@\" ); }'\n");
-        sb.append("    echo '_mscode_proot() { env PATH=\"$PATH\" PREFIX=\"$PREFIX\" \"$MSCODE_PROOT\" --link2symlink --kill-on-exit -0 -r / -b /system -b /data -b /dev -b /proc -b /sys -b /storage -b /sdcard -b /apex -b \"$PREFIX\" -b \"${TMPDIR:-$PREFIX/tmp}:/tmp\" -w \"$PWD\" \"$@\"; }'
-");
-        sb.append("    echo 'clang() { _mscode_proot \"$PREFIX/bin/clang\" \"$@\"; }'\n");
+        sb.append("    echo '_mscode_proot() { \"$MSCODE_PROOT\" --link2symlink --kill-on-exit -0 -r / -b /system -b /data -b /dev -b /proc -b /sys -b /storage -b /sdcard -b /apex -b \"$PREFIX\" -b \"${TMPDIR:-$PREFIX/tmp}:/tmp\" -w \"$PWD\" \"$@\"; }'\n");
+        sb.append("    echo 'clang() { [ -f \"$PREFIX/bin/clang\" ] || return 127; _mscode_proot \"$PREFIX/bin/clang\" \"$@\"; }'\n");
         sb.append("    echo '_mscode_clangxx() { _mscode_proot \"$PREFIX/bin/clang++\" \"$@\"; }'\n");
         sb.append("    echo \"alias 'clang++'=_mscode_clangxx\"\n");
+
         // busybox applets as bash functions
         sb.append("    for a in ls cat cp mv rm mkdir grep find tar head tail wc uname clear chmod sed sort awk cut tr uniq basename dirname pwd date touch ln readlink stat which xargs tee ps kill id env seq true false test; do\n");
-        sb.append("      echo \"$a() { bb $a \\\"\\$@\\\"; }\"\n");
+        sb.append("      echo \"$a() { bb $a \\\"$@\\\"; }\"\n");
         sb.append("    done\n");
         sb.append("    echo 'elf() { local b=\"$1\"; shift; [ -f \"$b\" ] || return 127; if [ -n \"$MSCODE_LINKER\" ]; then \"$MSCODE_LINKER\" \"$b\" \"$@\"; else \"$b\" \"$@\"; fi; }'\n");
         sb.append("    for _f in \"$PREFIX\"/bin/*; do\n");
@@ -417,48 +417,11 @@ public class InitScriptWriter {
         sb.append("      _n=${_f##*/}\n");
         sb.append("      case \"$_n\" in ''|*[!a-zA-Z0-9_]*|[0-9]*) continue ;; esac\n");
         sb.append("      case \" $_MSCODE_BB_SKIP \" in *\" $_n \"*) continue ;; esac\n");
-        sb.append("      echo \"$_n() { elf '$_f' \\\"\\$@\\\"; }\"\n");
+        sb.append("      echo \"$_n() { elf '$_f' \\\"$@\\\"; }\"\n");
         sb.append("    done\n");
         sb.append("  } > \"$PREFIX/etc/mscode_bash_env.sh\"\n");
         sb.append("}\n");
         sb.append("_mscode_write_bash_env 2>/dev/null\n");
-        sb.append("\n");
-
-        // ── clangd config so LSP finds stdio.h / stddef.h ──
-        sb.append("_mscode_write_clangd_config() {\n");
-        sb.append("  mkdir -p \"$HOME/.config/clangd\" \"$PREFIX/etc/clangd\"\n");
-        sb.append("  _res=\"$(ls -d \"$PREFIX\"/lib/clang/* 2>/dev/null | tail -1)\"\n");
-        sb.append("  if [ -z \"$_res\" ] || [ ! -d \"$_res/include\" ]; then\n");
-        sb.append("    _res=\"$PREFIX/lib/clang/latest\"\n");
-        sb.append("  fi\n");
-        sb.append("  _arch=aarch64-linux-android\n");
-        sb.append("  case \"$(bb uname -m 2>/dev/null)\" in\n");
-        sb.append("    armv7*|arm) _arch=arm-linux-androideabi ;;\n");
-        sb.append("    x86_64) _arch=x86_64-linux-android ;;\n");
-        sb.append("    i686) _arch=i686-linux-android ;;\n");
-        sb.append("  esac\n");
-        sb.append("  {\n");
-        sb.append("    echo 'CompileFlags:'\n");
-        sb.append("    if [ -f \"$PREFIX/bin/clang\" ]; then\n");
-        sb.append("      echo \"  Compiler: $PREFIX/bin/clang\"\n");
-        sb.append("    fi\n");
-        sb.append("    echo '  Add:'\n");
-        sb.append("    echo \"    - --sysroot=$PREFIX\"\n");
-        sb.append("    if [ -d \"$_res\" ]; then\n");
-        sb.append("      echo \"    - -resource-dir=$_res\"\n");
-        sb.append("      echo \"    - -isystem\"\n");
-        sb.append("      echo \"    - $_res/include\"\n");
-        sb.append("    fi\n");
-        sb.append("    echo \"    - -isystem\"\n");
-        sb.append("    echo \"    - $PREFIX/include\"\n");
-        sb.append("    echo \"    - -isystem\"\n");
-        sb.append("    echo \"    - $PREFIX/include/$_arch\"\n");
-        sb.append("    echo \"    - -I.\"\n");
-        sb.append("    echo \"    - -fPIE\"\n");
-        sb.append("  } > \"$HOME/.config/clangd/config.yaml\"\n");
-        sb.append("  cp \"$HOME/.config/clangd/config.yaml\" \"$PREFIX/etc/clangd/config.yaml\" 2>/dev/null\n");
-        sb.append("}\n");
-        sb.append("_mscode_write_clangd_config 2>/dev/null\n");
         sb.append("\n");
 
         // ── pkg — real install from shell (curl + ar + tar via linker) ──
@@ -486,13 +449,10 @@ public class InitScriptWriter {
         sb.append("  fi\n");
         sb.append("  if [ \"$_need\" = 1 ]; then\n");
         sb.append("    echo \"[pkg] fetching index ($_arch)…\"\n");
-        sb.append("    if [ -n \"$CURL_CA_BUNDLE\" ] && [ -f \"$CURL_CA_BUNDLE\" ]; then\n");
-        sb.append("      curl -fsSL --cacert \"$CURL_CA_BUNDLE\" -o \"$_pkg_cache/Packages.gz\" \\\n");
-        sb.append("        \"$_pkg_repo/dists/stable/main/binary-$_arch/Packages.gz\" || return 1\n");
-        sb.append("    else\n");
-        sb.append("      curl -fsSL -o \"$_pkg_cache/Packages.gz\" \\\n");
-        sb.append("        \"$_pkg_repo/dists/stable/main/binary-$_arch/Packages.gz\" || return 1\n");
-        sb.append("    fi\n");
+        sb.append("    _curl_ca=\n");
+        sb.append("    [ -n \"$CURL_CA_BUNDLE\" ] && _curl_ca=\"--cacert $CURL_CA_BUNDLE\"\n");
+        sb.append("    curl -fsSL $_curl_ca -o \"$_pkg_cache/Packages.gz\" \\\n");
+        sb.append("      \"$_pkg_repo/dists/stable/main/binary-$_arch/Packages.gz\" || return 1\n");
         sb.append("    bb gunzip -c \"$_pkg_cache/Packages.gz\" > \"$_idx\" || return 1\n");
         sb.append("  fi\n");
         sb.append("}\n");
@@ -516,7 +476,6 @@ public class InitScriptWriter {
         sb.append("  echo \"$_fn\"\n");
         sb.append("}\n");
         sb.append("\n");
-
         // Extract .deb → $PREFIX
         sb.append("_pkg_extract_deb() {\n");
         sb.append("  _deb=\"$1\"; _name=\"$2\"\n");
@@ -615,7 +574,6 @@ public class InitScriptWriter {
         sb.append("  [ -f \"$PREFIX/var/lib/dpkg/info/$1.list\" ]\n");
         sb.append("}\n");
         sb.append("\n");
-
         sb.append("_pkg_install_one() {\n");
         sb.append("  _p=\"$1\"\n");
         sb.append("  # depth guard for recursive deps\n");
@@ -649,11 +607,9 @@ public class InitScriptWriter {
         sb.append("  _deb=\"$_pkg_cache/$(basename \"$_path\")\"\n");
         sb.append("  if [ ! -f \"$_deb\" ]; then\n");
         sb.append("    echo \"[pkg] downloading $_path\"\n");
-        sb.append("    if [ -n \"$CURL_CA_BUNDLE\" ] && [ -f \"$CURL_CA_BUNDLE\" ]; then\n");
-        sb.append("      curl -fsSL --cacert \"$CURL_CA_BUNDLE\" -o \"$_deb\" \"$_pkg_repo/$_path\" || return 1\n");
-        sb.append("    else\n");
-        sb.append("      curl -fsSL -o \"$_deb\" \"$_pkg_repo/$_path\" || return 1\n");
-        sb.append("    fi\n");
+        sb.append("    _curl_ca=\n");
+        sb.append("    [ -n \"$CURL_CA_BUNDLE\" ] && _curl_ca=\"--cacert $CURL_CA_BUNDLE\"\n");
+        sb.append("    curl -fsSL $_curl_ca -o \"$_deb\" \"$_pkg_repo/$_path\" || return 1\n");
         sb.append("  else\n");
         sb.append("    echo \"[pkg] cached $(basename \"$_deb\")\"\n");
         sb.append("  fi\n");
@@ -716,70 +672,29 @@ public class InitScriptWriter {
         sb.append("fi\n");
         sb.append("\n");
 
-        // Termux-style welcome (no internal PREFIX/linker noise)
+        // banner
         sb.append("if [ -z \"$MSCODE_BANNER_SHOWN\" ]; then\n");
         sb.append("  export MSCODE_BANNER_SHOWN=1\n");
-        sb.append("  echo \"\"\n");
-        sb.append("  echo $'\\033[1;36mWelcome to MS Code terminal!\\033[0m'\n");
-        sb.append("  echo \"\"\n");
-        sb.append("  echo $'\\033[1;33mUseful packages:\\033[0m'\n");
-        sb.append("  echo \"  pkg install git python nodejs clang\"\n");
-        sb.append("  echo \"\"\n");
-        sb.append("  echo $'\\033[1;33mBasic commands:\\033[0m'\n");
-        sb.append("  echo \"  pkg search <name>     Search packages\"\n");
-        sb.append("  echo \"  pkg install <pkg>    Install package\"\n");
-        sb.append("  echo \"  pkg list-installed   List installed\"\n");
-        sb.append("  echo \"  ls / cd / nano / curl / python / node\"\n");
-        sb.append("  echo \"  bb --list            BusyBox applets\"\n");
-        sb.append("  echo \"\"\n");
-        if (!bootOk) {
-            sb.append("  echo $'\\033[1;31mBootstrap pending — run setup from the app.\\033[0m'\n");
-            sb.append("  echo \"\"\n");
+        sb.append("  echo \"[+] Opened: $PWD\"\n");
+        if (bootOk) {
+            sb.append("  echo \"[+] PREFIX=$PREFIX  linker=$MSCODE_LINKER\"\n");
+            sb.append("  echo \"[+] bb ls / curl / elf $PREFIX/bin/curl / pkg\"\n");
+        } else {
+            sb.append("  echo \"[+] Native shell (bootstrap pending)  |  bb ls / bb --list\"\n");
         }
         sb.append("fi\n");
 
-        writeBytes(outputPath, sb.toString().getBytes("UTF-8"));
-    }
-
-    /**
-     * Shared env for background / LSP — always anchored at $HOME, never a
-     * session project cwd (avoids stale -I. when clangd sources this file).
-     */
-    public void writeSharedEnv() throws IOException {
-        // Re-use write() with home as cwd so cd lands in HOME
-        write(rootfs.getFilesDir() + "/mscode_env.sh", rootfs.getHomePath());
-    }
-
-    private void writeBytes(String outputPath, byte[] bytes) throws IOException {
         File f = new File(outputPath);
-        File parent = f.getParentFile();
-        if (parent != null) parent.mkdirs();
+        f.getParentFile().mkdirs();
         try (FileOutputStream fos = new FileOutputStream(f)) {
-            fos.write(bytes);
+            fos.write(sb.toString().getBytes("UTF-8"));
         }
         //noinspection ResultOfMethodCallIgnored
         f.setReadable(true, false);
-        validateSyntax(outputPath);
     }
 
-    /** Logcat alert if generated script has a syntax error (mksh/sh -n). */
-    private void validateSyntax(String path) {
-        try {
-            Process p = new ProcessBuilder("/system/bin/sh", "-n", path)
-                    .redirectErrorStream(true)
-                    .start();
-            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-            byte[] buf = new byte[1024];
-            int n;
-            java.io.InputStream is = p.getInputStream();
-            while ((n = is.read(buf)) != -1) bos.write(buf, 0, n);
-            if (p.waitFor() != 0) {
-                android.util.Log.e("InitScriptWriter",
-                        "script syntax error (" + path + "): " + bos.toString("UTF-8"));
-            }
-        } catch (Exception e) {
-            android.util.Log.w("InitScriptWriter", "syntax check skipped: " + e.getMessage());
-        }
+    public void writeSharedEnv() throws IOException {
+        write(rootfs.getFilesDir() + "/mscode_env.sh", rootfs.getHomePath());
     }
 
     public void cleanup(String outputPath) {
