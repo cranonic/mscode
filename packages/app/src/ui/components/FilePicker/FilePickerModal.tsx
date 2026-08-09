@@ -15,6 +15,8 @@ import { FilePickerToolbar, type SortMode } from './FilePickerToolbar';
 import { FilePickerList, type InlineEditState } from './FilePickerList';
 import { FilePickerFooter } from './FilePickerFooter';
 import './FilePicker.css';
+import { CompressModal } from './compress';
+import type { CompressSource } from './compress';
 
 export const FilePickerModal: React.FC = () => {
   const { isOpen, options, closePicker } = useFilePickerStore();
@@ -43,6 +45,8 @@ export const FilePickerModal: React.FC = () => {
   const [sortMode, setSortMode] = useState<SortMode>('type');
   const [searchQuery, setSearchQuery] = useState('');
   const [markMode, setMarkMode] = useState(false);
+  const [compressOpen, setCompressOpen] = useState(false);
+  const [compressSources, setCompressSources] = useState<CompressSource[]>([]);
 
 
   // ── 1. Init & Reset ──
@@ -497,6 +501,8 @@ export const FilePickerModal: React.FC = () => {
           itemsMenu.push({ id: 'add-bm', label: 'Add to Bookmarks', icon: 'star', onClick: () => addBookmark(item.name, item.path) });
         }
       }
+      const canCompress = markMode && selectedPaths.size > 0;
+
       itemsMenu.push(
         { id: 'mark-this', label: markMode ? 'Unmark this' : 'Mark this', icon: 'check', onClick: () => {
           setMarkMode(true);
@@ -511,11 +517,35 @@ export const FilePickerModal: React.FC = () => {
           setMarkMode(true);
           setSelectedPaths(new Set(visibleItems.map((i) => i.path)));
         }},
+        {
+          id: 'compress',
+          label: 'Compress…',
+          icon: 'file-zip',
+          disabled: !canCompress,
+          onClick: () => {
+            if (!canCompress) return;
+            const srcs: CompressSource[] = visibleItems
+              .filter((i) => selectedPaths.has(i.path))
+              .map((i) => ({ path: i.path, name: i.name, isDirectory: i.isDirectory }));
+            setCompressSources(srcs);
+            setCompressOpen(true);
+          },
+        },
         { type: 'separator', id: 's-mark' },
         { id: 'c', label: 'Copy', icon: 'files', onClick: () => setClipboard({ path: item.path, name: item.name, isCut: false }) },
         { id: 'x', label: 'Cut', icon: 'close', onClick: () => setClipboard({ path: item.path, name: item.name, isCut: true }) },
         { type: 'separator', id: 's2' },
-        { id: 'open-with', label: 'Open With…', icon: 'link-external', onClick: () => void openWithExternal(item) },
+      );
+      // Open With — files only (not folders)
+      if (!item.isDirectory) {
+        itemsMenu.push({
+          id: 'open-with',
+          label: 'Open With…',
+          icon: 'link-external',
+          onClick: () => void openWithExternal(item),
+        });
+      }
+      itemsMenu.push(
         { id: 'r', label: 'Rename', icon: 'edit', onClick: () => setInlineEdit({ isNew: false, isFolder: item.isDirectory, initialName: item.name, targetPath: item.path }) },
         { id: 'd', label: 'Delete', icon: 'trash', onClick: async () => { if(confirm(`Delete ${item.name}?`)) { await fs.delete(item.path); refreshFiles(); } } }
       );
@@ -616,7 +646,8 @@ export const FilePickerModal: React.FC = () => {
   }
 
   return (
-    <Modal 
+    <>
+      <Modal 
       isOpen={isOpen}
       type="page" 
       title={options.title || (options.mode === 'saveAs' ? 'Save As...' : 'Select File')} 
@@ -650,6 +681,14 @@ export const FilePickerModal: React.FC = () => {
           onCancelMark={() => {
             setMarkMode(false);
             setSelectedPaths(new Set());
+          }}
+          onCompress={() => {
+            const srcs: CompressSource[] = visibleItems
+              .filter((i) => selectedPaths.has(i.path))
+              .map((i) => ({ path: i.path, name: i.name, isDirectory: i.isDirectory }));
+            if (!srcs.length) return;
+            setCompressSources(srcs);
+            setCompressOpen(true);
           }}
         />
 
@@ -750,5 +789,20 @@ export const FilePickerModal: React.FC = () => {
         />
       </div>
     </Modal>
+
+      <CompressModal
+        isOpen={compressOpen}
+        sources={compressSources}
+        outputDir={currentPath === 'ROOT' ? '/storage/emulated/0' : currentPath}
+        onClose={() => setCompressOpen(false)}
+        onConfirm={async (plan) => {
+          console.log('[Compress]', plan.summary, plan.shellCommand);
+          // Host can run plan.shellCommand via terminal later
+          try {
+            window.alert(`${plan.summary}\n\nCommand prepared. Run from terminal when ready.`);
+          } catch {}
+        }}
+      />
+    </>
   );
 };
