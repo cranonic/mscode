@@ -217,48 +217,133 @@ export function buildCompressPlan(
   L.push('  if command -v "$bin" >/dev/null 2>&1 || [ -f "$PREFIX/bin/$bin" ]; then');
   L.push('    echo "__MS_STATUS__ Found $bin"');
   L.push('  else');
-  L.push('    _ze=/tmp/mscode_zip_err_$$');
-  L.push('    _ok=0');
+  L.push('    echo "__MS_STATUS__ Missing $bin"');
+  L.push('    NEED_PKGS="$NEED_PKGS $bin"');
+  L.push('  fi');
+  L.push('done');
+  L.push('');
+  L.push('INSTALL_LIST=""');
+  L.push('for miss in $NEED_PKGS; do');
+  L.push('  case "$miss" in');
+  L.push('    zip) INSTALL_LIST="$INSTALL_LIST zip" ;;');
+  L.push('    tar) INSTALL_LIST="$INSTALL_LIST tar" ;;');
+  L.push('    gzip) INSTALL_LIST="$INSTALL_LIST gzip" ;;');
+  L.push('    bzip2) INSTALL_LIST="$INSTALL_LIST bzip2" ;;');
+  L.push('    xz) INSTALL_LIST="$INSTALL_LIST xz-utils" ;;');
+  L.push('    7z) INSTALL_LIST="$INSTALL_LIST p7zip" ;;');
+  L.push('    *) INSTALL_LIST="$INSTALL_LIST $miss" ;;');
+  L.push('  esac');
+  L.push('done');
   L.push(
-    '    if runpfx zip ' +
+    "INSTALL_LIST=$(printf '%s\\n' $INSTALL_LIST | sort -u | tr '\\n' ' ')",
+  );
+  L.push("INSTALL_LIST=$(echo \"$INSTALL_LIST\" | sed 's/^ *//;s/ *$//')");
+  L.push('');
+  L.push('if [ -n "$INSTALL_LIST" ]; then');
+  L.push('  echo "__MS_PHASE__ installing"');
+  L.push('  echo "__MS_PROGRESS__ 0"');
+  L.push('  echo "__MS_STATUS__ Packages to install: $INSTALL_LIST"');
+  L.push('  TOTAL_P=0');
+  L.push('  for _x in $INSTALL_LIST; do TOTAL_P=$((TOTAL_P + 1)); done');
+  L.push('  if [ -z "$TOTAL_P" ] || [ "$TOTAL_P" -lt 1 ]; then TOTAL_P=1; fi');
+  L.push('  N_P=0');
+  L.push('  if command -v pkg >/dev/null 2>&1 || [ -f "$PREFIX/bin/pkg" ] || type pkg >/dev/null 2>&1; then');
+  L.push('    for pkg in $INSTALL_LIST; do');
+  L.push('      N_P=$((N_P + 1))');
+  L.push('      echo "__MS_STATUS__ Installing $pkg ($N_P/$TOTAL_P)…"');
+  L.push('      echo "__MS_PROGRESS__ $N_P $TOTAL_P"');
+  L.push(
+    '      pkg install "$pkg" 2>&1 | while IFS= read -r line || [ -n "$line" ]; do',
+  );
+  L.push('        [ -z "$line" ] && continue');
+  L.push('        echo "__MS_STATUS__ [$pkg] $line"');
+  L.push('      done || true');
+  L.push('      echo "__MS_STATUS__ Installed $pkg"');
+  L.push('    done');
+  L.push('  else');
+  L.push('    echo "__MS_STATUS__ pkg not found — tools may be missing"');
+  L.push('  fi');
+  L.push('  echo "__MS_STATUS__ Verifying tools…"');
+  L.push('  for bin in ' + binArr + '; do');
+  L.push('    if ! command -v "$bin" >/dev/null 2>&1 && [ ! -f "$PREFIX/bin/$bin" ]; then');
+  L.push('      echo "__MS_STATUS__ Still missing: $bin"');
+  L.push('      echo "__MS_PROGRESS__ 100"');
+  L.push('      exit 127');
+  L.push('    fi');
+  L.push('  done');
+  L.push('  echo "__MS_STATUS__ All tools ready"');
+  L.push('  echo "__MS_PROGRESS__ 100"');
+  L.push('fi');
+  L.push('');
+  L.push('echo "__MS_PHASE__ compressing"');
+  L.push('echo "__MS_PROGRESS__ 0"');
+  L.push('echo "__MS_STATUS__ Preparing compress…"');
+  L.push('"$MKDIR" -p "$OUTDIR" 2>/dev/null || true');
+  L.push('"$RM" -f "$OUT" 2>/dev/null || true');
+  L.push('LIST="${TMPDIR:-/data/local/tmp}/mscode_compress_$$.list"');
+  L.push('{ ' + listCmd + '; } > "$LIST" 2>/dev/null || true');
+  L.push("TOTAL=$(wc -l < \"$LIST\" 2>/dev/null | tr -d ' \\t')");
+  L.push('case "$TOTAL" in \'\'|*[!0-9]*) TOTAL=0 ;; esac');
+  L.push('if [ -z "$TOTAL" ] || [ "$TOTAL" -lt 1 ]; then');
+  L.push(
+    '  echo "__MS_STATUS__ No readable files to compress (use Internal Storage / sdcard paths)"',
+  );
+  L.push('  echo "__MS_PROGRESS__ 100"');
+  L.push('  rm -f "$LIST"');
+  L.push('  exit 1');
+  L.push('fi');
+  L.push('echo "__MS_STATUS__ Found $TOTAL file(s)"');
+  L.push('echo "__MS_PROGRESS__ 0 $TOTAL"');
+  L.push('');
+  L.push('if [ "$MODE" = "tar" ]; then');
+  L.push('  echo "__MS_STATUS__ Creating archive ($TOTAL files)…"');
+  L.push('  echo "__MS_PROGRESS__ 1 $TOTAL"');
+  L.push('  runpfx tar $TARFLAGS "$OUT" -T "$LIST" || tar $TARFLAGS "$OUT" -T "$LIST"');
+  L.push('  EC=$?');
+  L.push('  rm -f "$LIST"');
+  L.push('  if [ $EC -ne 0 ]; then');
+  L.push('    echo "__MS_STATUS__ tar failed (exit $EC)"');
+  L.push('    echo "__MS_PROGRESS__ 100"');
+  L.push('    exit $EC');
+  L.push('  fi');
+  L.push(
+    '  echo "__MS_STATUS__ Done — $TOTAL file(s) → $(basename "$OUT")"',
+  );
+  L.push('  echo "__MS_PROGRESS__ 100"');
+  L.push('  exit 0');
+  L.push('fi');
+  L.push('');
+  L.push('N=0');
+  L.push('while IFS= read -r f || [ -n "$f" ]; do');
+  L.push('  [ -z "$f" ] && continue');
+  L.push('  N=$((N+1))');
+  L.push('  BASE=$(basename "$f")');
+  L.push('  echo "__MS_STATUS__ [$N/$TOTAL] $BASE"');
+  L.push('  echo "__MS_PROGRESS__ $N $TOTAL"');
+  L.push('  if [ "$MODE" = "7z" ]; then');
+  L.push('    runpfx 7z a -t7z -mx=' + String(level) + solid + pwd7z + ' "$OUT" "$f" >/dev/null 2>&1 || true');
+  L.push('  else');
+  L.push('    rel="$f"');
+  L.push('    case "$f" in');
+  L.push('      "$OUTDIR"/*) rel="${f#$OUTDIR/}" ;;');
+  L.push('    esac');
+  L.push(
+    '    (cd "$OUTDIR" && runpfx zip -q ' +
       zipLevel +
       pwdZip +
-      ' "$OUT" "$f" >"$_ze" 2>&1; then _ok=1; fi',
+      ' "$OUT" "$rel") 2>/dev/null || true',
   );
   L.push(
-    '    if [ "$_ok" -eq 0 ] && [ -f "$PREFIX/bin/zip" ]; then',
+    '    runpfx zip -q ' + zipLevel + pwdZip + ' "$OUT" "$f" 2>/dev/null || true',
   );
-  L.push(
-    '      if "$MSCODE_LINKER" "$PREFIX/bin/zip" ' +
-      zipLevel +
-      pwdZip +
-      ' "$OUT" "$f" >"$_ze" 2>&1; then _ok=1; fi',
-  );
-  L.push('    fi');
-  L.push('    if [ "$_ok" -eq 0 ] && command -v zip >/dev/null 2>&1; then');
-  L.push(
-    '      if zip ' +
-      zipLevel +
-      pwdZip +
-      ' "$OUT" "$f" >"$_ze" 2>&1; then _ok=1; fi',
-  );
-  L.push('    fi');
-  L.push('    if [ "$_ok" -eq 0 ]; then');
-  L.push('      echo "__MS_STATUS__ zip fail: $(head -1 "$_ze" 2>/dev/null)"');
-  L.push('    fi');
-  L.push('    rm -f "$_ze"');
   L.push('  fi');
   L.push('done < "$LIST"');
   L.push('"$RM" -f "$LIST"');
-  L.push('if [ ! -f "$OUT" ]; then');
-  L.push('  echo "__MS_STATUS__ Archive not created at $OUT"');
-  L.push('  echo "__MS_PROGRESS__ 100"');
-  L.push('  exit 1');
-  L.push('fi');
-  L.push('SZ=$(/system/bin/stat -c %s "$OUT" 2>/dev/null || wc -c < "$OUT" | tr -d " ")');
-  L.push('echo "__MS_STATUS__ Done — $TOTAL file(s) → $OUT ($SZ bytes)"');
+  L.push(
+    'echo "__MS_STATUS__ Done — $TOTAL file(s) → $(basename "$OUT")"',
+  );
   L.push('echo "__MS_PROGRESS__ 100"');
-  L.push('test -f "$OUT"');
+  L.push('test -e "$OUT"');
 
   const script = L.join('\n');
   const cwd = safeShellCwd(writableOutDir, opts?.tmpDir);
