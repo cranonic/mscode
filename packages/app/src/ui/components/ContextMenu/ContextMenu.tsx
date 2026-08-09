@@ -73,7 +73,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested
   
   const menuRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const exitFallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // const exitFallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Root menu MUST be position:fixed for `top`/`left` to work and for its z-index to
   // actually apply (z-index is ignored on position:static elements). Without this,
   // the full-screen overlay (which IS positioned) paints above the menu and eats the
