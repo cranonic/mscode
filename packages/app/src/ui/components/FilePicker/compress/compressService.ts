@@ -197,15 +197,11 @@ export function buildCompressPlan(
 
   const L: string[] = [];
   // Prefer system tools; drop dead busybox function wrappers from mscode_env.sh
-  L.push('export PATH="/system/bin:/system/xbin:${PREFIX:-}/bin:${PATH:-}"');
-  L.push('unset BUSYBOX 2>/dev/null || true');
-  L.push(
-    'for _c in find wc tr sort head basename mkdir rm ls cp mv cat; do unset -f $_c 2>/dev/null; done',
-  );
-  L.push(
-    'unalias find wc tr sort head basename mkdir rm zip tar 7z gzip bzip2 xz 2>/dev/null || true',
-  );
-  L.push('');
+  L.push('export PATH="/system/bin:/system/xbin:${PREFIX:-}/bin"');
+  L.push('MKDIR=/system/bin/mkdir; [ -x "$MKDIR" ] || MKDIR=mkdir');
+  L.push('FIND=/system/bin/find; [ -x "$FIND" ] || FIND=find');
+  L.push('RM=/system/bin/rm; [ -x "$RM" ] || RM=rm');
+  L.push('WC=/system/bin/wc; [ -x "$WC" ] || WC=wc');
   L.push('OUT=' + q(outputPath));
   L.push('OUTDIR=' + q(writableOutDir));
   L.push('MODE=' + q(mode));
@@ -218,7 +214,7 @@ export function buildCompressPlan(
   L.push('NEED_PKGS=""');
   L.push('for bin in ' + binArr + '; do');
   L.push('  echo "__MS_STATUS__ Checking $bin…"');
-  L.push('  if command -v "$bin" >/dev/null 2>&1; then');
+  L.push('  if command -v "$bin" >/dev/null 2>&1 || [ -f "$PREFIX/bin/$bin" ]; then');
   L.push('    echo "__MS_STATUS__ Found $bin"');
   L.push('  else');
   L.push('    echo "__MS_STATUS__ Missing $bin"');
@@ -251,7 +247,7 @@ export function buildCompressPlan(
   L.push('  for _x in $INSTALL_LIST; do TOTAL_P=$((TOTAL_P + 1)); done');
   L.push('  if [ -z "$TOTAL_P" ] || [ "$TOTAL_P" -lt 1 ]; then TOTAL_P=1; fi');
   L.push('  N_P=0');
-  L.push('  if command -v pkg >/dev/null 2>&1; then');
+  L.push('  if command -v pkg >/dev/null 2>&1 || [ -f "$PREFIX/bin/pkg" ] || type pkg >/dev/null 2>&1; then');
   L.push('    for pkg in $INSTALL_LIST; do');
   L.push('      N_P=$((N_P + 1))');
   L.push('      echo "__MS_STATUS__ Installing $pkg ($N_P/$TOTAL_P)…"');
@@ -269,7 +265,7 @@ export function buildCompressPlan(
   L.push('  fi');
   L.push('  echo "__MS_STATUS__ Verifying tools…"');
   L.push('  for bin in ' + binArr + '; do');
-  L.push('    if ! command -v "$bin" >/dev/null 2>&1; then');
+  L.push('    if ! command -v "$bin" >/dev/null 2>&1 && [ ! -f "$PREFIX/bin/$bin" ]; then');
   L.push('      echo "__MS_STATUS__ Still missing: $bin"');
   L.push('      echo "__MS_PROGRESS__ 100"');
   L.push('      exit 127');
@@ -282,10 +278,8 @@ export function buildCompressPlan(
   L.push('echo "__MS_PHASE__ compressing"');
   L.push('echo "__MS_PROGRESS__ 0"');
   L.push('echo "__MS_STATUS__ Preparing compress…"');
-  L.push(
-    'mkdir -p "$OUTDIR" 2>/dev/null || /system/bin/mkdir -p "$OUTDIR" || true',
-  );
-  L.push('rm -f "$OUT" 2>/dev/null || true');
+  L.push('"$MKDIR" -p "$OUTDIR" 2>/dev/null || true');
+  L.push('"$RM" -f "$OUT" 2>/dev/null || true');
   L.push('LIST="${TMPDIR:-/data/local/tmp}/mscode_compress_$$.list"');
   L.push('{ ' + listCmd + '; } > "$LIST" 2>/dev/null || true');
   L.push("TOTAL=$(wc -l < \"$LIST\" 2>/dev/null | tr -d ' \\t')");
@@ -304,7 +298,7 @@ export function buildCompressPlan(
   L.push('if [ "$MODE" = "tar" ]; then');
   L.push('  echo "__MS_STATUS__ Creating archive ($TOTAL files)…"');
   L.push('  echo "__MS_PROGRESS__ 1 $TOTAL"');
-  L.push('  tar $TARFLAGS "$OUT" -T "$LIST"');
+  L.push('  runpfx tar $TARFLAGS "$OUT" -T "$LIST" || tar $TARFLAGS "$OUT" -T "$LIST"');
   L.push('  EC=$?');
   L.push('  rm -f "$LIST"');
   L.push('  if [ $EC -ne 0 ]; then');
@@ -327,30 +321,24 @@ export function buildCompressPlan(
   L.push('  echo "__MS_STATUS__ [$N/$TOTAL] $BASE"');
   L.push('  echo "__MS_PROGRESS__ $N $TOTAL"');
   L.push('  if [ "$MODE" = "7z" ]; then');
-  L.push(
-    '    7z a -t7z -mx=' +
-      String(level) +
-      solid +
-      pwd7z +
-      ' "$OUT" "$f" >/dev/null 2>&1 || true',
-  );
+  L.push('    runpfx 7z a -t7z -mx=' + String(level) + solid + pwd7z + ' "$OUT" "$f" >/dev/null 2>&1 || true');
   L.push('  else');
   L.push('    rel="$f"');
   L.push('    case "$f" in');
   L.push('      "$OUTDIR"/*) rel="${f#$OUTDIR/}" ;;');
   L.push('    esac');
   L.push(
-    '    (cd "$OUTDIR" && zip -q ' +
+    '    (cd "$OUTDIR" && runpfx zip -q ' +
       zipLevel +
       pwdZip +
-      ' "$OUT" "$rel") 2>/dev/null || \\',
+      ' "$OUT" "$rel") 2>/dev/null || true',
   );
   L.push(
-    '    zip -q ' + zipLevel + pwdZip + ' "$OUT" "$f" 2>/dev/null || true',
+    '    runpfx zip -q ' + zipLevel + pwdZip + ' "$OUT" "$f" 2>/dev/null || true',
   );
   L.push('  fi');
   L.push('done < "$LIST"');
-  L.push('rm -f "$LIST"');
+  L.push('"$RM" -f "$LIST"');
   L.push(
     'echo "__MS_STATUS__ Done — $TOTAL file(s) → $(basename "$OUT")"',
   );
