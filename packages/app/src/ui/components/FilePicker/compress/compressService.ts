@@ -271,7 +271,15 @@ export function buildCompressPlan(
 
   const script = L.join('\n');
   const cwd = safeShellCwd(writableOutDir, opts?.tmpDir);
-  const shellCommand = 'sh -c ' + q(script);
+
+// The native side (ProotCommandBuilder.buildNativeBackgroundCommand) already 
+// runs this as "sh -c <this>" using an array-based ProcessBuilder — 
+// wrapping it again here as sh -c "..." causes it to fall into the 
+// intermediate shell's double-quote parsing, leading to premature expansion 
+// of all $VAR in the script into empty values. Therefore, send the raw 
+// script as-is and do not wrap it again.
+
+  const shellCommand = script;
   const summary =
     'Compress ' + options.sources.length + ' item(s) → ' + fileName + ' (' + format + ', level ' + level + ')';
 
