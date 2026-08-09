@@ -304,3 +304,86 @@
   flex: 1;
   min-height: 0;
 }
+
+
+.ms-filepicker-toolbar-wrap {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--ms-bg-side);
+  border-bottom: 1px solid var(--ms-border-light);
+}
+
+.ms-filepicker-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--ms-border-light);
+}
+
+.ms-filepicker-search-input {
+  flex: 1;
+  background: var(--ms-input-bg, var(--ms-bg-main));
+  border: 1px solid var(--ms-input-border, var(--ms-border-light));
+  color: var(--ms-text-main);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  outline: none;
+}
+
+.ms-filepicker-search-input:focus {
+  border-color: var(--ms-accent);
+}
+
+.ms-filepicker-search-clear {
+  cursor: pointer;
+  opacity: 0.7;
+  display: flex;
+  padding: 2px;
+}
+
+
+.ms-filepicker-check {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--ms-text-faded);
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0;
+}
+.ms-filepicker-check:hover {
+  background: var(--ms-icon-hover-bg, rgba(127,127,127,0.15));
+  color: var(--ms-text-main);
+}
+.ms-filepicker-check.checked {
+  color: var(--ms-accent);
+}
+.ms-filepicker-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ms-filepicker-item.selected {
+  background: color-mix(in srgb, var(--ms-accent) 18%, var(--ms-bg-main));
+}
+
+.ms-filepicker-check-box {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--ms-text-faded);
+  border-radius: 2px;
+  display: inline-block;
+  box-sizing: border-box;
+}
+.ms-filepicker-check.checked .ms-filepicker-check-box {
+  display: none;
+}

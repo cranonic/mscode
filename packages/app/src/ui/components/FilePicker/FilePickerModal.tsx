@@ -11,7 +11,7 @@ import { fs } from '@/core/fileSystem';
 import type { FileStat } from '@/core/fileSystem/IFileSystem';
 import { Icon } from '../Icon/IconRegistry'; 
 
-import { FilePickerToolbar } from './FilePickerToolbar';
+import { FilePickerToolbar, formatPickerPath, type SortMode } from './FilePickerToolbar';
 import { FilePickerList, type InlineEditState } from './FilePickerList';
 import { FilePickerFooter } from './FilePickerFooter';
 import './FilePicker.css';
@@ -37,15 +37,27 @@ export const FilePickerModal: React.FC = () => {
   const [inlineEdit, setInlineEdit] = useState<InlineEditState | null>(null);
   const [clipboard, setClipboard] = useState<{ path: string, name: string, isCut: boolean } | null>(null);
 
+  /** Navigation stack — reliable back for content:// SAF paths */
+  const [navStack, setNavStack] = useState<string[]>(['ROOT']);
+  const [showHidden, setShowHidden] = useState(true);
+  const [sortMode, setSortMode] = useState<SortMode>('type');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [markMode, setMarkMode] = useState(false);
+
+
   // ── 1. Init & Reset ──
   useEffect(() => {
     if (isOpen && options) {
-      setCurrentPath(options.defaultPath || 'ROOT');
+      const start = options.defaultPath || 'ROOT';
+      setCurrentPath(start);
+      setNavStack(start === 'ROOT' ? ['ROOT'] : ['ROOT', start]);
       setFileNameInput(options.defaultName || '');
       setSelectedPaths(new Set());
       setActiveFilterIndex(0);
       setInlineEdit(null);
-      setRootView('storage'); // Reset tab to storage
+      setRootView('storage');
+      setSearchQuery('');
+      setMarkMode(false);
     }
   }, [isOpen, options]);
 
@@ -191,7 +203,7 @@ export const FilePickerModal: React.FC = () => {
         }
       } catch {}
       await loadRoots();
-      setCurrentPath(path);
+      navigateTo(path, 'reset');
     } catch (e) {
       console.error('[FilePicker] Add Storage failed', e);
     }
@@ -224,30 +236,119 @@ export const FilePickerModal: React.FC = () => {
   }, [currentPath, isOpen, rootStorages, rootView, recentWorkspaces]);
 
   // ── 4. Filtering Logic ──
-  const visibleItems = allItems.filter(item => {
-    if (!options) return false;
-    if (options.showHidden === false && item.name.startsWith('.')) return false;
-    if (item.isDirectory) return true; 
-
-    if (options.filters && options.filters.length > 0) {
-      const filter = options.filters[activeFilterIndex];
-      if (filter && filter.extensions.length > 0) {
-        const ext = item.name.split('.').pop() || '';
-        return filter.extensions.includes(ext);
+  const visibleItems = (() => {
+    let list = allItems.filter((item) => {
+      if (!options) return false;
+      if (!showHidden && item.name.startsWith('.')) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        if (!item.name.toLowerCase().includes(q)) return false;
       }
-    }
-    return true;
-  });
+      if (item.isDirectory) return true;
+      if (options.filters && options.filters.length > 0) {
+        const filter = options.filters[activeFilterIndex];
+        if (filter && filter.extensions.length > 0) {
+          const ext = item.name.split('.').pop() || '';
+          return filter.extensions.includes(ext);
+        }
+      }
+      return true;
+    });
+    list = [...list].sort((a, b) => {
+      if (sortMode === 'type') {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      }
+      if (sortMode === 'name-desc') {
+        return b.name.localeCompare(a.name, undefined, { sensitivity: 'base' });
+      }
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    });
+    return list;
+  })();
 
   // ── 5. Navigation Handlers ──
+  const navigateTo = (path: string, mode: 'push' | 'replace' | 'reset' = 'push') => {
+    if (path === 'ROOT') {
+      setNavStack(['ROOT']);
+      setCurrentPath('ROOT');
+      setSearchQuery('');
+      setMarkMode(false);
+      setSelectedPaths(new Set());
+      return;
+    }
+    setSearchQuery('');
+    if (mode === 'reset') {
+      setNavStack(['ROOT', path]);
+    } else if (mode === 'replace') {
+      setNavStack((s) => {
+        const next = s.length ? [...s.slice(0, -1), path] : ['ROOT', path];
+        return next;
+      });
+    } else {
+      setNavStack((s) => {
+        if (s[s.length - 1] === path) return s;
+        return [...s, path];
+      });
+    }
+    setCurrentPath(path);
+  };
+
   const handleGoUp = () => {
     if (currentPath === 'ROOT') return;
-    if (rootStorages.some(r => r.path === currentPath)) return setCurrentPath('ROOT');
-    if (recentWorkspaces.some(r => r.path === currentPath)) return setCurrentPath('ROOT'); // Recent থেকেও ব্যাক করলে ROOT-এ আসবে
 
-    const parts = currentPath.split('/').filter(Boolean);
-    parts.pop(); 
-    setCurrentPath('/' + parts.join('/'));
+    // Prefer explicit navigation stack (works for content:// SAF)
+    if (navStack.length > 1) {
+      const next = navStack.slice(0, -1);
+      setNavStack(next);
+      setCurrentPath(next[next.length - 1]);
+      setSearchQuery('');
+      setSelectedPaths(new Set());
+      return;
+    }
+
+    if (rootStorages.some((r) => r.path === currentPath)) {
+      navigateTo('ROOT');
+      return;
+    }
+    if (recentWorkspaces.some((r) => r.path === currentPath)) {
+      navigateTo('ROOT');
+      return;
+    }
+
+    if (!currentPath.startsWith('content://')) {
+      const parts = currentPath.split('/').filter(Boolean);
+      parts.pop();
+      navigateTo(parts.length ? '/' + parts.join('/') : 'ROOT', 'reset');
+      return;
+    }
+
+    // content:// without stack: parent via document id
+    try {
+      const doc = currentPath.match(/^(content:\/\/[^/]+\/tree\/[^/]+)\/document\/(.+)$/);
+      if (doc) {
+        const treeBase = doc[1];
+        const decoded = decodeURIComponent(doc[2]);
+        const segs = decoded.split('/').filter(Boolean);
+        if (segs.length <= 1) {
+          navigateTo(treeBase, 'reset');
+          return;
+        }
+        segs.pop();
+        const parentDecoded = '/' + segs.join('/');
+        const treeIdMatch = treeBase.match(/\/tree\/([^/?#]+)/);
+        const treeRoot = treeIdMatch ? decodeURIComponent(treeIdMatch[1]) : '';
+        if (parentDecoded === treeRoot || parentDecoded.replace(/\/$/, '') === treeRoot.replace(/\/$/, '')) {
+          navigateTo(treeBase, 'reset');
+        } else {
+          navigateTo(treeBase + '/document/' + encodeURIComponent(parentDecoded), 'reset');
+        }
+        return;
+      }
+      navigateTo('ROOT');
+    } catch {
+      navigateTo('ROOT');
+    }
   };
 
   const handleItemClick = (item: FileStat) => {
@@ -265,7 +366,7 @@ export const FilePickerModal: React.FC = () => {
 
     if (openMode === 'singleClick') {
       if (item.isDirectory) {
-        setCurrentPath(resolveContentUri(item.path));
+        navigateTo(item.path.startsWith('content://') ? item.path : resolveContentUri(item.path));
         setSelectedPaths(new Set());
       } else if (options!.mode === 'file') {
         closePicker(item.path); 
@@ -276,7 +377,7 @@ export const FilePickerModal: React.FC = () => {
   const handleItemDoubleClick = (item: FileStat) => {
     if (openMode === 'doubleClick') {
       if (item.isDirectory) {
-        setCurrentPath(resolveContentUri(item.path));
+        navigateTo(item.path.startsWith('content://') ? item.path : resolveContentUri(item.path));
         setSelectedPaths(new Set());
       } else if (options!.mode === 'file') {
         closePicker(item.path);
@@ -362,7 +463,7 @@ export const FilePickerModal: React.FC = () => {
     } else {
       const itemsMenu: any[] = [];
       if (item.isDirectory) {
-        itemsMenu.push({ id: 'o', label: 'Open Folder', icon: 'folder', onClick: () => setCurrentPath(resolveContentUri(item.path)) });
+        itemsMenu.push({ id: 'o', label: 'Open Folder', icon: 'folder', onClick: () => navigateTo(item.path.startsWith('content://') ? item.path : resolveContentUri(item.path)) });
         itemsMenu.push({ id: 'pi', label: 'Paste inside', icon: 'folder', disabled: !clipboard, onClick: () => doPaste(item.path) });
         itemsMenu.push({ type: 'separator', id: 's1' });
 
@@ -376,9 +477,24 @@ export const FilePickerModal: React.FC = () => {
         }
       }
       itemsMenu.push(
+        { id: 'mark-this', label: markMode ? 'Unmark this' : 'Mark this', icon: 'check', onClick: () => {
+          setMarkMode(true);
+          setSelectedPaths((prev) => {
+            const next = new Set(prev);
+            if (next.has(item.path)) next.delete(item.path);
+            else next.add(item.path);
+            return next;
+          });
+        }},
+        { id: 'mark-all', label: 'Mark all', icon: 'checklist', onClick: () => {
+          setMarkMode(true);
+          setSelectedPaths(new Set(visibleItems.map((i) => i.path)));
+        }},
+        { type: 'separator', id: 's-mark' },
         { id: 'c', label: 'Copy', icon: 'files', onClick: () => setClipboard({ path: item.path, name: item.name, isCut: false }) },
         { id: 'x', label: 'Cut', icon: 'close', onClick: () => setClipboard({ path: item.path, name: item.name, isCut: true }) },
         { type: 'separator', id: 's2' },
+        { id: 'open-with', label: 'Open With…', icon: 'link-external', onClick: () => void openWithExternal(item) },
         { id: 'r', label: 'Rename', icon: 'edit', onClick: () => setInlineEdit({ isNew: false, isFolder: item.isDirectory, initialName: item.name, targetPath: item.path }) },
         { id: 'd', label: 'Delete', icon: 'trash', onClick: async () => { if(confirm(`Delete ${item.name}?`)) { await fs.delete(item.path); refreshFiles(); } } }
       );
@@ -444,16 +560,27 @@ export const FilePickerModal: React.FC = () => {
   useEffect(() => {
     if (isOpen) {
       useBackButtonStore.getState().push('ms-file-picker', () => {
-        if (inlineEdit) setInlineEdit(null);
-        else if (currentPath === 'ROOT') closePicker(null);
-        else handleGoUp();
-        return true; 
+        if (inlineEdit) {
+          setInlineEdit(null);
+          return true;
+        }
+        if (markMode) {
+          setMarkMode(false);
+          setSelectedPaths(new Set());
+          return true;
+        }
+        if (currentPath === 'ROOT') {
+          closePicker(null);
+          return true;
+        }
+        handleGoUp();
+        return true;
       });
     }
     return () => {
       useBackButtonStore.getState().remove('ms-file-picker');
     };
-  }, [isOpen, currentPath, rootStorages, inlineEdit]);
+  }, [isOpen, currentPath, rootStorages, inlineEdit, markMode]);
 
 
   if (!isOpen || !options) return null;
@@ -478,14 +605,31 @@ export const FilePickerModal: React.FC = () => {
       <div className="ms-filepicker-layout">
         
         {/* TOP TOOLBAR */}
-        <FilePickerToolbar 
+        <FilePickerToolbar
           currentPath={currentPath}
-          allowCreate={options.allowCreate !== false}
+          allowCreate={options.mode !== 'file'}
           onGoUp={handleGoUp}
-          onRefresh={refreshFiles}
-          onAddStorage={handleAddStorage}
           onCreateFile={() => setInlineEdit({ isNew: true, isFolder: false, initialName: 'NewFile.txt', targetPath: currentPath })}
           onCreateFolder={() => setInlineEdit({ isNew: true, isFolder: true, initialName: 'NewFolder', targetPath: currentPath })}
+          onRefresh={refreshFiles}
+          onAddStorage={handleAddStorage}
+          pathSegments={3}
+          showHidden={showHidden}
+          onToggleHidden={() => setShowHidden((v) => !v)}
+          sortMode={sortMode}
+          onSortMode={setSortMode}
+          searchQuery={searchQuery}
+          onSearchQuery={setSearchQuery}
+          selectedCount={selectedPaths.size}
+          totalCount={visibleItems.length}
+          onSelectAll={() => { setMarkMode(true); setSelectedPaths(new Set(visibleItems.map((i) => i.path))); }}
+          onClearSelection={() => { setSelectedPaths(new Set()); setMarkMode(false); }}
+          maxOverflow={4}
+          markMode={markMode}
+          onCancelMark={() => {
+            setMarkMode(false);
+            setSelectedPaths(new Set());
+          }}
         />
 
         {/*  BOOKMARKS BAR */}
@@ -500,7 +644,7 @@ export const FilePickerModal: React.FC = () => {
                 {bookmarks.map((bm, idx) => (
                   <div 
                     key={idx}
-                    onClick={() => setCurrentPath(bm.path)}
+                    onClick={() => navigateTo(bm.path, 'reset')}
                     style={{
                       display: 'flex', alignItems: 'center', gap: '4px', padding: '0px 8px',
                       backgroundColor: currentPath === bm.path ? 'var(--ms-bg-active)' : 'var(--ms-bg-main)',
@@ -558,6 +702,16 @@ export const FilePickerModal: React.FC = () => {
           onItemClick={handleItemClick}
           onItemDoubleClick={handleItemDoubleClick}
           onContextMenu={handleContextMenu}
+          markMode={markMode}
+          onToggleSelect={(item) => {
+            setMarkMode(true);
+            setSelectedPaths((prev) => {
+              const next = new Set(prev);
+              if (next.has(item.path)) next.delete(item.path);
+              else next.add(item.path);
+              return next;
+            });
+          }}
           onInlineEditSubmit={handleInlineSubmit}
           onInlineEditCancel={() => setInlineEdit(null)}
         />
