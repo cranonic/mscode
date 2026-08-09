@@ -215,29 +215,39 @@ public class InitScriptWriter {
         sb.append("}\n");
         sb.append("\n");
 
-        // Coreutils via busybox — always work, never hit PREFIX Permission denied
-        String[] bbApplets = {
+        // Coreutils: toybox-first via `command` (avoids function recursion).
+        // NEVER wrap shell builtins: test true false echo printf pwd [ :
+        // — redefining them breaks mksh parsing (unmatched 'if').
+        // zip/wget etc. stay as PREFIX elf wrappers (mscode_wrap) or bb-only.
+        String[] toyboxApplets = {
             "ls", "cat", "cp", "mv", "rm", "mkdir", "rmdir", "grep", "find",
-            "tar", "head", "tail", "wc", "uname", "clear", "chmod", "chown",
-            "sed", "sort", "awk", "cut", "tr", "uniq", "basename", "dirname",
-            "dirname", "pwd", "echo", "printf", "sleep", "date", "touch",
-            "ln", "readlink", "stat", "du", "df", "mount", "umount",
-            "ps", "kill", "id", "whoami", "which", "xargs", "tee",
-            "md5sum", "sha256sum", "base64", "gzip", "gunzip", "zcat",
-            "diff", "cmp", "od", "hexdump", "yes", "true", "false",
-            "test", "env", "printenv", "seq", "expr", "tr", "fold",
-            "realpath", "mktemp", "wget"
+            "tar", "head", "tail", "wc", "uname", "chmod", "chown",
+            "sed", "sort", "cut", "tr", "uniq", "basename", "dirname",
+            "sleep", "date", "touch", "ln", "readlink", "stat", "du", "df",
+            "mount", "umount", "ps", "kill", "id", "whoami", "which", "xargs",
+            "tee", "md5sum", "base64", "gzip", "diff", "cmp",
+            "env", "printenv", "seq", "expr", "realpath", "mktemp", "clear"
         };
-        // dedupe while writing
+        String[] bbOnlyApplets = {
+            "awk", "wget", "sha256sum", "gunzip", "zcat", "od", "hexdump", "fold"
+        };
         java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
-        for (String a : bbApplets) {
+        for (String a : toyboxApplets) {
             if (!seen.add(a)) continue;
             if ("ls".equals(a)) {
-                sb.append("ls()  { bb ls \"$@\"; }\n");
-                sb.append("ll()  { bb ls -la \"$@\"; }\n");
+                // command → PATH /system/bin; never recursive into this function
+                sb.append("ls() { command ls \"$@\" 2>/dev/null || /system/bin/ls \"$@\" || bb ls \"$@\"; }\n");
+                sb.append("ll() { ls -la \"$@\"; }\n");
             } else {
-                sb.append(a).append("() { bb ").append(a).append(" \"$@\"; }\n");
+                // Prefer system toybox; fall back to busybox multi-call
+                sb.append(a).append("() { command ").append(a)
+                  .append(" \"$@\" 2>/dev/null || /system/bin/").append(a)
+                  .append(" \"$@\" || bb ").append(a).append(" \"$@\"; }\n");
             }
+        }
+        for (String a : bbOnlyApplets) {
+            if (!seen.add(a)) continue;
+            sb.append(a).append("() { bb ").append(a).append(" \"$@\"; }\n");
         }
         sb.append("\n");
 
