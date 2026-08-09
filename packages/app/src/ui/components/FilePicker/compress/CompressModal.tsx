@@ -24,6 +24,8 @@ import {
   type CompressPhase,
 } from './compressService';
 import { taskManager } from '@/core/extensionAPI/tasks/taskManager';
+import { registerPlugin } from '@capacitor/core';
+const NativeTerminal = registerPlugin<any>('NativeTerminal');
 import './CompressModal.css';
 
 export interface CompressModalProps {
@@ -151,6 +153,27 @@ export const CompressModal: React.FC<CompressModalProps> = ({
       await onConfirm?.(plan);
     } catch {
       /* ignore */
+    }
+
+    // Install missing tools via native pkgInstall (shell pkg has no wrapper in bg jobs)
+    if (plan.requiredPackages?.length) {
+      setPhase('installing');
+      setStatusLine('Installing: ' + plan.requiredPackages.join(', '));
+      progressState.current = {
+        percent: 0,
+        status: 'Installing packages…',
+        phase: 'installing',
+      };
+      try {
+        await NativeTerminal.pkgInstall({ packages: plan.requiredPackages });
+        setStatusLine('Packages ready');
+        setPercent(100);
+      } catch (e: any) {
+        // Continue — tool may already be present; shell check will decide
+        setStatusLine(
+          'Install note: ' + (e?.message || String(e)) + ' — retrying compress…',
+        );
+      }
     }
 
     // Never pass content:// as cwd — plan.cwd is already sanitized
