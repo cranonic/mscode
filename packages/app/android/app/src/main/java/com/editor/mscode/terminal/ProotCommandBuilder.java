@@ -103,46 +103,33 @@ public class ProotCommandBuilder {
 
     public String[] buildNativeBackgroundCommand(String shellCommand) {
         List<String> cmd = new ArrayList<>();
+        // Never use libbusybox.so as argv[0] — /system/bin/sh -c only
         cmd.add("/system/bin/sh");
         cmd.add("-c");
-        // Do NOT source mscode_env.sh here.
-        // That file defines busybox applet functions (mkdir/find/…) that call
-        // $BUSYBOX; after APK updates the .so path often breaks and every
-        // coreutils call becomes:  sh: : can't execute: Is a directory
-        // Background jobs get a minimal clean environment instead.
+        String envFile = filesDir + "/mscode_env.sh";
+        // Source env for pkg / PREFIX wrappers, then hard-reset PATH.
+        // nativeLibraryDir must NOT be on PATH (directory of .so →
+        // "can't execute: Is a directory" for empty/bad commands).
+        // Unset busybox coreutils functions so mkdir/find use /system/bin toybox.
         String safePrefix = prefixPath.replace("'", "'\\''");
         String safeTmp = tmpPath.replace("'", "'\\''");
         String safeHome = homePath.replace("'", "'\\''");
-        String safeLib = nativeLibDir.replace("'", "'\\''");
         StringBuilder w = new StringBuilder();
         w.append("MSCODE_BANNER_SHOWN=1; ");
-        w.append("export HOME='").append(safeHome).append("'; ");
-        w.append("export TMPDIR='").append(safeTmp).append("'; ");
-        w.append("export PREFIX='").append(safePrefix).append("'; ");
-        w.append("export TERMUX_PREFIX='").append(safePrefix).append("'; ");
-        // system tools first — never put nativeLibraryDir on PATH
+        w.append("[ -f '").append(envFile).append("' ] && . '").append(envFile).append("'; ");
         w.append("export PATH=\"/system/bin:/system/xbin:")
          .append(safePrefix).append("/bin:")
          .append(safePrefix).append("/bin/applets\"; ");
-        w.append("export LD_LIBRARY_PATH=\"")
-         .append(safePrefix).append("/lib:")
-         .append(safeLib).append("\"; ");
-        w.append("export ANDROID_DATA=/data ANDROID_ROOT=/system; ");
-        w.append("export SSL_CERT_FILE='").append(safePrefix).append("/etc/tls/cert.pem'; ");
-        w.append("export CURL_CA_BUNDLE=\"$SSL_CERT_FILE\"; ");
-        // Helper: run a PREFIX binary via linker64 when not directly executable
-        w.append("MSCODE_LINKER=/system/bin/linker64; ");
-        w.append("[ -x /system/bin/linker64 ] || MSCODE_LINKER=/system/bin/linker; ");
-        w.append("runpfx() {");
-        w.append(" _n=\"$1\"; shift;");
-        w.append(" _b=\"$PREFIX/bin/$_n\";");
-        w.append(" if [ ! -f \"$_b\" ]; then command -v \"$_n\" >/dev/null 2>&1 && { \"$_n\" \"$@\"; return $?; }; return 127; fi;");
-        w.append(" if [ -x \"$_b\" ]; then \"$_b\" \"$@\"; else \"$MSCODE_LINKER\" \"$_b\" \"$@\"; fi;");
-        w.append(" }; ");
+        w.append("export PREFIX='").append(safePrefix).append("'; ");
+        w.append("export TMPDIR='").append(safeTmp).append("'; ");
+        w.append("export HOME='").append(safeHome).append("'; ");
+        w.append("for _c in find wc tr sort head basename mkdir rm ls cp mv cat uname chmod touch grep sed awk; do unset -f $_c 2>/dev/null; done; ");
+        w.append("unalias -a 2>/dev/null; ");
         w.append(shellCommand);
         cmd.add(w.toString());
         return cmd.toArray(new String[0]);
     }
+
 
     private String[] buildProotBackgroundCommand(String shellCommand) {
         List<String> cmd = new ArrayList<>();
