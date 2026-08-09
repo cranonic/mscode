@@ -11,7 +11,7 @@ import { fs } from '@/core/fileSystem';
 import type { FileStat } from '@/core/fileSystem/IFileSystem';
 import { Icon } from '../Icon/IconRegistry'; 
 
-import { FilePickerToolbar, formatPickerPath, type SortMode } from './FilePickerToolbar';
+import { FilePickerToolbar, type SortMode } from './FilePickerToolbar';
 import { FilePickerList, type InlineEditState } from './FilePickerList';
 import { FilePickerFooter } from './FilePickerFooter';
 import './FilePicker.css';
@@ -405,8 +405,29 @@ export const FilePickerModal: React.FC = () => {
     refreshFiles();
   };
 
+  // ── 6b. Android Open With (system chooser) ──
+  const openWithExternal = async (item: FileStat) => {
+    try {
+      const { registerPlugin } = await import('@capacitor/core');
+      const SafStorage = registerPlugin<{
+        openWith: (opts: { path?: string; uri?: string }) => Promise<void>;
+      }>('SafStorage');
+      if (item.path.startsWith('content://')) {
+        await SafStorage.openWith({ uri: item.path });
+      } else {
+        await SafStorage.openWith({ path: item.path });
+      }
+    } catch (e) {
+      console.warn('[FilePicker] openWith failed', e);
+      window.alert('Open With is not available on this device.');
+    }
+  };
+
   // ── 7. Context Menu ──
-  const handleContextMenu = (e: React.MouseEvent, item?: FileStat) => {
+  const handleContextMenu = (
+    e: React.MouseEvent | { clientX: number; clientY: number; preventDefault: () => void },
+    item?: FileStat,
+  ) => {
     e.preventDefault();
 
     if (currentPath === 'ROOT') {
