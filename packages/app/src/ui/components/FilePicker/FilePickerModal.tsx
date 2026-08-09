@@ -795,12 +795,10 @@ export const FilePickerModal: React.FC = () => {
         sources={compressSources}
         outputDir={currentPath === 'ROOT' ? '/storage/emulated/0' : currentPath}
         onClose={() => setCompressOpen(false)}
-        onConfirm={async (plan) => {
-          console.log('[Compress]', plan.summary, plan.shellCommand);
-          // Host can run plan.shellCommand via terminal later
-          try {
-            window.alert(`${plan.summary}\n\nCommand prepared. Run from terminal when ready.`);
-          } catch {}
+        onComplete={async (plan, exitCode) => {
+          if (exitCode === 0) {
+            try { refreshFiles(); } catch {}
+          }
         }}
       />
     </>

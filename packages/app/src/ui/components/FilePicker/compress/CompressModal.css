@@ -115,3 +115,82 @@
     grid-template-columns: 1fr;
   }
 }
+
+
+.ms-compress-progress {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 6px 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--ms-bg-side);
+  border: 1px solid var(--ms-border-light);
+  opacity: 0.55;
+}
+.ms-compress-progress.active {
+  opacity: 1;
+}
+.ms-compress-status-line {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--ms-text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-height: 1.2em;
+  font-family: var(--ms-font-mono, ui-monospace, monospace);
+}
+.ms-compress-bar-track {
+  grid-column: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ms-text-faded) 25%, transparent);
+  overflow: hidden;
+}
+.ms-compress-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--ms-accent);
+  transition: width 0.15s ease-out;
+}
+.ms-compress-pct {
+  grid-column: 2;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ms-accent);
+  align-self: center;
+  min-width: 2.5em;
+  text-align: right;
+}
+.ms-compress-done {
+  font-size: 12px;
+  color: #3ecf8e;
+  padding: 6px 8px;
+  background: color-mix(in srgb, #3ecf8e 12%, transparent);
+  border-radius: 4px;
+}
+
+.ms-compress-phase-label {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ms-text-faded);
+}
+.ms-compress-progress.phase-installing .ms-compress-phase-label {
+  color: #3b82f6;
+}
+.ms-compress-progress.phase-compressing .ms-compress-phase-label {
+  color: var(--ms-accent);
+}
+.ms-compress-progress.phase-checking .ms-compress-phase-label {
+  color: var(--ms-text-main);
+}
+.ms-compress-bar-fill.install {
+  background: #3b82f6; /* blue — installing packages */
+}
+.ms-compress-progress.phase-installing .ms-compress-pct {
+  color: #3b82f6;
+}

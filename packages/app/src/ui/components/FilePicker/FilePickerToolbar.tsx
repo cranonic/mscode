@@ -98,11 +98,31 @@ export const FilePickerToolbar: React.FC<ToolbarProps> = ({
 
   const breadcrumb = formatPickerPath(currentPath, pathSegments);
 
-  const openSortMenu = (e?: React.MouseEvent | React.SyntheticEvent) => {
-    e?.stopPropagation?.();
-    // InputAction often fires without usable clientX/Y — anchor under the button
-    let x = 0;
-    let y = 0;
+  /** Sort options as proper MenuItem children (menu engine pattern). */
+  const sortChildren: MenuItem[] = [
+    {
+      id: 'sort-name-asc',
+      label: 'Name (A → Z)',
+      checked: sortMode === 'name-asc',
+      onClick: () => onSortMode('name-asc'),
+    },
+    {
+      id: 'sort-name-desc',
+      label: 'Name (Z → A)',
+      checked: sortMode === 'name-desc',
+      onClick: () => onSortMode('name-desc'),
+    },
+    {
+      id: 'sort-type',
+      label: 'Type (folders first)',
+      checked: sortMode === 'type',
+      onClick: () => onSortMode('type'),
+    },
+  ];
+
+  const anchorFromEvent = (e?: React.MouseEvent | React.SyntheticEvent) => {
+    let x = Math.round(window.innerWidth / 2 - 110);
+    let y = 72;
     const target = (e?.currentTarget || e?.target) as HTMLElement | null;
     if (target && typeof target.getBoundingClientRect === 'function') {
       const r = target.getBoundingClientRect();
@@ -111,31 +131,20 @@ export const FilePickerToolbar: React.FC<ToolbarProps> = ({
     } else if (e && 'clientX' in e && typeof (e as React.MouseEvent).clientX === 'number') {
       x = (e as React.MouseEvent).clientX;
       y = (e as React.MouseEvent).clientY;
-    } else {
-      x = Math.round(window.innerWidth / 2 - 110);
-      y = 72;
     }
-    const items: MenuItem[] = [
-      {
-        id: 'sort-name-asc',
-        label: 'Name (A → Z)',
-        icon: sortMode === 'name-asc' ? 'check' : undefined,
-        onClick: () => onSortMode('name-asc'),
-      },
-      {
-        id: 'sort-name-desc',
-        label: 'Name (Z → A)',
-        icon: sortMode === 'name-desc' ? 'check' : undefined,
-        onClick: () => onSortMode('name-desc'),
-      },
-      {
-        id: 'sort-type',
-        label: 'Type (folders first)',
-        icon: sortMode === 'type' ? 'check' : undefined,
-        onClick: () => onSortMode('type'),
-      },
-    ];
-    openMenu(x, y, items);
+    return { x, y };
+  };
+
+  /**
+   * Open sort as a flat menu of the children themselves.
+   * Menu engine: leaf items use onClick (no children) so a click runs the action.
+   * Parent+children pattern is used when Sort sits inside the overflow ⋮ menu.
+   */
+  const openSortMenu = (e?: React.MouseEvent | React.SyntheticEvent) => {
+    e?.stopPropagation?.();
+    const { x, y } = anchorFromEvent(e);
+    // Pass children as top-level items — each is a leaf with onClick
+    openMenu(x, y, sortChildren);
   };
 
   const actions: ActionDef[] = useMemo(() => {
@@ -249,13 +258,25 @@ export const FilePickerToolbar: React.FC<ToolbarProps> = ({
   const openOverflow = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!overflow.length) return;
-    const items: MenuItem[] = overflow.map((a) => ({
-      id: a.id,
-      label: a.title,
-      icon: a.icon,
-      onClick: () => a.onClick(e),
-    }));
-    openMenu(e.clientX, e.clientY, items);
+    const { x, y } = anchorFromEvent(e);
+    const items: MenuItem[] = overflow.map((a) => {
+      // Sort → parent with children (submenu). Do NOT put onClick on parent.
+      if (a.id === 'sort') {
+        return {
+          id: 'sort',
+          label: 'Sort',
+          icon: 'filter',
+          children: sortChildren,
+        };
+      }
+      return {
+        id: a.id,
+        label: a.title,
+        icon: a.icon,
+        onClick: () => a.onClick(e),
+      };
+    });
+    openMenu(x, y, items);
   };
 
   return (

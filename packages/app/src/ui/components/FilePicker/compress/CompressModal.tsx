@@ -1,5 +1,5 @@
 // src/ui/components/FilePicker/compress/CompressModal.tsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '../../Modal/Modal';
 import { Icon } from '../../Icon/IconRegistry';
 import { Button } from '../../Button/Button';
@@ -17,20 +17,27 @@ import {
   type CompressionLevel,
   type CompressionMethod,
 } from './compressTypes';
-import { prepareCompress, type CompressPlan } from './compressService';
+import {
+  prepareCompress,
+  parseCompressOutput,
+  type CompressPlan,
+  type CompressPhase,
+} from './compressService';
+import { taskManager } from '@/core/extensionAPI/tasks/taskManager';
 import './CompressModal.css';
 
 export interface CompressModalProps {
   isOpen: boolean;
   sources: CompressSource[];
-  /** Directory where the archive will be written */
   outputDir: string;
   onClose: () => void;
   /**
-   * Called with the prepared plan after user confirms.
-   * Host decides how to run shellCommand (terminal, native, …).
+   * Optional hook after successful compress (exit 0).
+   * Execution is handled inside the modal via taskManager.
    */
-  onConfirm: (plan: CompressPlan) => void | Promise<void>;
+  onComplete?: (plan: CompressPlan, exitCode: number) => void | Promise<void>;
+  /** @deprecated use onComplete — kept for older hosts */
+  onConfirm?: (plan: CompressPlan) => void | Promise<void>;
 }
 
 export const CompressModal: React.FC<CompressModalProps> = ({
@@ -38,6 +45,7 @@ export const CompressModal: React.FC<CompressModalProps> = ({
   sources,
   outputDir,
   onClose,
+  onComplete,
   onConfirm,
 }) => {
   const [opts, setOpts] = useState<CompressOptions>(() =>
@@ -45,12 +53,27 @@ export const CompressModal: React.FC<CompressModalProps> = ({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [percent, setPercent] = useState(0);
+  const [statusLine, setStatusLine] = useState('');
+  const [phase, setPhase] = useState<CompressPhase>('idle');
+  const [doneMsg, setDoneMsg] = useState<string | null>(null);
+  const killRef = useRef<(() => void) | null>(null);
+  const progressState = useRef({ percent: 0, status: '', phase: 'idle' as CompressPhase });
 
   useEffect(() => {
     if (isOpen) {
       setOpts(defaultCompressOptions(sources, outputDir));
       setError(null);
       setBusy(false);
+      setPercent(0);
+      setStatusLine('');
+      setDoneMsg(null);
+      setPhase('idle');
+      progressState.current = { percent: 0, status: '', phase: 'idle' };
+      killRef.current = null;
+    } else {
+      killRef.current?.();
+      killRef.current = null;
     }
   }, [isOpen, sources, outputDir]);
 
@@ -76,6 +99,18 @@ export const CompressModal: React.FC<CompressModalProps> = ({
     });
   };
 
+  const handleCancel = () => {
+    if (busy && killRef.current) {
+      killRef.current();
+      killRef.current = null;
+      setBusy(false);
+      setStatusLine('Cancelled');
+      setError('Compress cancelled.');
+      return;
+    }
+    onClose();
+  };
+
   const handleSubmit = async () => {
     if (!opts.archiveName.trim()) {
       setError('Archive name is required.');
@@ -85,16 +120,67 @@ export const CompressModal: React.FC<CompressModalProps> = ({
       setError('No files selected.');
       return;
     }
+
     setBusy(true);
     setError(null);
+    setDoneMsg(null);
+    setPercent(0);
+    setStatusLine('Starting…');
+    setPhase('checking');
+    progressState.current = { percent: 0, status: 'Checking…', phase: 'checking' };
+
+    let plan: CompressPlan;
     try {
-      const plan = await prepareCompress({ ...opts, sources, outputDir });
-      await onConfirm(plan);
-      onClose();
+      plan = await prepareCompress({ ...opts, sources, outputDir });
     } catch (e: any) {
       setError(e?.message || 'Failed to prepare archive.');
-    } finally {
       setBusy(false);
+      return;
+    }
+
+    // Legacy host callback (optional)
+    try {
+      await onConfirm?.(plan);
+    } catch {
+      /* ignore */
+    }
+
+    const { result, kill } = taskManager.execute(
+      plan.shellCommand,
+      plan.cwd || outputDir || '/',
+      (chunk) => {
+        const next = parseCompressOutput(chunk, progressState.current);
+        progressState.current = next;
+        setPercent(next.percent);
+        setPhase(next.phase);
+        // Single live status line — previous text is replaced (not appended)
+        if (next.status) setStatusLine(next.status);
+      },
+      'Compress', // visible in Tasks panel + output channel
+    );
+    killRef.current = kill;
+
+    try {
+      const { exitCode } = await result;
+      killRef.current = null;
+      setBusy(false);
+      if (exitCode === 0) {
+        setPercent(100);
+        setStatusLine(progressState.current.status || 'Done');
+        setPhase('done');
+        setDoneMsg(`Created ${previewName}`);
+        await onComplete?.(plan, exitCode);
+        // brief moment then close
+        setTimeout(() => onClose(), 700);
+      } else {
+        setPhase('failed');
+        setError(`Compress failed (exit ${exitCode}).`);
+        setStatusLine(progressState.current.status || `Failed (exit ${exitCode})`);
+      }
+    } catch (e: any) {
+      killRef.current = null;
+      setBusy(false);
+      setError(e?.message || 'Compress task error.');
     }
   };
 
@@ -104,19 +190,44 @@ export const CompressModal: React.FC<CompressModalProps> = ({
       type="modal"
       title="Compress"
       iconName="file-zip"
-      onClose={onClose}
+      onClose={handleCancel}
       footerActions={
         <>
-          <Button variant="type2" onClick={onClose} disabled={busy}>
-            Cancel
+          <Button variant="type2" onClick={handleCancel}>
+            {busy ? 'Cancel job' : 'Close'}
           </Button>
           <Button variant="type1" onClick={handleSubmit} disabled={busy}>
-            {busy ? 'Working…' : 'Compress'}
+            {busy ? 'Compressing…' : 'Compress'}
           </Button>
         </>
       }
     >
       <div className="ms-compress-body">
+        {/* Live progress — always reserved so layout does not jump */}
+        <section
+          className={`ms-compress-progress ${busy || doneMsg || percent > 0 ? 'active' : ''} phase-${phase}`}
+        >
+          <div className="ms-compress-phase-label">
+            {phase === 'checking' && 'Checking…'}
+            {phase === 'installing' && 'Installing packages…'}
+            {phase === 'compressing' && 'Compressing…'}
+            {phase === 'done' && 'Done'}
+            {(phase === 'idle' || phase === 'failed') && (busy ? 'Working…' : '')}
+          </div>
+          <div className="ms-compress-status-line" title={statusLine}>
+            {statusLine || (busy ? 'Working…' : '\u00A0')}
+          </div>
+          <div className="ms-compress-bar-track">
+            <div
+              className={`ms-compress-bar-fill ${phase === 'installing' ? 'install' : ''}`}
+              style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+            />
+          </div>
+          <div className="ms-compress-pct">{percent}%</div>
+        </section>
+
+        {doneMsg && <div className="ms-compress-done">{doneMsg}</div>}
+
         <section className="ms-compress-section">
           <div className="ms-compress-label">Items ({sources.length})</div>
           <ul className="ms-compress-sources">
@@ -138,6 +249,7 @@ export const CompressModal: React.FC<CompressModalProps> = ({
             value={opts.archiveName}
             onChange={(v) => set('archiveName', v)}
             placeholder="archive"
+            disabled={busy}
           />
           <div className="ms-compress-hint">
             Output: <code>{previewName}</code>
@@ -151,6 +263,7 @@ export const CompressModal: React.FC<CompressModalProps> = ({
             <Select
               value={opts.format}
               onChange={handleFormat}
+              disabled={busy}
               options={ARCHIVE_FORMAT_OPTIONS.map((f) => ({
                 value: f.value,
                 label: f.label,
@@ -163,6 +276,7 @@ export const CompressModal: React.FC<CompressModalProps> = ({
             <Select
               value={String(opts.level)}
               onChange={(v) => set('level', Number(v) as CompressionLevel)}
+              disabled={busy}
               options={LEVEL_OPTIONS}
             />
           </div>
@@ -174,6 +288,7 @@ export const CompressModal: React.FC<CompressModalProps> = ({
             <Select
               value={opts.method}
               onChange={(v) => set('method', v as CompressionMethod)}
+              disabled={busy}
               options={METHOD_OPTIONS.map((m) => ({
                 value: m.value,
                 label: m.label,
@@ -188,6 +303,7 @@ export const CompressModal: React.FC<CompressModalProps> = ({
               onChange={(v) => set('splitSizeMb', Math.max(0, parseInt(v, 10) || 0))}
               placeholder="0"
               type="number"
+              disabled={busy}
             />
           </div>
         </section>
@@ -199,6 +315,7 @@ export const CompressModal: React.FC<CompressModalProps> = ({
             onChange={(v) => set('password', v)}
             placeholder="Leave empty for no encryption"
             type="password"
+            disabled={busy}
           />
         </section>
 
@@ -208,6 +325,7 @@ export const CompressModal: React.FC<CompressModalProps> = ({
               type="checkbox"
               checked={opts.includeHidden}
               onChange={(e) => set('includeHidden', e.target.checked)}
+              disabled={busy}
             />
             Include hidden files
           </label>
@@ -216,6 +334,7 @@ export const CompressModal: React.FC<CompressModalProps> = ({
               type="checkbox"
               checked={opts.followSymlinks}
               onChange={(e) => set('followSymlinks', e.target.checked)}
+              disabled={busy}
             />
             Follow symlinks
           </label>
@@ -224,7 +343,7 @@ export const CompressModal: React.FC<CompressModalProps> = ({
               type="checkbox"
               checked={opts.solid}
               onChange={(e) => set('solid', e.target.checked)}
-              disabled={opts.format !== '7z'}
+              disabled={busy || opts.format !== '7z'}
             />
             Solid archive (7z)
           </label>
