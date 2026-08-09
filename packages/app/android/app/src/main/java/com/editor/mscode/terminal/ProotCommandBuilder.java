@@ -103,16 +103,33 @@ public class ProotCommandBuilder {
 
     public String[] buildNativeBackgroundCommand(String shellCommand) {
         List<String> cmd = new ArrayList<>();
-        // Same reason as session: cannot use libbusybox.so as argv[0] applet name
+        // Never use libbusybox.so as argv[0] — /system/bin/sh -c only
         cmd.add("/system/bin/sh");
         cmd.add("-c");
-        // Source shared env so pkg/elf/git wrappers exist (interactive ENV is not set for -c)
         String envFile = filesDir + "/mscode_env.sh";
-        // Suppress welcome banner for background jobs
-        String wrapped = "MSCODE_BANNER_SHOWN=1; [ -f '" + envFile + "' ] && . '" + envFile + "'; " + shellCommand;
-        cmd.add(wrapped);
+        // Source env for pkg / PREFIX wrappers, then hard-reset PATH.
+        // nativeLibraryDir must NOT be on PATH (directory of .so →
+        // "can't execute: Is a directory" for empty/bad commands).
+        // Unset busybox coreutils functions so mkdir/find use /system/bin toybox.
+        String safePrefix = prefixPath.replace("'", "'\\''");
+        String safeTmp = tmpPath.replace("'", "'\\''");
+        String safeHome = homePath.replace("'", "'\\''");
+        StringBuilder w = new StringBuilder();
+        w.append("MSCODE_BANNER_SHOWN=1; ");
+        w.append("[ -f '").append(envFile).append("' ] && . '").append(envFile).append("'; ");
+        w.append("export PATH=\"/system/bin:/system/xbin:")
+         .append(safePrefix).append("/bin:")
+         .append(safePrefix).append("/bin/applets\"; ");
+        w.append("export PREFIX='").append(safePrefix).append("'; ");
+        w.append("export TMPDIR='").append(safeTmp).append("'; ");
+        w.append("export HOME='").append(safeHome).append("'; ");
+        w.append("for _c in find wc tr sort head basename mkdir rm ls cp mv cat uname chmod touch grep sed awk; do unset -f $_c 2>/dev/null; done; ");
+        w.append("unalias -a 2>/dev/null; ");
+        w.append(shellCommand);
+        cmd.add(w.toString());
         return cmd.toArray(new String[0]);
     }
+
 
     private String[] buildProotBackgroundCommand(String shellCommand) {
         List<String> cmd = new ArrayList<>();
@@ -212,8 +229,7 @@ public class ProotCommandBuilder {
         map.put("PREFIX",          prefixPath);
         map.put("TERM",            "xterm-256color");
         map.put("LANG",            "C.UTF-8");
-        map.put("PATH",            prefixPath + "/bin:" + prefixPath + "/bin/applets:"
-                                   + nativeLibDir + ":/system/bin:/system/xbin");
+        map.put("PATH", "/system/bin:/system/xbin:" + prefixPath + "/bin:" + prefixPath + "/bin/applets");
         map.put("LD_LIBRARY_PATH", prefixPath + "/lib:" + nativeLibDir);
         map.put("BUSYBOX",         busyboxPath);
         map.put("TERMUX_PREFIX",   prefixPath);
