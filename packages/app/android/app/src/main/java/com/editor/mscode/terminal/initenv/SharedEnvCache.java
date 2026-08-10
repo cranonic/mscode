@@ -48,7 +48,7 @@ public class SharedEnvCache {
 
     private String computeEnvStamp() {
         StringBuilder s = new StringBuilder();
-        s.append("v5|"); // bumped: mksh 'set -o multiline' wrap fix (was horizontal-scrolling with '<')
+        s.append("v4|");
         s.append(rootfs.isBootstrapReady() ? "1" : "0").append('|');
         s.append(rootfs.getToyboxPath()).append('|');
         s.append(rootfs.getNativeLibDir()).append('|');
