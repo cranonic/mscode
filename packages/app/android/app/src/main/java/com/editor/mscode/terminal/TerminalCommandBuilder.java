@@ -280,47 +280,51 @@ public class TerminalCommandBuilder {
     /**
      * Interactive PTY session command.
      *
-     * Prefer $PREFIX/bin/bash (readline soft-wraps long lines like Termux).
-     * Android mksh (/system/bin/sh) only horizontal-scrolls and shows '&lt;' —
-     * it has no soft-wrap option.
+     * Always starts {@code /system/bin/sh} so the process never fails with 127
+     * when $PREFIX/bin/bash is missing, non-executable, or broken.
      *
-     * targetSdk &gt; 28: binaries under filesDir may be non-executable → run via
-     * the system linker when needed.
+     * Inside the shell:
+     *   1. Try bash (direct or via linker) only if {@code --version} works
+     *   2. Otherwise stay on mksh ({@code exec /system/bin/sh -i})
      *
-     * Init:
-     *   • bash  → --rcfile &lt;initScriptPath&gt;
-     *   • mksh  → ENV=&lt;initScriptPath&gt; (set in {@link #buildSessionEnv})
+     * bash + readline soft-wraps long lines (Termux). mksh only horizontal-scrolls.
+     * Init script: bash uses --rcfile; mksh uses ENV= (see {@link #buildSessionEnv}).
      */
     public String[] buildSessionCommand(String initScriptPath) {
         List<String> cmd = new ArrayList<>();
-        File bash = new File(prefixPath, "bin/bash");
-        if (bash.isFile()) {
-            String bashPath = bash.getAbsolutePath();
-            String rc = (initScriptPath != null && !initScriptPath.isEmpty())
-                ? initScriptPath
-                : (homePath + "/.bashrc");
-            if (bash.canExecute()) {
-                cmd.add(bashPath);
-            } else {
-                // App-private binary not marked executable — load via linker
-                String linker = new File("/system/bin/linker64").exists()
-                    ? "/system/bin/linker64"
-                    : "/system/bin/linker";
-                cmd.add(linker);
-                cmd.add(bashPath);
-            }
-            cmd.add("--rcfile");
-            cmd.add(rc);
-            cmd.add("-i");
-            return cmd.toArray(new String[0]);
-        }
-        // Fallback: Android mksh (no soft wrap — long lines scroll with '<')
         cmd.add("/system/bin/sh");
-        cmd.add("-i");
+        cmd.add("-c");
+
+        String safePrefix = prefixPath.replace("'", "'\\''");
+        String safeRc = (initScriptPath != null && !initScriptPath.isEmpty())
+            ? initScriptPath.replace("'", "'\\''")
+            : (homePath + "/.bashrc").replace("'", "'\\''");
+
+        // Probe bash before exec — broken/partial installs must not kill the session (exit 127).
+        StringBuilder w = new StringBuilder(512);
+        w.append("PREFIX='").append(safePrefix).append("'; ");
+        w.append("RC='").append(safeRc).append("'; ");
+        w.append("export ENV=\"$RC\"; ");
+        w.append("BASH_BIN=\"$PREFIX/bin/bash\"; ");
+        w.append("L=/system/bin/linker64; [ -x \"$L\" ] || L=/system/bin/linker; ");
+        w.append("run_bash() { ");
+        w.append("  if [ -x \"$BASH_BIN\" ]; then ");
+        w.append("    \"$BASH_BIN\" --version >/dev/null 2>&1 || return 1; ");
+        w.append("    exec \"$BASH_BIN\" --rcfile \"$RC\" -i; ");
+        w.append("  fi; ");
+        w.append("  if [ -f \"$BASH_BIN\" ] && [ -x \"$L\" ]; then ");
+        w.append("    \"$L\" \"$BASH_BIN\" --version >/dev/null 2>&1 || return 1; ");
+        w.append("    exec \"$L\" \"$BASH_BIN\" --rcfile \"$RC\" -i; ");
+        w.append("  fi; ");
+        w.append("  return 1; ");
+        w.append("}; ");
+        w.append("run_bash || exec /system/bin/sh -i");
+
+        cmd.add(w.toString());
         return cmd.toArray(new String[0]);
     }
 
-    /** True when interactive sessions will use bash (soft wrap available). */
+    /** True when $PREFIX/bin/bash exists (may still fall back to mksh if it fails to run). */
     public boolean usesBash() {
         return new File(prefixPath, "bin/bash").isFile();
     }
