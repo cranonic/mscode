@@ -60,16 +60,54 @@ public final class PkgShellFragment {
         sb.append("}\n");
         sb.append("\n");
         // Extract .deb → $PREFIX
+        // toybox has NO `ar` applet — never use `bb ar`.
+        // Order: $PREFIX/bin/ar (elf) → pure shell System V ar (deb-safe).
+        sb.append("_pkg_ar_x() {\n");
+        sb.append("  # Extract ar members of $1 into cwd. No toybox ar.\n");
+        sb.append("  _ar_file=\"$1\"\n");
+        sb.append("  if [ -f \"$PREFIX/bin/ar\" ]; then\n");
+        sb.append("    elf \"$PREFIX/bin/ar\" x \"$_ar_file\" && return 0\n");
+        sb.append("  fi\n");
+        sb.append("  # Pure System V ar reader (ASCII headers — works for .deb)\n");
+        sb.append("  _magic=$(dd if=\"$_ar_file\" bs=8 count=1 2>/dev/null)\n");
+        sb.append("  case \"$_magic\" in\n");
+        sb.append("    '!<arch>'*) ;;\n");
+        sb.append("    *) echo \"[pkg] not an ar archive: $_ar_file\" >&2; return 1 ;;\n");
+        sb.append("  esac\n");
+        sb.append("  _off=8\n");
+        sb.append("  _total=$(bb stat -c %s \"$_ar_file\" 2>/dev/null || echo 0)\n");
+        sb.append("  [ \"$_total\" -gt 68 ] || return 1\n");
+        sb.append("  while [ \"$_off\" -lt \"$_total\" ]; do\n");
+        sb.append("    _hdr=$(dd if=\"$_ar_file\" bs=1 skip=\"$_off\" count=60 2>/dev/null)\n");
+        sb.append("    [ ${#_hdr} -eq 60 ] || break\n");
+        sb.append("    _name=$(printf '%s' \"$_hdr\" | dd bs=1 count=16 2>/dev/null)\n");
+        sb.append("    _name=$(printf '%s' \"$_name\" | sed 's/[[:space:]]*$//;s/\\/$//')\n");
+        sb.append("    _sz=$(printf '%s' \"$_hdr\" | dd bs=1 skip=48 count=10 2>/dev/null)\n");
+        sb.append("    _sz=$(printf '%s' \"$_sz\" | sed 's/[[:space:]]//g')\n");
+        sb.append("    _off=$((_off + 60))\n");
+        sb.append("    case \"$_name\" in ''|//* ) break ;; esac\n");
+        sb.append("    case \"$_sz\" in ''|*[!0-9]*) break ;; esac\n");
+        sb.append("    [ \"$_sz\" -eq 0 ] && continue\n");
+        sb.append("    # Skip GNU extended name table; still extract real members\n");
+        sb.append("    case \"$_name\" in\n");
+        sb.append("      //|/) _off=$((_off + _sz)); [ $((_sz & 1)) -eq 1 ] && _off=$((_off + 1)); continue ;;\n");
+        sb.append("    esac\n");
+        sb.append("    dd if=\"$_ar_file\" of=\"$_name\" bs=1 skip=\"$_off\" count=\"$_sz\" 2>/dev/null || return 1\n");
+        sb.append("    _off=$((_off + _sz))\n");
+        sb.append("    [ $((_sz & 1)) -eq 1 ] && _off=$((_off + 1))\n");
+        sb.append("  done\n");
+        sb.append("  return 0\n");
+        sb.append("}\n");
+        sb.append("\n");
         sb.append("_pkg_extract_deb() {\n");
         sb.append("  _deb=\"$1\"; _name=\"$2\"\n");
         sb.append("  _work=\"$_pkg_cache/extract-$_name\"\n");
         sb.append("  rm -rf \"$_work\"; mkdir -p \"$_work\"\n");
-        sb.append("  if ! ( cd \"$_work\" && bb ar x \"$_deb\" ); then\n");
-        sb.append("    echo \"[pkg] ar failed — corrupt cache? re-downloading\"\n");
-        sb.append("    rm -f \"$_deb\"\n");
+        sb.append("  if ! ( cd \"$_work\" && _pkg_ar_x \"$_deb\" ); then\n");
+        sb.append("    echo \"[pkg] ar extract failed for $_name\" >&2\n");
         sb.append("    return 1\n");
         sb.append("  fi\n");
-        sb.append("  # detect truncated deb (ar short read leaves tiny/missing data.tar)\n");
+        sb.append("  # detect truncated deb (short read leaves tiny/missing data.tar)\n");
         sb.append("  _has_data=0\n");
         sb.append("  for _f in \"$_work\"/data.tar*; do [ -f \"$_f\" ] && [ -s \"$_f\" ] && _has_data=1; done\n");
         sb.append("  if [ \"$_has_data\" = 0 ]; then\n");
@@ -92,7 +130,7 @@ public final class PkgShellFragment {
         sb.append("      if [ -f \"$PREFIX/bin/xz\" ]; then\n");
         sb.append("        elf \"$PREFIX/bin/xz\" -dc \"$_data\" | bb tar -xf - -C \"$_stage\" || return 1\n");
         sb.append("      else\n");
-        sb.append("        echo \"[pkg] need $PREFIX/bin/xz to extract data.tar.xz\" >&2; return 1\n");
+        sb.append("        echo \"[pkg] need $PREFIX/bin/xz to extract data.tar.xz — try: pkg install xz-utils\" >&2; return 1\n");
         sb.append("      fi\n");
         sb.append("      ;;\n");
         sb.append("    *.gz|*.tgz)\n");
@@ -102,7 +140,7 @@ public final class PkgShellFragment {
         sb.append("      if [ -f \"$PREFIX/bin/zstd\" ]; then\n");
         sb.append("        elf \"$PREFIX/bin/zstd\" -dc \"$_data\" | bb tar -xf - -C \"$_stage\" || return 1\n");
         sb.append("      else\n");
-        sb.append("        echo \"[pkg] need $PREFIX/bin/zstd for data.tar.zst\" >&2; return 1\n");
+        sb.append("        echo \"[pkg] need $PREFIX/bin/zstd for data.tar.zst — try: pkg install zstd\" >&2; return 1\n");
         sb.append("      fi\n");
         sb.append("      ;;\n");
         sb.append("    *)\n");
@@ -132,6 +170,7 @@ public final class PkgShellFragment {
         sb.append("  rm -rf \"$_work\"\n");
         sb.append("}\n");
         sb.append("\n");
+
         // Parse Depends: from Packages index (simple, ignores versions/alternatives)
         sb.append("_pkg_depends() {\n");
         sb.append("  _want=\"$1\"\n");
@@ -181,7 +220,7 @@ public final class PkgShellFragment {
         sb.append("      *)\n");
         sb.append("        if ! _pkg_is_installed \"$_dep\"; then\n");
         sb.append("          echo \"[pkg] dependency: $_dep (for $_p)\"\n");
-        sb.append("          _pkg_install_one \"$_dep\" || echo \"[pkg] warn: dep $_dep failed\"\n");
+        sb.append("          _pkg_install_one \"$_dep\" || { echo \"[pkg] dep failed: $_dep\" >&2; return 1; }\n");
         sb.append("        fi\n");
         sb.append("        ;;\n");
         sb.append("    esac\n");
