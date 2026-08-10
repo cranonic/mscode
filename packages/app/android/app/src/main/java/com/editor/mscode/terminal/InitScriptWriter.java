@@ -307,8 +307,7 @@ public class InitScriptWriter {
 
         // ── PREFIX/bin wrappers (pre-generated in Java — NO shell for-loop) ──
         // Shell-side `for f in $PREFIX/bin/*; eval ...` was taking 10–30s on open.
-        sb.append("# PREFIX wrappers (static, generated at env-write time)
-");
+        sb.append("# PREFIX wrappers (static, generated at env-write time)\n");
         File prefixBin = new File(prefix, "bin");
         if (prefixBin.isDirectory()) {
             File[] bins = prefixBin.listFiles();
@@ -323,27 +322,20 @@ public class InitScriptWriter {
                             || "cc".equals(name) || "c++".equals(name)) continue;
                     if (name.startsWith("clang-")) continue;
                     // static function — no eval, no directory scan at shell startup
-                    String safePath = binFile.getAbsolutePath().replace("'", "'\''");
-                    sb.append(name).append("() { elf '").append(safePath).append("' \"$@\"; }
-");
+                    String safePath = binFile.getAbsolutePath().replace("'", "'\\''");
+                    sb.append(name).append("() { elf '").append(safePath).append("' \"$@\"; }\n");
                     wrapped++;
                     if (wrapped > 400) break; // safety cap
                 }
-                sb.append("# wrapped ").append(String.valueOf(wrapped)).append(" PREFIX tools
-");
+                sb.append("# wrapped ").append(String.valueOf(wrapped)).append(" PREFIX tools\n");
             }
         }
         // Lightweight refresh helper (after pkg install) — still available but not run at start
-        sb.append("mscode_wrap() {
-");
-        sb.append("  echo \"[mscode] wrappers already loaded from cached env; pkg install refreshes on next session\" >&2
-");
-        sb.append("  return 0
-");
-        sb.append("}
-");
-        sb.append("
-");
+        sb.append("mscode_wrap() {\n");
+        sb.append("  echo \"[mscode] wrappers already loaded from cached env; pkg install refreshes on next session\" >&2\n");
+        sb.append("  return 0\n");
+        sb.append("}\n");
+        sb.append("\n");
 
         // ── Compilers via proot so plain `clang hello.c -o hello` works ──
         // linker64 cannot satisfy clang's -cc1 re-exec (absolute path error).
