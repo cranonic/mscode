@@ -129,10 +129,12 @@ public class TerminalForegroundService extends Service {
         }
         PkgInstaller installer = new PkgInstaller(rootfs, arch);
         String result = installer.install(packages, msg -> emitLog("[pkg] " + msg));
-        // PREFIX/bin changed — force shared env rebuild on next session
+        // PREFIX/bin changed — force shared env rebuild
         try {
-            new java.io.File(rootfs.getFilesDir(), ".mscode_env_stamp").delete();
-            if (scriptWriter != null) scriptWriter.writeSharedEnv();
+            if (scriptWriter != null) {
+                scriptWriter.invalidateSharedEnv();
+                scriptWriter.writeSharedEnv();
+            }
         } catch (Exception e) {
             emitLog("env refresh after pkg: " + e.getMessage());
         }
