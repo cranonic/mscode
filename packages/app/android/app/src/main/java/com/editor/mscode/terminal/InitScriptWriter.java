@@ -151,9 +151,17 @@ public class InitScriptWriter {
         sb.append("  export PROOT_LOADER32='").append(safeLib).append("/libproot-loader32.so'\n");
         sb.append("fi\n");
         sb.append("export PROOT_TMP_DIR='").append(safeTmp).append("'\n");
+        // Stale APK path after update: recover libproot.so next to loader/busybox
+        sb.append("if [ ! -f \"$MSCODE_PROOT\" ]; then\n");
+        sb.append("  if [ -n \"$PROOT_LOADER\" ] && [ -f \"${PROOT_LOADER%/*}/libproot.so\" ]; then\n");
+        sb.append("    export MSCODE_PROOT=\"${PROOT_LOADER%/*}/libproot.so\"\n");
+        sb.append("  elif [ -n \"$BUSYBOX\" ] && [ -f \"${BUSYBOX%/*}/libproot.so\" ]; then\n");
+        sb.append("    export MSCODE_PROOT=\"${BUSYBOX%/*}/libproot.so\"\n");
+        sb.append("  fi\n");
+        sb.append("fi\n");
         sb.append("\n");
 
-        // elf <path> [args…] — run PREFIX binary via linker WITHOUT replacing the shell.
+                // elf <path> [args…] — run PREFIX binary via linker WITHOUT replacing the shell.
         // NEVER use bare `exec` here — that killed the whole terminal session.
         sb.append("elf() {\n");
         sb.append("  if [ $# -lt 1 ]; then\n");
@@ -165,10 +173,9 @@ public class InitScriptWriter {
         sb.append("    echo \"elf: not found: $_elf_bin\" >&2\n");
         sb.append("    return 127\n");
         sb.append("  fi\n");
-        sb.append("  _elf_hd=$(bb head -c 2 \"$_elf_bin\" 2>/dev/null)\n");
+        sb.append("  _elf_hd=$(command head -c 2 \"$_elf_bin\" 2>/dev/null || /system/bin/head -c 2 \"$_elf_bin\" 2>/dev/null)\n");
         sb.append("  if [ \"$_elf_hd\" = '#!' ]; then\n");
-        sb.append("    # Honour shebang: Termux scripts often need bash, not system sh\n");
-        sb.append("    _shebang=$(bb head -n 1 \"$_elf_bin\")\n");
+        sb.append("    _shebang=$(command head -n 1 \"$_elf_bin\" 2>/dev/null || /system/bin/head -n 1 \"$_elf_bin\")\n");
         sb.append("    _interp=\n");
         sb.append("    case \"$_shebang\" in\n");
         sb.append("      *bash*)\n");
@@ -198,6 +205,7 @@ public class InitScriptWriter {
         sb.append("}\n");
         sb.append("\n");
 
+
         // ── Busybox multi-call ────────────────────────────────────────────
         sb.append("bb() {\n");
         sb.append("  if [ $# -lt 1 ]; then\n");
@@ -216,9 +224,7 @@ public class InitScriptWriter {
         sb.append("\n");
 
         // Coreutils: toybox-first via `command` (avoids function recursion).
-        // NEVER wrap shell builtins: test true false echo printf pwd [ :
-        // — redefining them breaks mksh parsing (unmatched 'if').
-        // zip/wget etc. stay as PREFIX elf wrappers (mscode_wrap) or bb-only.
+        // NEVER wrap shell builtins: test true false echo printf pwd
         String[] toyboxApplets = {
             "ls", "cat", "cp", "mv", "rm", "mkdir", "rmdir", "grep", "find",
             "tar", "head", "tail", "wc", "uname", "chmod", "chown",
@@ -235,11 +241,9 @@ public class InitScriptWriter {
         for (String a : toyboxApplets) {
             if (!seen.add(a)) continue;
             if ("ls".equals(a)) {
-                // command → PATH /system/bin; never recursive into this function
                 sb.append("ls() { command ls \"$@\" 2>/dev/null || /system/bin/ls \"$@\" || bb ls \"$@\"; }\n");
                 sb.append("ll() { ls -la \"$@\"; }\n");
             } else {
-                // Prefer system toybox; fall back to busybox multi-call
                 sb.append(a).append("() { command ").append(a)
                   .append(" \"$@\" 2>/dev/null || /system/bin/").append(a)
                   .append(" \"$@\" || bb ").append(a).append(" \"$@\"; }\n");
@@ -252,8 +256,6 @@ public class InitScriptWriter {
         sb.append("\n");
 
         // ── Dynamic PREFIX/bin wrappers (re-run after pkg install) ────────
-        // Java static list goes stale; shell scan always matches current $PREFIX/bin.
-        // Skip busybox-covered names and invalid function identifiers.
         sb.append("_MSCODE_BB_SKIP=' ");
         for (String a : seen) {
             sb.append(a).append(' ');
@@ -265,7 +267,6 @@ public class InitScriptWriter {
         sb.append("  for _f in \"$PREFIX\"/bin/*; do\n");
         sb.append("    [ -e \"$_f\" ] || continue\n");
         sb.append("    _n=${_f##*/}\n");
-        sb.append("    # valid shell function name?\n");
         sb.append("    case \"$_n\" in\n");
         sb.append("      ''|*[!a-zA-Z0-9_]*|[0-9]*) continue ;;\n");
         sb.append("    esac\n");
@@ -275,9 +276,6 @@ public class InitScriptWriter {
         sb.append("    case \"$_n\" in\n");
         sb.append("      elf|bb|pkg|mscode_wrap|export|exec|if|fi|then|else|while|do|done|case|esac|function|return|shift|cd|command) continue ;;\n");
         sb.append("    esac\n");
-        // IMPORTANT: must be \$@ so eval keeps literal "$@" inside the function body.
-        // Using plain $@ here expands at wrap-time (empty) and breaks python --version etc.
-        // Compilers: skip generic elf-wrap — overridden with proot below
         sb.append("    case \"$_n\" in\n");
         sb.append("      clang|clang++|clang-*[0-9]*|tcc|gcc|g++|cc|c++) continue ;;\n");
         sb.append("    esac\n");
@@ -291,30 +289,41 @@ public class InitScriptWriter {
 
         // ── Compilers via proot so plain `clang hello.c -o hello` works ──
         // linker64 cannot satisfy clang's -cc1 re-exec (absolute path error).
-                sb.append("_mscode_proot() {\n");
-        sb.append("  if [ -z \"$MSCODE_PROOT\" ] || [ ! -f \"$MSCODE_PROOT\" ]; then\n");
-        sb.append("    echo 'mscode: libproot.so missing (MSCODE_PROOT)' >&2\n");
+        // NEVER use `env CMD` form when CMD may be empty — toybox env treats
+        // the next token (--link2symlink) as the program name.
+        sb.append("_mscode_proot() {\n");
+        sb.append("  _pr=\"$MSCODE_PROOT\"\n");
+        sb.append("  if [ -z \"$_pr\" ] || [ ! -f \"$_pr\" ]; then\n");
+        sb.append("    # Recover path next to loader if export was lost\n");
+        sb.append("    if [ -n \"$PROOT_LOADER\" ] && [ -f \"${PROOT_LOADER%/*}/libproot.so\" ]; then\n");
+        sb.append("      _pr=\"${PROOT_LOADER%/*}/libproot.so\"\n");
+        sb.append("      MSCODE_PROOT=\"$_pr\"; export MSCODE_PROOT\n");
+        sb.append("    fi\n");
+        sb.append("  fi\n");
+        sb.append("  if [ -z \"$_pr\" ] || [ ! -f \"$_pr\" ]; then\n");
+        sb.append("    echo \"mscode: libproot.so missing (MSCODE_PROOT='$MSCODE_PROOT')\" >&2\n");
         sb.append("    return 127\n");
         sb.append("  fi\n");
-        sb.append("  # First arg is guest binary — must exist on host (proot -r / sees host paths)\n");
         sb.append("  if [ -n \"$1\" ] && [ ! -e \"$1\" ]; then\n");
         sb.append("    echo \"mscode: binary not found: $1\" >&2\n");
         sb.append("    echo \"mscode: install with: pkg install clang ndk-sysroot\" >&2\n");
         sb.append("    return 127\n");
         sb.append("  fi\n");
-        sb.append("  # Explicit binds + PATH so guest is not PATH=(null)\n");
-        sb.append("  env PATH=\"${PATH:-/system/bin:/system/xbin:$PREFIX/bin}\" \\\n");
-        sb.append("      PREFIX=\"$PREFIX\" TMPDIR=\"${TMPDIR:-$PREFIX/tmp}\" HOME=\"$HOME\" \\\n");
-        sb.append("      LD_LIBRARY_PATH=\"${LD_LIBRARY_PATH:-$PREFIX/lib}\" \\\n");
-        sb.append("      ANDROID_DATA=/data ANDROID_ROOT=/system \\\n");
-        sb.append("    \"$MSCODE_PROOT\" --link2symlink --kill-on-exit -0 -r / \\\n");
-        sb.append("      -b /system -b /data -b /dev -b /proc -b /sys \\\n");
-        sb.append("      -b /storage -b /sdcard -b /apex \\\n");
-        sb.append("      -b \"$PREFIX\" \\\n");
-        sb.append("      -b \"${TMPDIR:-$PREFIX/tmp}:/data/data/com.termux/files/usr/tmp\" \\\n");
-        sb.append("      -b \"${TMPDIR:-$PREFIX/tmp}:/tmp\" \\\n");
-        sb.append("      -w \"$PWD\" \\\n");
-        sb.append("      \"$@\"\n");
+        sb.append("  # Prefix-assignment form (not env) so empty _pr cannot become --link2symlink\n");
+        sb.append("  PATH=\"${PATH:-/system/bin:/system/xbin:${PREFIX}/bin}\" \\\n");
+        sb.append("  PREFIX=\"$PREFIX\" \\\n");
+        sb.append("  TMPDIR=\"${TMPDIR:-$PREFIX/tmp}\" \\\n");
+        sb.append("  HOME=\"${HOME:-}\" \\\n");
+        sb.append("  LD_LIBRARY_PATH=\"${LD_LIBRARY_PATH:-$PREFIX/lib}\" \\\n");
+        sb.append("  ANDROID_DATA=/data ANDROID_ROOT=/system \\\n");
+        sb.append("  \"$_pr\" --link2symlink --kill-on-exit -0 -r / \\\n");
+        sb.append("    -b /system -b /data -b /dev -b /proc -b /sys \\\n");
+        sb.append("    -b /storage -b /sdcard -b /apex \\\n");
+        sb.append("    -b \"$PREFIX\" \\\n");
+        sb.append("    -b \"${TMPDIR:-$PREFIX/tmp}:/data/data/com.termux/files/usr/tmp\" \\\n");
+        sb.append("    -b \"${TMPDIR:-$PREFIX/tmp}:/tmp\" \\\n");
+        sb.append("    -w \"$PWD\" \\\n");
+        sb.append("    \"$@\"\n");
         sb.append("}\n");
 // Pull the argument that follows -o (space form only, not -ofile)
         sb.append("_mscode_dash_o() {\n");
