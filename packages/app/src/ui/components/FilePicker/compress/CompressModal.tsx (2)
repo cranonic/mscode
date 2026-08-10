@@ -20,21 +20,12 @@ import {
 import {
   prepareCompress,
   parseCompressOutput,
-  planStaging,
-  isContentUri,
-  isForeignAppPath,
-  isOwnAppPath,
-  shellPathFromUri,
-  normalizeFsPath,
   type CompressPlan,
   type CompressPhase,
 } from './compressService';
-import type { CompressSource } from './compressTypes';
 import { taskManager } from '@/core/extensionAPI/tasks/taskManager';
 import { registerPlugin } from '@capacitor/core';
-import { Filesystem } from '@capacitor/filesystem';
 const NativeTerminal = registerPlugin<any>('NativeTerminal');
-const SafStorage = registerPlugin<any>('SafStorage');
 import './CompressModal.css';
 
 export interface CompressModalProps {
@@ -122,61 +113,6 @@ export const CompressModal: React.FC<CompressModalProps> = ({
     onClose();
   };
 
-  /** Copy one source into stageDir via Capacitor (own/shared) or SAF (content://). */
-  const stageOne = async (
-    src: CompressSource,
-    stageDir: string,
-  ): Promise<CompressSource> => {
-    const destPath = stageDir.replace(/\/+$/, '') + '/' + src.name;
-    if (isContentUri(src.path)) {
-      await SafStorage.copyUriToPath({
-        uri: src.path,
-        destPath,
-        recursive: !!src.isDirectory,
-      });
-      return { path: destPath, name: src.name, isDirectory: src.isDirectory };
-    }
-    // Absolute filesystem path (own app or shared) — Capacitor copy
-    const from = normalizeFsPath(shellPathFromUri(src.path));
-    try {
-      const stat = await Filesystem.stat({ path: from });
-      if (stat.type === 'directory') {
-        await Filesystem.mkdir({ path: destPath, recursive: true });
-        const dir = await Filesystem.readdir({ path: from });
-        for (const f of dir.files || []) {
-          await stageOne(
-            {
-              path: from + '/' + f.name,
-              name: f.name,
-              isDirectory: f.type === 'directory',
-            },
-            destPath,
-          );
-        }
-      } else {
-        await Filesystem.copy({ from, to: destPath });
-      }
-    } catch (e) {
-      // Fallback: shell cp for own/shared paths the shell can see
-      const { result } = taskManager.execute(
-        'mkdir -p ' +
-          JSON.stringify(stageDir) +
-          ' && cp -a ' +
-          JSON.stringify(from) +
-          ' ' +
-          JSON.stringify(destPath),
-        stageDir,
-        () => {},
-        'Stage copy',
-      );
-      const { exitCode } = await result;
-      if (exitCode !== 0) {
-        throw e instanceof Error ? e : new Error(String(e));
-      }
-    }
-    return { path: destPath, name: src.name, isDirectory: src.isDirectory };
-  };
-
   const handleSubmit = async () => {
     if (!opts.archiveName.trim()) {
       setError('Archive name is required.');
@@ -195,101 +131,20 @@ export const CompressModal: React.FC<CompressModalProps> = ({
     setPhase('checking');
     progressState.current = { percent: 0, status: 'Checking…', phase: 'checking' };
 
-    const tmpHint =
-      (typeof window !== 'undefined' &&
-        ((window as any).__MSCODE_TMPDIR ||
-          (window as any).mscode?.tmpDir)) ||
-      undefined;
-
-    // ── Stage Termux / SAF / foreign paths so the shell can read them ──
-    let effectiveSources: CompressSource[] = sources.map((s) => ({
-      ...s,
-      path: shellPathFromUri(s.path),
-    }));
-    let stageDir: string | undefined;
-
-    const staging = planStaging(sources, tmpHint);
-    if (staging.needsStage) {
-      setPhase('staging');
-      setStatusLine('Staging files for compress…');
-      progressState.current = {
-        percent: 0,
-        status: 'Staging…',
-        phase: 'staging',
-      };
-      stageDir = staging.stageDir;
-      try {
-        // Ensure stage root exists via shell (always works for app tmp / local tmp)
-        const { result: mkResult } = taskManager.execute(
-          'mkdir -p ' + JSON.stringify(stageDir),
-          tmpHint || '/data/local/tmp',
-          () => {},
-          'Stage mkdir',
-        );
-        await mkResult;
-
-        const staged: CompressSource[] = [...staging.direct];
-        let i = 0;
-        for (const s of staging.toStage) {
-          i++;
-          setStatusLine(`Staging [${i}/${staging.toStage.length}] ${s.name}`);
-          setPercent(
-            Math.round((i * 100) / Math.max(1, staging.toStage.length)),
-          );
-          try {
-            staged.push(await stageOne(s, stageDir));
-          } catch (e: any) {
-            setError(
-              `Cannot stage "${s.name}": ${e?.message || e}. ` +
-                (isContentUri(s.path) || isForeignAppPath(s.path)
-                  ? 'Grant SAF access or copy files to Internal Storage / sdcard first.'
-                  : 'Check storage permission.'),
-            );
-            setBusy(false);
-            setPhase('failed');
-            // best-effort cleanup
-            taskManager.execute(
-              'rm -rf ' + JSON.stringify(stageDir),
-              tmpHint || '/data/local/tmp',
-              () => {},
-              'Stage cleanup',
-            );
-            return;
-          }
-        }
-        effectiveSources = staged;
-        setStatusLine('Staging done');
-      } catch (e: any) {
-        setError(e?.message || 'Staging failed.');
-        setBusy(false);
-        setPhase('failed');
-        return;
-      }
-    }
-
-    // Own-app paths are shell-readable (same UID). Normalize only.
-    effectiveSources = effectiveSources.map((s) => ({
-      ...s,
-      path: normalizeFsPath(shellPathFromUri(s.path)),
-    }));
-
     let plan: CompressPlan;
     try {
+      const tmpHint =
+        (typeof window !== 'undefined' &&
+          ((window as any).__MSCODE_TMPDIR ||
+            (window as any).mscode?.tmpDir)) ||
+        undefined;
       plan = await prepareCompress(
-        { ...opts, sources: effectiveSources, outputDir },
-        { tmpDir: tmpHint, stageDir },
+        { ...opts, sources, outputDir },
+        { tmpDir: tmpHint },
       );
     } catch (e: any) {
       setError(e?.message || 'Failed to prepare archive.');
       setBusy(false);
-      if (stageDir) {
-        taskManager.execute(
-          'rm -rf ' + JSON.stringify(stageDir),
-          tmpHint || '/data/local/tmp',
-          () => {},
-          'Stage cleanup',
-        );
-      }
       return;
     }
 

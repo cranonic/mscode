@@ -5,18 +5,25 @@
  * Native already runs: /system/bin/sh -c <shellCommand>
  *
  * Markers:
- *   __MS_PHASE__ checking | installing | compressing
+ *   __MS_PHASE__ checking | installing | compressing | staging
  *   __MS_PROGRESS__ <pct> | <current> <total>
  *   __MS_STATUS__ <text>
+ *
+ * Path rules (Android):
+ *  - Shared storage (/storage, /sdcard) → shell can read/write directly
+ *  - Own app (/data/.../com.editor.mscode/...) → same UID, shell OK
+ *  - Foreign app private (/data/.../com.termux/...) → NOT readable by shell
+ *  - content:// SAF URIs → NOT readable by shell; must stage via JS/SAF first
  */
 
-import type { ArchiveFormat, CompressOptions } from './compressTypes';
+import type { ArchiveFormat, CompressOptions, CompressSource } from './compressTypes';
 import { ensureArchiveExtension } from './compressTypes';
 
 export type CompressPhase =
   | 'idle'
   | 'checking'
   | 'installing'
+  | 'staging'
   | 'compressing'
   | 'done'
   | 'failed';
@@ -28,33 +35,55 @@ export interface CompressPlan {
   options: CompressOptions;
   cwd: string;
   requiredPackages: string[];
+  /** Temp staging dir to delete after compress (if any) */
+  stageDir?: string;
 }
 
 const q = (p: string) =>
   '"' + String(p).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 
+/** Strip file:// and normalize. */
+export function normalizeFsPath(pathOrUri: string): string {
+  if (!pathOrUri || pathOrUri === 'ROOT') return pathOrUri;
+  let p = pathOrUri;
+  if (p.startsWith('file://')) {
+    p = p.slice('file://'.length);
+    // file:///data/... → /data/...
+    if (p.startsWith('//')) p = p.slice(1);
+  }
+  // collapse duplicate slashes except leading //
+  p = p.replace(/\/{2,}/g, '/');
+  return p;
+}
+
 export function shellPathFromUri(pathOrUri: string): string {
   if (!pathOrUri || pathOrUri === 'ROOT') return pathOrUri;
-  if (!pathOrUri.startsWith('content://')) return pathOrUri;
+  if (!pathOrUri.startsWith('content://')) {
+    return normalizeFsPath(pathOrUri);
+  }
   try {
     const doc = pathOrUri.match(/\/document\/([^?#]+)/);
     if (doc) {
       const decoded = decodeURIComponent(doc[1]);
-      if (decoded.startsWith('/')) return decoded;
-      if (decoded.startsWith('raw:')) return decoded.slice(4);
+      if (decoded.startsWith('/')) return normalizeFsPath(decoded);
+      if (decoded.startsWith('raw:')) return normalizeFsPath(decoded.slice(4));
       if (decoded.startsWith('primary:')) {
         const rel = decoded.slice('primary:'.length);
-        return rel ? '/storage/emulated/0/' + rel : '/storage/emulated/0';
+        return rel
+          ? normalizeFsPath('/storage/emulated/0/' + rel)
+          : '/storage/emulated/0';
       }
     }
     const tree = pathOrUri.match(/\/tree\/([^/?#]+)/);
     if (tree) {
       const decoded = decodeURIComponent(tree[1]);
-      if (decoded.startsWith('/')) return decoded;
-      if (decoded.startsWith('raw:')) return decoded.slice(4);
+      if (decoded.startsWith('/')) return normalizeFsPath(decoded);
+      if (decoded.startsWith('raw:')) return normalizeFsPath(decoded.slice(4));
       if (decoded.startsWith('primary:')) {
         const rel = decoded.slice('primary:'.length);
-        return rel ? '/storage/emulated/0/' + rel : '/storage/emulated/0';
+        return rel
+          ? normalizeFsPath('/storage/emulated/0/' + rel)
+          : '/storage/emulated/0';
       }
     }
   } catch {
@@ -67,9 +96,36 @@ export function isContentUri(p: string): boolean {
   return typeof p === 'string' && p.startsWith('content://');
 }
 
-function isForeignAppPath(p: string): boolean {
-  if (!p.startsWith('/data/data/') && !p.startsWith('/data/user/')) return false;
-  return p.indexOf('com.editor.mscode') < 0;
+/** True for this app's private data dirs (any user id). */
+export function isOwnAppPath(p: string): boolean {
+  if (!p) return false;
+  const n = normalizeFsPath(p);
+  return /\/com\.editor\.mscode(\.|\/|$)/.test(n);
+}
+
+/**
+ * Other apps' private data (/data/data/com.termux/..., /data/user/0/com.xxx/...).
+ * Own app is NOT foreign.
+ */
+export function isForeignAppPath(p: string): boolean {
+  if (!p) return false;
+  const n = normalizeFsPath(p);
+  if (!n.startsWith('/data/data/') && !n.startsWith('/data/user/')) return false;
+  return !isOwnAppPath(n);
+}
+
+/** Paths the native shell can read without SAF staging. */
+export function isShellReadablePath(p: string): boolean {
+  if (!p || isContentUri(p)) return false;
+  const n = normalizeFsPath(p);
+  if (!n.startsWith('/')) return false;
+  if (isForeignAppPath(n)) return false;
+  return true;
+}
+
+/** Paths that need JS/SAF copy into a stage dir before zip. */
+export function needsStaging(p: string): boolean {
+  return isContentUri(p) || isForeignAppPath(p);
 }
 
 export function safeShellCwd(preferred: string, fallbackTmp?: string): string {
@@ -82,9 +138,15 @@ export function safeShellCwd(preferred: string, fallbackTmp?: string): string {
   ) {
     return resolved;
   }
-  if (fallbackTmp && fallbackTmp.startsWith('/') && !isContentUri(fallbackTmp)) {
+  if (
+    fallbackTmp &&
+    fallbackTmp.startsWith('/') &&
+    !isContentUri(fallbackTmp) &&
+    !isForeignAppPath(fallbackTmp)
+  ) {
     return fallbackTmp;
   }
+  // Prefer app tmp if we know it; else system tmp
   return '/data/local/tmp';
 }
 
@@ -112,13 +174,15 @@ export function depsForFormat(format: ArchiveFormat): {
 
 export function buildCompressPlan(
   options: CompressOptions,
-  opts?: { tmpDir?: string },
+  opts?: { tmpDir?: string; stageDir?: string },
 ): CompressPlan {
   const fileName = ensureArchiveExtension(
     options.archiveName.trim() || 'archive',
     options.format,
   );
-  const outputDirRaw = options.outputDir.replace(/\/$/, '') || '.';
+  const outputDirRaw = normalizeFsPath(
+    options.outputDir.replace(/\/+$/, '') || '.',
+  );
   const outputDir = shellPathFromUri(outputDirRaw);
 
   const tmpFallback =
@@ -126,10 +190,10 @@ export function buildCompressPlan(
     opts.tmpDir.startsWith('/') &&
     !isContentUri(opts.tmpDir) &&
     !isForeignAppPath(opts.tmpDir)
-      ? opts.tmpDir
+      ? normalizeFsPath(opts.tmpDir)
       : '/data/local/tmp';
 
-  // Prefer real sdcard/internal path for output when writable
+  // Prefer real path for output when shell-writable (shared OR own app)
   const writableOutDir =
     !isContentUri(outputDir) &&
     outputDir.startsWith('/') &&
@@ -137,7 +201,10 @@ export function buildCompressPlan(
       ? outputDir
       : tmpFallback;
 
-  const outputPath = writableOutDir.replace(/\/$/, '') + '/' + fileName;
+  const outputPath =
+    normalizeFsPath(writableOutDir.replace(/\/+$/, '')) + '/' + fileName;
+
+  // Sources may already be staged paths from CompressModal
   const sources = options.sources.map((s) => shellPathFromUri(s.path));
   const level = options.level;
   const includeHidden = options.includeHidden;
@@ -147,14 +214,20 @@ export function buildCompressPlan(
   const listParts: string[] = [];
   for (const p of sources) {
     if (isContentUri(p) || isForeignAppPath(p)) {
+      // Should not happen if modal staged correctly — still report clearly
       listParts.push(
-        'echo "__MS_STATUS__ Skip inaccessible path (permission)" >&2',
+        'echo "__MS_STATUS__ Skip (need stage): ' +
+          p.replace(/"/g, '') +
+          '"',
       );
       continue;
     }
     const hidden = includeHidden ? '' : " -not -path '*/.*' ";
     listParts.push(
-      'if [ -d ' +
+      'echo "__MS_STATUS__ Listing ' +
+        p.replace(/"/g, '') +
+        '"; ' +
+        'if [ -d ' +
         q(p) +
         ' ]; then /system/bin/find ' +
         q(p) +
@@ -167,10 +240,12 @@ export function buildCompressPlan(
         q(p) +
         " ]; then printf '%s\\n' " +
         q(p) +
-        '; fi',
+        '; else echo "__MS_STATUS__ Missing path: ' +
+        p.replace(/"/g, '') +
+        '"; fi',
     );
   }
-  const listCmd = listParts.join('; ');
+  const listCmd = listParts.length ? listParts.join('; ') : 'true';
 
   const pwdZip = options.password ? ' -P ' + q(options.password) : '';
   const zipLevel =
@@ -196,6 +271,9 @@ export function buildCompressPlan(
   if (format === 'tar.xz') tarFlags = '-cJf';
 
   const binArr = bins.map((b) => q(b)).join(' ');
+  const stageDir = opts?.stageDir
+    ? normalizeFsPath(opts.stageDir)
+    : undefined;
 
   const L: string[] = [];
   L.push('export PATH="/system/bin:/system/xbin:${PREFIX:-}/bin"');
@@ -207,6 +285,9 @@ export function buildCompressPlan(
   L.push('OUTDIR=' + q(writableOutDir));
   L.push('MODE=' + q(mode));
   L.push('TARFLAGS=' + q(tarFlags));
+  if (stageDir) {
+    L.push('STAGEDIR=' + q(stageDir));
+  }
   L.push('');
   L.push('echo "__MS_PHASE__ checking"');
   L.push('echo "__MS_PROGRESS__ 0"');
@@ -239,16 +320,20 @@ export function buildCompressPlan(
   L.push('echo "__MS_STATUS__ OUT=$OUT"');
   L.push('"$MKDIR" -p "$OUTDIR" 2>/dev/null || true');
   L.push('"$RM" -f "$OUT" 2>/dev/null || true');
+  // Prefer app/tmp over /tmp (not writable on many devices)
   L.push('LIST="${TMPDIR:-/data/local/tmp}/mscode_compress_$$.list"');
   L.push('{ ' + listCmd + '; } > "$LIST" 2>/dev/null || true');
   L.push('TOTAL=$("$WC" -l < "$LIST" 2>/dev/null | tr -d \' \\t\')');
   L.push('case "$TOTAL" in \'\'|*[!0-9]*) TOTAL=0 ;; esac');
   L.push('if [ -z "$TOTAL" ] || [ "$TOTAL" -lt 1 ]; then');
   L.push(
-    '  echo "__MS_STATUS__ No readable files (use Internal Storage / sdcard)"',
+    '  echo "__MS_STATUS__ No readable files (stage Termux/SAF first, or use sdcard / app storage)"',
   );
   L.push('  echo "__MS_PROGRESS__ 100"');
   L.push('  "$RM" -f "$LIST"');
+  if (stageDir) {
+    L.push('  "$RM" -rf "$STAGEDIR" 2>/dev/null || true');
+  }
   L.push('  exit 1');
   L.push('fi');
   L.push('echo "__MS_STATUS__ Found $TOTAL file(s)"');
@@ -262,6 +347,9 @@ export function buildCompressPlan(
   );
   L.push('  EC=$?');
   L.push('  "$RM" -f "$LIST"');
+  if (stageDir) {
+    L.push('  "$RM" -rf "$STAGEDIR" 2>/dev/null || true');
+  }
   L.push('  if [ $EC -ne 0 ]; then');
   L.push('    echo "__MS_STATUS__ tar failed (exit $EC)"');
   L.push('    echo "__MS_PROGRESS__ 100"');
@@ -323,6 +411,9 @@ export function buildCompressPlan(
   L.push('  fi');
   L.push('done < "$LIST"');
   L.push('"$RM" -f "$LIST"');
+  if (stageDir) {
+    L.push('"$RM" -rf "$STAGEDIR" 2>/dev/null || true');
+  }
   L.push('if [ ! -f "$OUT" ]; then');
   L.push('  echo "__MS_STATUS__ Archive not created at $OUT"');
   L.push('  echo "__MS_PROGRESS__ 100"');
@@ -355,14 +446,52 @@ export function buildCompressPlan(
     options,
     cwd,
     requiredPackages: packages,
+    stageDir,
   };
 }
 
 export async function prepareCompress(
   options: CompressOptions,
-  opts?: { tmpDir?: string },
+  opts?: { tmpDir?: string; stageDir?: string },
 ): Promise<CompressPlan> {
   return buildCompressPlan(options, opts);
+}
+
+/**
+ * Decide which sources need staging and build a unique stage directory path.
+ */
+export function planStaging(
+  sources: CompressSource[],
+  tmpDir?: string,
+): {
+  needsStage: boolean;
+  stageDir: string;
+  toStage: CompressSource[];
+  direct: CompressSource[];
+} {
+  const base =
+    tmpDir && tmpDir.startsWith('/') && !isForeignAppPath(tmpDir)
+      ? normalizeFsPath(tmpDir)
+      : '/data/local/tmp';
+  const stageDir =
+    base.replace(/\/+$/, '') +
+    '/mscode_stage_' +
+    Date.now() +
+    '_' +
+    Math.floor(Math.random() * 1e6);
+
+  const toStage: CompressSource[] = [];
+  const direct: CompressSource[] = [];
+  for (const s of sources) {
+    if (needsStaging(s.path)) toStage.push(s);
+    else direct.push({ ...s, path: shellPathFromUri(s.path) });
+  }
+  return {
+    needsStage: toStage.length > 0,
+    stageDir,
+    toStage,
+    direct,
+  };
 }
 
 export function parseCompressOutput(
@@ -374,9 +503,15 @@ export function parseCompressOutput(
     const ph = line.match(/__MS_PHASE__\s+(\w+)/);
     if (ph) {
       const p = ph[1] as CompressPhase;
-      if (p === 'checking' || p === 'installing' || p === 'compressing') {
+      if (
+        p === 'checking' ||
+        p === 'installing' ||
+        p === 'compressing' ||
+        p === 'staging'
+      ) {
         phase = p;
-        if (p === 'compressing' || p === 'installing') percent = 0;
+        if (p === 'compressing' || p === 'installing' || p === 'staging')
+          percent = 0;
       }
       continue;
     }
