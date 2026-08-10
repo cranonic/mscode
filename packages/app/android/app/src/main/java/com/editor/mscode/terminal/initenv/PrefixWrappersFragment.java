@@ -32,32 +32,28 @@ public final class PrefixWrappersFragment {
             }
             sb.append("# wrapped ").append(String.valueOf(wrapped)).append(" PREFIX tools\n");
         }
-        // Dynamic wrap after pkg install — targetSdk>28 cannot exec filesDir binaries.
-        // Shell functions call elf() so linker/shebang handling always runs.
+        // Dynamic wrap ONLY after pkg install (same-session). Do NOT call at session
+        // start — shell "for f in $PREFIX/bin/*; eval …" is 10–30s (see ai old fix).
+        // Session open uses the static wrappers above (Java-generated, stamp-cached).
         sb.append("mscode_wrap() {\n");
         sb.append("  [ -d \"$PREFIX/bin\" ] || return 0\n");
         sb.append("  _n=0\n");
         sb.append("  for _f in \"$PREFIX/bin\"/*; do\n");
         sb.append("    [ -f \"$_f\" ] || continue\n");
-        sb.append("    _b=$(basename \"$_f\")\n");
-        // skip invalid shell function names
+        sb.append("    _b=${_f##*/}\n");
         sb.append("    case \"$_b\" in\n");
-        sb.append("      *[!a-zA-Z0-9_+.-]*|[0-9]*) continue ;;\n");
+        sb.append("      *[!a-zA-Z0-9_+.-]*|[0-9]*|elf|bb|pkg|mscode_wrap|runpfx) continue ;;\n");
         sb.append("    esac\n");
-        // don't override critical builtins / already-defined session helpers
-        sb.append("    case \"$_b\" in\n");
-        sb.append("      elf|bb|pkg|mscode_wrap|runpfx) continue ;;\n");
+        // Skip if already a shell function (static wrapper from this env)
+        sb.append("    case \"$(typeset -f \"$_b\" 2>/dev/null | head -1)\" in\n");
+        sb.append("      *\"$_b\"*) continue ;;\n");
         sb.append("    esac\n");
-        // define/overwrite: name() { elf "$PREFIX/bin/name" "$@"; }
-        // \$@ so $@ is not expanded at eval time
         sb.append("    eval \"${_b}() { elf \\\"\\${PREFIX}/bin/${_b}\\\" \\\"\\$@\\\"; }\"\n");
         sb.append("    _n=$((_n+1))\n");
         sb.append("  done\n");
-        sb.append("  echo \"[mscode] wrapped $_n tools from \\$PREFIX/bin\" >&2\n");
+        sb.append("  [ \"$_n\" -gt 0 ] && echo \"[mscode] wrapped $_n new tools\" >&2\n");
         sb.append("  return 0\n");
         sb.append("}\n");
-        // Auto-wrap once at session start so already-installed packages work
-        sb.append("mscode_wrap 2>/dev/null\n");
         sb.append("\n");
     }
 }
