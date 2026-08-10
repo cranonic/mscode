@@ -233,8 +233,11 @@ public class RootfsManager {
      */
     public boolean isRootfsReady() {
         if (new File(getToyboxPath()).exists()) {
-            return new File(getHomePath()).isDirectory()
-                || new File(getToyboxPath()).exists();
+            // toybox's existence is already established by the branch above;
+            // the old `|| new File(getToyboxPath()).exists()` here made this
+            // ALWAYS return true once toybox existed, even when home/ was
+            // missing. Only home/ actually needs checking.
+            return new File(getHomePath()).isDirectory();
         }
         return new File(getRootfsPath(), "etc/alpine-release").exists();
     }

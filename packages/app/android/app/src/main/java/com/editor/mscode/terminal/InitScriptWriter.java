@@ -1,5 +1,7 @@
 package com.editor.mscode.terminal;
 
+import android.util.Log;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -309,26 +311,24 @@ public class InitScriptWriter {
         // Shell-side `for f in $PREFIX/bin/*; eval ...` was taking 10–30s on open.
         sb.append("# PREFIX wrappers (static, generated at env-write time)\n");
         File prefixBin = new File(prefix, "bin");
-        if (prefixBin.isDirectory()) {
-            File[] bins = prefixBin.listFiles();
-            if (bins != null) {
-                int wrapped = 0;
-                for (File binFile : bins) {
-                    String name = binFile.getName();
-                    if (!isValidShellName(name)) continue;
-                    if (seen.contains(name)) continue;
-                    if ("clang".equals(name) || "clang++".equals(name) || "tcc".equals(name)
-                            || "gcc".equals(name) || "g++".equals(name)
-                            || "cc".equals(name) || "c++".equals(name)) continue;
-                    if (name.startsWith("clang-")) continue;
-                    // static function — no eval, no directory scan at shell startup
-                    String safePath = binFile.getAbsolutePath().replace("'", "'\\''");
-                    sb.append(name).append("() { elf '").append(safePath).append("' \"$@\"; }\n");
-                    wrapped++;
-                    if (wrapped > 400) break; // safety cap
-                }
-                sb.append("# wrapped ").append(String.valueOf(wrapped)).append(" PREFIX tools\n");
+        File[] bins = prefixBin.isDirectory() ? prefixBin.listFiles() : null;
+        if (bins != null) {
+            int wrapped = 0;
+            for (File binFile : bins) {
+                String name = binFile.getName();
+                if (!isValidShellName(name)) continue;
+                if (seen.contains(name)) continue;
+                if ("clang".equals(name) || "clang++".equals(name) || "tcc".equals(name)
+                        || "gcc".equals(name) || "g++".equals(name)
+                        || "cc".equals(name) || "c++".equals(name)) continue;
+                if (name.startsWith("clang-")) continue;
+                // static function — no eval, no directory scan at shell startup
+                String safePath = binFile.getAbsolutePath().replace("'", "'\\''");
+                sb.append(name).append("() { elf '").append(safePath).append("' \"$@\"; }\n");
+                wrapped++;
+                if (wrapped > 400) break; // safety cap
             }
+            sb.append("# wrapped ").append(String.valueOf(wrapped)).append(" PREFIX tools\n");
         }
         // Lightweight refresh helper (after pkg install) — still available but not run at start
         sb.append("mscode_wrap() {\n");
@@ -442,46 +442,20 @@ public class InitScriptWriter {
         sb.append("}\n");
         sb.append("\n");
 
-        // Write BASH_ENV file so bash scripts get the same wrappers
-        sb.append("_mscode_write_bash_env() {\n");
-        sb.append("  mkdir -p \"$PREFIX/etc\"\n");
-        sb.append("  {\n");
-        sb.append("    echo '# Auto-generated for bash scripts (neofetch, etc.)'\n");
-        sb.append("    echo \"export PREFIX='$PREFIX'\"\n");
-        sb.append("    echo \"export TERMUX_PREFIX='$PREFIX'\"\n");
-        sb.append("    echo \"export TOYBOX='$TOYBOX'\"\n");
-        sb.append("    echo \"export MSCODE_LINKER='$MSCODE_LINKER'\"\n");
-        sb.append("    echo \"export MSCODE_PROOT='$MSCODE_PROOT'\"\n");
-        sb.append("    echo \"export PROOT_LOADER='$PROOT_LOADER'\"\n");
-        sb.append("    echo \"export LD_LIBRARY_PATH='$LD_LIBRARY_PATH'\"\n");
-        sb.append("    echo \"export PATH='$PATH'\"\n");
-        sb.append("    echo \"export TERMINFO='$TERMINFO'\"\n");
-        sb.append("    echo \"export CURL_CA_BUNDLE='$CURL_CA_BUNDLE'\"\n");
-        sb.append("    echo \"export SSL_CERT_FILE='$SSL_CERT_FILE'\"\n");
-        sb.append("    echo \"export ANDROID_DATA=/data\"\n");
-        sb.append("    echo \"export ANDROID_ROOT=/system\"\n");
-        sb.append("    echo 'bb() { [ $# -lt 1 ] && return 1; local a=\"$1\"; shift; ( exec -a \"$a\" \"$TOYBOX\" \"$@\" ); }'\n");
-        sb.append("    echo '_mscode_proot() { \"$MSCODE_PROOT\" --link2symlink --kill-on-exit -0 -r / -b /system -b /data -b /dev -b /proc -b /sys -b /storage -b /sdcard -b /apex -b \"$PREFIX\" -b \"${TMPDIR:-$PREFIX/tmp}:/tmp\" -w \"$PWD\" \"$@\"; }'\n");
-        sb.append("    echo 'clang() { [ -f \"$PREFIX/bin/clang\" ] || return 127; _mscode_proot \"$PREFIX/bin/clang\" \"$@\"; }'\n");
-        sb.append("    echo '_mscode_clangxx() { _mscode_proot \"$PREFIX/bin/clang++\" \"$@\"; }'\n");
-        sb.append("    echo \"alias 'clang++'=_mscode_clangxx\"\n");
-
-        // toybox applets as bash functions
-        sb.append("    for a in ls cat cp mv rm mkdir grep find tar head tail wc uname clear chmod sed sort awk cut tr uniq basename dirname pwd date touch ln readlink stat which xargs tee ps kill id env seq true false test; do\n");
-        sb.append("      echo \"$a() { bb $a \\\"$@\\\"; }\"\n");
-        sb.append("    done\n");
-        sb.append("    echo 'elf() { local b=\"$1\"; shift; [ -f \"$b\" ] || return 127; if [ -n \"$MSCODE_LINKER\" ]; then \"$MSCODE_LINKER\" \"$b\" \"$@\"; else \"$b\" \"$@\"; fi; }'\n");
-        sb.append("    for _f in \"$PREFIX\"/bin/*; do\n");
-        sb.append("      [ -e \"$_f\" ] || continue\n");
-        sb.append("      _n=${_f##*/}\n");
-        sb.append("      case \"$_n\" in ''|*[!a-zA-Z0-9_]*|[0-9]*) continue ;; esac\n");
-        sb.append("      case \" $_MSCODE_BB_SKIP \" in *\" $_n \"*) continue ;; esac\n");
-        sb.append("      echo \"$_n() { elf '$_f' \\\"$@\\\"; }\"\n");
-        sb.append("    done\n");
-        sb.append("  } > \"$PREFIX/etc/mscode_bash_env.sh\"\n");
-        sb.append("}\n");
-        sb.append("_mscode_write_bash_env 2>/dev/null\n");
-        sb.append("\n");
+        // BASH_ENV file so bash scripts (neofetch, etc.) get the same wrappers.
+        //
+        // BUG FIX: this used to be a shell function (`_mscode_write_bash_env`)
+        // that was DEFINED **and called** right here, meaning it re-ran a
+        // `for _f in "$PREFIX"/bin/*; do … done` scan (with per-file `echo`
+        // into a file) on every single interactive session open — the exact
+        // same anti-pattern already called out and fixed a few lines above
+        // for the mksh wrappers ("no eval, no directory scan at shell
+        // startup"). It was just forgotten here, and is what was costing
+        // 10-30s per session even after the first one. Now it's written
+        // once, directly from Java, reusing the same bins[] scan above, and
+        // it is naturally cached by writeSharedEnv()'s stamp check like
+        // everything else in this file.
+        writeBashEnvFile(prefix, safePrefix, safeToybox, safeLib, bins);
 
         // ── pkg — real install from shell (curl + ar + tar via linker) ──
         sb.append("_pkg_repo='https://packages-cf.termux.dev/apt/termux-main'\n");
@@ -756,6 +730,78 @@ public class InitScriptWriter {
     }
 
     /**
+     * Writes $PREFIX/etc/mscode_bash_env.sh once, directly from Java.
+     * Bash scripts (invoked via BASH_ENV) don't inherit mksh functions from
+     * mscode_env.sh, so they need their own copy of the same wrappers.
+     *
+     * This replaces a shell-side `for _f in "$PREFIX"/bin/*; do … done` loop
+     * that previously ran unconditionally every time mscode_env.sh was
+     * sourced (i.e. on every terminal open) — that scan was the actual
+     * cause of the 10-30s-per-session slowdown. Writing it here means it
+     * only happens when writeFullEnv() itself runs, which writeSharedEnv()
+     * already gates behind a cache-stamp check.
+     */
+    private void writeBashEnvFile(String prefix, String safePrefix, String safeToybox,
+                                   String safeLib, File[] bins) {
+        StringBuilder b = new StringBuilder(4096);
+        b.append("# Auto-generated for bash scripts (neofetch, etc.) — do not hand-edit\n");
+        b.append("export PREFIX='").append(safePrefix).append("'\n");
+        b.append("export TERMUX_PREFIX='").append(safePrefix).append("'\n");
+        b.append("export TOYBOX='").append(safeToybox).append("'\n");
+        b.append("export LD_LIBRARY_PATH='").append(safePrefix).append("/lib:")
+         .append(safePrefix).append("/lib/glibc:").append(safeLib).append("'\n");
+        b.append("export PATH='").append(safePrefix).append("/bin:")
+         .append(safePrefix).append("/bin/applets:").append(safeLib)
+         .append(":/system/bin:/system/xbin'\n");
+        b.append("export TERMINFO='").append(safePrefix).append("/share/terminfo'\n");
+        b.append("if [ -f '").append(safePrefix).append("/etc/tls/cert.pem' ]; then\n");
+        b.append("  export CURL_CA_BUNDLE='").append(safePrefix).append("/etc/tls/cert.pem'\n");
+        b.append("  export SSL_CERT_FILE=\"$CURL_CA_BUNDLE\"\n");
+        b.append("fi\n");
+        b.append("export ANDROID_DATA=/data\n");
+        b.append("export ANDROID_ROOT=/system\n");
+        // MSCODE_LINKER / MSCODE_PROOT / PROOT_LOADER are already exported by
+        // mscode_env.sh (which BASH_ENV scripts inherit from their parent
+        // shell's environment), so we don't need to hardcode them here.
+        b.append("bb() { [ $# -lt 1 ] && return 1; local a=\"$1\"; shift; ( exec -a \"$a\" \"$TOYBOX\" \"$@\" ); }\n");
+        b.append("_mscode_proot() { \"$MSCODE_PROOT\" --link2symlink --kill-on-exit -0 -r / -b /system -b /data -b /dev -b /proc -b /sys -b /storage -b /sdcard -b /apex -b \"$PREFIX\" -b \"${TMPDIR:-$PREFIX/tmp}:/tmp\" -w \"$PWD\" \"$@\"; }\n");
+        b.append("clang() { [ -f \"$PREFIX/bin/clang\" ] || return 127; _mscode_proot \"$PREFIX/bin/clang\" \"$@\"; }\n");
+        b.append("_mscode_clangxx() { _mscode_proot \"$PREFIX/bin/clang++\" \"$@\"; }\n");
+        b.append("alias 'clang++'=_mscode_clangxx\n");
+        b.append("elf() { local _b=\"$1\"; shift; [ -f \"$_b\" ] || return 127; if [ -n \"$MSCODE_LINKER\" ]; then \"$MSCODE_LINKER\" \"$_b\" \"$@\"; else \"$_b\" \"$@\"; fi; }\n");
+
+        String[] toyboxApplets = {
+            "ls", "cat", "cp", "mv", "rm", "mkdir", "grep", "find", "tar", "head", "tail",
+            "wc", "uname", "clear", "chmod", "sed", "sort", "awk", "cut", "tr", "uniq",
+            "basename", "dirname", "pwd", "date", "touch", "ln", "readlink", "stat",
+            "which", "xargs", "tee", "ps", "kill", "id", "env", "seq", "true", "false", "test"
+        };
+        for (String a : toyboxApplets) {
+            b.append(a).append("() { bb ").append(a).append(" \"$@\"; }\n");
+        }
+
+        if (bins != null) {
+            int wrapped = 0;
+            for (File binFile : bins) {
+                String name = binFile.getName();
+                if (!isValidShellName(name)) continue;
+                if ("clang".equals(name) || "clang++".equals(name)) continue;
+                String safePath = binFile.getAbsolutePath().replace("'", "'\\''");
+                b.append(name).append("() { elf '").append(safePath).append("' \"$@\"; }\n");
+                if (++wrapped > 400) break; // safety cap, matches mscode_env.sh
+            }
+        }
+
+        File etc = new File(prefix, "etc");
+        if (!etc.isDirectory()) etc.mkdirs();
+        try (FileOutputStream fos = new FileOutputStream(new File(etc, "mscode_bash_env.sh"))) {
+            fos.write(b.toString().getBytes("UTF-8"));
+        } catch (IOException e) {
+            Log.w("InitScriptWriter", "mscode_bash_env.sh write failed: " + e.getMessage());
+        }
+    }
+
+    /**
      * Heavy shared env — written only when stamp changes (bootstrap / PREFIX / toybox).
      * Per-session init scripts just source this file.
      */
@@ -781,25 +827,35 @@ public class InitScriptWriter {
 
     private String computeEnvStamp() {
         StringBuilder s = new StringBuilder();
-        s.append("v3|");
+        s.append("v4|");
         s.append(rootfs.isBootstrapReady() ? "1" : "0").append('|');
         s.append(rootfs.getToyboxPath()).append('|');
         s.append(rootfs.getNativeLibDir()).append('|');
         File bin = new File(rootfs.getPrefixPath(), "bin");
         if (bin.isDirectory()) {
             File[] kids = bin.listFiles();
-            s.append(kids == null ? 0 : kids.length).append('|');
-            // cheap mtime fingerprint
-            long maxM = bin.lastModified();
+            long count = kids == null ? 0 : kids.length;
+            // Order-independent fingerprint: File.listFiles() does not
+            // guarantee stable ordering across calls, so scanning only the
+            // "first 30" entries (old code) could pick up a different
+            // mtime on two calls against the very same, unchanged
+            // directory — that made the cache flap between hit/miss and
+            // triggered a full (expensive) rebuild on sessions where
+            // nothing had actually changed. Sum+max over every entry is
+            // deterministic regardless of listing order, and still cheap
+            // (a few hundred stat()s at worst).
+            long maxM = 0;
+            long sumM = 0;
             if (kids != null) {
-                int n = Math.min(kids.length, 30);
-                for (int i = 0; i < n; i++) {
-                    if (kids[i].lastModified() > maxM) maxM = kids[i].lastModified();
+                for (File k : kids) {
+                    long m = k.lastModified();
+                    sumM += m;
+                    if (m > maxM) maxM = m;
                 }
             }
-            s.append(maxM);
+            s.append(count).append('|').append(maxM).append('|').append(sumM);
         } else {
-            s.append("0|0");
+            s.append("0|0|0");
         }
         return s.toString();
     }
