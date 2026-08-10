@@ -292,7 +292,7 @@ export function buildCompressPlan(
       ' "$OUT" "$f"; fi',
   );
   L.push('  else');
-  L.push('    _ze=/tmp/mscode_zip_err_$$');
+  L.push('    _ze="${TMPDIR:-/data/local/tmp}/mscode_zip_err_$$"');
   L.push('    _ok=0');
   L.push(
     '    if command -v runpfx >/dev/null 2>&1 && runpfx zip ' +
