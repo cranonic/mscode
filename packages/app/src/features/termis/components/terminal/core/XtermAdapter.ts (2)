@@ -154,9 +154,6 @@ export class XtermAdapter {
       allowTransparency:     false,
       convertEol:            true,
       disableStdin:          false,
-      // Match Termux: long lines wrap to next row instead of horizontal scroll
-      windowsMode:           false,
-      scrollOnUserInput:     true,
       logLevel: 'off',
     });
 
@@ -164,34 +161,13 @@ export class XtermAdapter {
 
     this.xterm.open(this.container);
 
-    // Fit then sync PTY size + force DEC auto-wrap (DECAWM) on
-    setTimeout(() => {
-      this._fitAndSyncPty();
-      this._ensureAutowrap();
-    }, 50);
+    setTimeout(() => this.fitAddon?.fit(), 50);
 
     this._connectProcess();
     this._setupResizeObserver();
     this._setupMouseWheelZoom();
     this._setupTouchScrolling();
     this._setupMobileSelection();
-  }
-
-  /** Enable DEC auto-wrap mode so lines wrap like Termux (no '<' overflow marker). */
-  private _ensureAutowrap(): void {
-    try {
-      // CSI ? 7 h = DECAWM on (auto-wrap)
-      this.xterm?.write('\x1b[?7h');
-    } catch {}
-  }
-
-  private _fitAndSyncPty(): void {
-    try {
-      this.fitAddon?.fit();
-      if (this.xterm?.cols && this.xterm?.rows) {
-        this.process.resize(this.xterm.cols, this.xterm.rows);
-      }
-    } catch {}
   }
 
   private async _loadAddons(): Promise<void> {
@@ -276,8 +252,12 @@ export class XtermAdapter {
     const doFit = () => {
       clearTimeout(this._fitTimer);
       this._fitTimer = setTimeout(() => {
-        this._fitAndSyncPty();
-        this._ensureAutowrap();
+        try {
+          this.fitAddon?.fit();
+          if (this.xterm && this.xterm.cols && this.xterm.rows) {
+            this.process.resize(this.xterm.cols, this.xterm.rows);
+          }
+        } catch (e) {}
       }, 40);
     };
 
@@ -562,8 +542,7 @@ export class XtermAdapter {
   blur():  void { this.xterm?.blur(); }
 
   fit(): void {
-    this._fitAndSyncPty();
-    this._ensureAutowrap();
+    this.fitAddon?.fit();
   }
 
   findNext(term: string): boolean {

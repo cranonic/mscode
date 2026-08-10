@@ -194,21 +194,31 @@ export function buildCompressPlan(
   );
   const outputDir = shellPathFromUri(outputDirRaw);
 
-  const tmpFallback =
-    opts?.tmpDir &&
-    opts.tmpDir.startsWith('/') &&
-    !isContentUri(opts.tmpDir) &&
-    !isForeignAppPath(opts.tmpDir)
-      ? normalizeFsPath(opts.tmpDir)
-      : '/data/local/tmp';
+  // Staging tmp is for intermediate copies only — NEVER use it as archive output.
+  // When user is in Termux/SAF, put the zip on shared storage so it's visible.
+  const sharedFallback = '/storage/emulated/0';
 
-  // Prefer real path for output when shell-writable (shared OR own app)
-  const writableOutDir =
+  // Prefer real path for output when shell-writable (shared OR own app).
+  // Do not fall back to app cache/tmp for the final archive.
+  let writableOutDir: string;
+  if (
     !isContentUri(outputDir) &&
     outputDir.startsWith('/') &&
     !isForeignAppPath(outputDir)
-      ? outputDir
-      : tmpFallback;
+  ) {
+    // Avoid writing final archive into compress staging folders
+    const norm = normalizeFsPath(outputDir);
+    if (
+      norm.includes('/mscode_stage_') ||
+      norm.includes('/compress_stage')
+    ) {
+      writableOutDir = sharedFallback;
+    } else {
+      writableOutDir = norm;
+    }
+  } else {
+    writableOutDir = sharedFallback;
+  }
 
   const outputPath =
     normalizeFsPath(writableOutDir.replace(/\/+$/, '')) + '/' + fileName;
@@ -220,23 +230,23 @@ export function buildCompressPlan(
   const format = options.format;
   const { bins, packages } = depsForFormat(format);
 
+  // Build file-list command: ONLY paths go to LIST file.
+  // Status lines must go to stdout (UI), never into the list (zip would treat them as paths).
   const listParts: string[] = [];
+  const statusParts: string[] = [];
   for (const p of sources) {
     if (isContentUri(p) || isForeignAppPath(p)) {
-      // Should not happen if modal staged correctly — still report clearly
-      listParts.push(
-        'echo "__MS_STATUS__ Skip (need stage): ' +
-          p.replace(/"/g, '') +
-          '"',
+      statusParts.push(
+        'echo "__MS_STATUS__ Skip (need stage): ' + p.replace(/"/g, '') + '"',
       );
       continue;
     }
+    statusParts.push(
+      'echo "__MS_STATUS__ Listing ' + p.replace(/"/g, '') + '"',
+    );
     const hidden = includeHidden ? '' : " -not -path '*/.*' ";
     listParts.push(
-      'echo "__MS_STATUS__ Listing ' +
-        p.replace(/"/g, '') +
-        '"; ' +
-        'if [ -d ' +
+      'if [ -d ' +
         q(p) +
         ' ]; then /system/bin/find ' +
         q(p) +
@@ -251,10 +261,11 @@ export function buildCompressPlan(
         q(p) +
         '; else echo "__MS_STATUS__ Missing path: ' +
         p.replace(/"/g, '') +
-        '"; fi',
+        '" >&2; fi',
     );
   }
   const listCmd = listParts.length ? listParts.join('; ') : 'true';
+  const statusCmd = statusParts.length ? statusParts.join('; ') : 'true';
 
   const pwdZip = options.password ? ' -P ' + q(options.password) : '';
   const zipLevel =
@@ -329,9 +340,14 @@ export function buildCompressPlan(
   L.push('echo "__MS_STATUS__ OUT=$OUT"');
   L.push('"$MKDIR" -p "$OUTDIR" 2>/dev/null || true');
   L.push('"$RM" -f "$OUT" 2>/dev/null || true');
-  // Prefer app/tmp over /tmp (not writable on many devices)
+  // Status to stdout (UI); file paths only into LIST (zip -T must not see status lines)
+  L.push(statusCmd);
   L.push('LIST="${TMPDIR:-/data/local/tmp}/mscode_compress_$$.list"');
   L.push('{ ' + listCmd + '; } > "$LIST" 2>/dev/null || true');
+  // Keep only absolute paths — drop any accidental status/noise lines
+  L.push(
+    'if [ -f "$LIST" ]; then grep -E "^/" "$LIST" > "$LIST.clean" 2>/dev/null && mv "$LIST.clean" "$LIST" || true; fi',
+  );
   L.push('TOTAL=$("$WC" -l < "$LIST" 2>/dev/null | tr -d \' \\t\')');
   L.push('case "$TOTAL" in \'\'|*[!0-9]*) TOTAL=0 ;; esac');
   L.push('if [ -z "$TOTAL" ] || [ "$TOTAL" -lt 1 ]; then');

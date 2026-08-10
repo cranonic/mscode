@@ -78,6 +78,15 @@ public final class EnvExportsFragment {
         sb.append("export ANDROID_ROOT=/system\n");
         sb.append("export ANDROID_STORAGE=/storage\n");
         sb.append("export BASH_ENV='").append(safePrefix).append("/etc/mscode_bash_env.sh'\n");
+        // Line wrap like Termux — never horizontal-scroll with '<' / '>' markers
+        sb.append("printf '\\033[?7h' 2>/dev/null || true\n");
+        sb.append("if [ -n \"$BASH_VERSION\" ]; then\n");
+        sb.append("  bind 'set horizontal-scroll-mode off' 2>/dev/null || true\n");
+        sb.append("  bind 'set horizontal-scroll-mode Off' 2>/dev/null || true\n");
+        sb.append("  bind 'set enable-bracketed-paste on' 2>/dev/null || true\n");
+        sb.append("fi\n");
+        // mksh / toybox ash: no horizontal-scroll; keep wrap via terminal modes
+        sb.append("stty onlcr 2>/dev/null || true\n");
         sb.append("\n");
     }
 }
