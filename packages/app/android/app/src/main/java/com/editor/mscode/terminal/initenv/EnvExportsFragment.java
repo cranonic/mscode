@@ -84,8 +84,12 @@ public final class EnvExportsFragment {
         sb.append("  bind 'set horizontal-scroll-mode off' 2>/dev/null || true\n");
         sb.append("  bind 'set horizontal-scroll-mode Off' 2>/dev/null || true\n");
         sb.append("  bind 'set enable-bracketed-paste on' 2>/dev/null || true\n");
+        sb.append("elif [ -n \"$KSH_VERSION\" ]; then\n");
+        sb.append("  # mksh's line editor horizontal-scrolls a long command line by default,\n");
+        sb.append("  # showing a '<' where content is clipped off-screen. 'multiline' makes\n");
+        sb.append("  # it wrap across terminal rows instead, same as Termux.\n");
+        sb.append("  set -o multiline 2>/dev/null || true\n");
         sb.append("fi\n");
-        // mksh / toybox ash: no horizontal-scroll; keep wrap via terminal modes
         sb.append("stty onlcr 2>/dev/null || true\n");
         sb.append("\n");
     }
