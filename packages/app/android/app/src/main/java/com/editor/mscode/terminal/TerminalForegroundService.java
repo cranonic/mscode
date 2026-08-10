@@ -128,7 +128,15 @@ public class TerminalForegroundService extends Service {
             }
         }
         PkgInstaller installer = new PkgInstaller(rootfs, arch);
-        return installer.install(packages, msg -> emitLog("[pkg] " + msg));
+        String result = installer.install(packages, msg -> emitLog("[pkg] " + msg));
+        // PREFIX/bin changed — force shared env rebuild on next session
+        try {
+            new java.io.File(rootfs.getFilesDir(), ".mscode_env_stamp").delete();
+            if (scriptWriter != null) scriptWriter.writeSharedEnv();
+        } catch (Exception e) {
+            emitLog("env refresh after pkg: " + e.getMessage());
+        }
+        return result;
     }
 
     public java.util.List<String> pkgListInstalled() {
@@ -243,16 +251,9 @@ public class TerminalForegroundService extends Service {
             ? projectPath
             : rootfs.getHomePath();
 
-        // Write per-session init script
+        // Thin per-session init (sources cached mscode_env.sh — fast)
         String initPath = rootfs.getFilesDir() + "/init_" + sessionId + ".sh";
         scriptWriter.write(initPath, cwd);
-        // Keep shared mscode_env.sh fresh (wrappers + clangd config) without
-        // stamping a project cwd into background/LSP jobs
-        try {
-            scriptWriter.writeSharedEnv();
-        } catch (Exception e) {
-            emitLog("mscode_env.sh refresh: " + e.getMessage());
-        }
 
         String[] cmd = builder.buildSessionCommand(initPath);
         // ENV=initPath so interactive sh sources bb()/aliases + PREFIX

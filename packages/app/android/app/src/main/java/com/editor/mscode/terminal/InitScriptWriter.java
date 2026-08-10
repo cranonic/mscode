@@ -31,7 +31,57 @@ public class InitScriptWriter {
      * @param outputPath  filesDir/init_tabX.sh — set as ENV= for interactive sh
      * @param projectCwd  Android path to cd into on startup
      */
+    /**
+     * Thin per-session ENV script. Sources cached mscode_env.sh then sets cwd/banner.
+     * Must be fast — called on every terminal open.
+     */
     public void write(String outputPath, String projectCwd) throws IOException {
+        // Ensure shared heavy env exists (cached — usually a no-op after first time)
+        writeSharedEnv();
+
+        String home = rootfs.getHomePath();
+        String hostname = rootfs.getStoredHostname();
+
+        String safeCwd = (projectCwd != null && !projectCwd.isEmpty())
+            ? projectCwd.replace("'", "'\\''")
+            : home.replace("'", "'\\''");
+        String safeHome = home.replace("'", "'\\''");
+        String safeHost = hostname != null ? hostname.replace("'", "'\\''") : "mscode";
+        String sharedPath = (rootfs.getFilesDir() + "/mscode_env.sh").replace("'", "'\\''");
+
+        StringBuilder sb = new StringBuilder(512);
+        sb.append("# MS Code per-session ENV (thin) — sources shared env\n");
+        sb.append("[ -f '").append(sharedPath).append("' ] && . '").append(sharedPath).append("'\n");
+        sb.append("export MSCODE_HOST='").append(safeHost).append("'\n");
+        sb.append("if [ -d '").append(safeCwd).append("' ]; then\n");
+        sb.append("  cd '").append(safeCwd).append("'\n");
+        sb.append("else\n");
+        sb.append("  cd '").append(safeHome).append("' 2>/dev/null || true\n");
+        sb.append("fi\n");
+        sb.append("if [ -z \"$MSCODE_BANNER_SHOWN\" ]; then\n");
+        sb.append("  export MSCODE_BANNER_SHOWN=1\n");
+        sb.append("  echo \"[+] Opened: $PWD\"\n");
+        sb.append("  if [ -n \"$PREFIX\" ] && [ -d \"$PREFIX/bin\" ]; then\n");
+        sb.append("    echo \"[+] PREFIX=$PREFIX\"\n");
+        sb.append("  else\n");
+        sb.append("    echo \"[+] Native shell (bootstrap pending)\"\n");
+        sb.append("  fi\n");
+        sb.append("fi\n");
+
+        File f = new File(outputPath);
+        if (f.getParentFile() != null) f.getParentFile().mkdirs();
+        try (FileOutputStream fos = new FileOutputStream(f)) {
+            fos.write(sb.toString().getBytes("UTF-8"));
+        }
+        //noinspection ResultOfMethodCallIgnored
+        f.setReadable(true, false);
+    }
+
+    /**
+     * Full shared environment (heavy). Prefer writeSharedEnv() which caches this.
+     */
+    public void writeFullEnv(String outputPath, String projectCwd, boolean includeSessionBits) throws IOException {
+
         String hostname = rootfs.getStoredHostname();
         String home     = rootfs.getHomePath();
         String tmp      = rootfs.getTmpPath();
@@ -255,37 +305,45 @@ public class InitScriptWriter {
         }
         sb.append("\n");
 
-        // ── Dynamic PREFIX/bin wrappers (re-run after pkg install) ────────
-        sb.append("_MSCODE_BB_SKIP=' ");
-        for (String a : seen) {
-            sb.append(a).append(' ');
+        // ── PREFIX/bin wrappers (pre-generated in Java — NO shell for-loop) ──
+        // Shell-side `for f in $PREFIX/bin/*; eval ...` was taking 10–30s on open.
+        sb.append("# PREFIX wrappers (static, generated at env-write time)
+");
+        File prefixBin = new File(prefix, "bin");
+        if (prefixBin.isDirectory()) {
+            File[] bins = prefixBin.listFiles();
+            if (bins != null) {
+                int wrapped = 0;
+                for (File binFile : bins) {
+                    String name = binFile.getName();
+                    if (!isValidShellName(name)) continue;
+                    if (seen.contains(name)) continue;
+                    if ("clang".equals(name) || "clang++".equals(name) || "tcc".equals(name)
+                            || "gcc".equals(name) || "g++".equals(name)
+                            || "cc".equals(name) || "c++".equals(name)) continue;
+                    if (name.startsWith("clang-")) continue;
+                    // static function — no eval, no directory scan at shell startup
+                    String safePath = binFile.getAbsolutePath().replace("'", "'\''");
+                    sb.append(name).append("() { elf '").append(safePath).append("' \"$@\"; }
+");
+                    wrapped++;
+                    if (wrapped > 400) break; // safety cap
+                }
+                sb.append("# wrapped ").append(String.valueOf(wrapped)).append(" PREFIX tools
+");
+            }
         }
-        sb.append("'\n");
-        sb.append("mscode_wrap() {\n");
-        sb.append("  [ -d \"$PREFIX/bin\" ] || return 0\n");
-        sb.append("  _wc=0\n");
-        sb.append("  for _f in \"$PREFIX\"/bin/*; do\n");
-        sb.append("    [ -e \"$_f\" ] || continue\n");
-        sb.append("    _n=${_f##*/}\n");
-        sb.append("    case \"$_n\" in\n");
-        sb.append("      ''|*[!a-zA-Z0-9_]*|[0-9]*) continue ;;\n");
-        sb.append("    esac\n");
-        sb.append("    case \"$_MSCODE_BB_SKIP\" in\n");
-        sb.append("      *\" $_n \"*) continue ;;\n");
-        sb.append("    esac\n");
-        sb.append("    case \"$_n\" in\n");
-        sb.append("      elf|bb|pkg|mscode_wrap|export|exec|if|fi|then|else|while|do|done|case|esac|function|return|shift|cd|command) continue ;;\n");
-        sb.append("    esac\n");
-        sb.append("    case \"$_n\" in\n");
-        sb.append("      clang|clang++|clang-*[0-9]*|tcc|gcc|g++|cc|c++) continue ;;\n");
-        sb.append("    esac\n");
-        sb.append("    eval \"$_n() { elf \\\"$_f\\\" \\\"\\$@\\\"; }\"\n");
-        sb.append("    _wc=$((_wc+1))\n");
-        sb.append("  done\n");
-        sb.append("  return 0\n");
-        sb.append("}\n");
-        sb.append("mscode_wrap\n");
-        sb.append("\n");
+        // Lightweight refresh helper (after pkg install) — still available but not run at start
+        sb.append("mscode_wrap() {
+");
+        sb.append("  echo \"[mscode] wrappers already loaded from cached env; pkg install refreshes on next session\" >&2
+");
+        sb.append("  return 0
+");
+        sb.append("}
+");
+        sb.append("
+");
 
         // ── Compilers via proot so plain `clang hello.c -o hello` works ──
         // linker64 cannot satisfy clang's -cc1 re-exec (absolute path error).
@@ -673,28 +731,31 @@ public class InitScriptWriter {
         sb.append("}\n");
         sb.append("\n");
 
-        // cd into project
-        sb.append("if [ -d '").append(safeCwd).append("' ]; then\n");
-        sb.append("  cd '").append(safeCwd).append("'\n");
-        sb.append("else\n");
-        sb.append("  cd '").append(safeHome).append("' 2>/dev/null || true\n");
-        sb.append("fi\n");
-        sb.append("\n");
 
-        // banner
-        sb.append("if [ -z \"$MSCODE_BANNER_SHOWN\" ]; then\n");
-        sb.append("  export MSCODE_BANNER_SHOWN=1\n");
-        sb.append("  echo \"[+] Opened: $PWD\"\n");
-        if (bootOk) {
-            sb.append("  echo \"[+] PREFIX=$PREFIX  linker=$MSCODE_LINKER\"\n");
-            sb.append("  echo \"[+] bb ls / curl / elf $PREFIX/bin/curl / pkg\"\n");
-        } else {
-            sb.append("  echo \"[+] Native shell (bootstrap pending)  |  bb ls / bb --list\"\n");
+        if (includeSessionBits) {
+            // cd into project
+            sb.append("if [ -d '").append(safeCwd).append("' ]; then\n");
+            sb.append("  cd '").append(safeCwd).append("'\n");
+            sb.append("else\n");
+            sb.append("  cd '").append(safeHome).append("' 2>/dev/null || true\n");
+            sb.append("fi\n");
+            sb.append("\n");
+
+            // banner
+            sb.append("if [ -z \"$MSCODE_BANNER_SHOWN\" ]; then\n");
+            sb.append("  export MSCODE_BANNER_SHOWN=1\n");
+            sb.append("  echo \"[+] Opened: $PWD\"\n");
+            if (bootOk) {
+                sb.append("  echo \"[+] PREFIX=$PREFIX  linker=$MSCODE_LINKER\"\n");
+                sb.append("  echo \"[+] bb ls / curl / elf $PREFIX/bin/curl / pkg\"\n");
+            } else {
+                sb.append("  echo \"[+] Native shell (bootstrap pending)  |  bb ls / bb --list\"\n");
+            }
+            sb.append("fi\n");
         }
-        sb.append("fi\n");
 
         File f = new File(outputPath);
-        f.getParentFile().mkdirs();
+        if (f.getParentFile() != null) f.getParentFile().mkdirs();
         try (FileOutputStream fos = new FileOutputStream(f)) {
             fos.write(sb.toString().getBytes("UTF-8"));
         }
@@ -702,8 +763,61 @@ public class InitScriptWriter {
         f.setReadable(true, false);
     }
 
+    /**
+     * Heavy shared env — written only when stamp changes (bootstrap / PREFIX / toybox).
+     * Per-session init scripts just source this file.
+     */
     public void writeSharedEnv() throws IOException {
-        write(rootfs.getFilesDir() + "/mscode_env.sh", rootfs.getHomePath());
+        String sharedPath = rootfs.getFilesDir() + "/mscode_env.sh";
+        File shared = new File(sharedPath);
+        String stamp = computeEnvStamp();
+        File stampFile = new File(rootfs.getFilesDir(), ".mscode_env_stamp");
+        if (shared.isFile() && stampFile.isFile()) {
+            try {
+                String old = new String(readAll(new FileInputStream(stampFile)), "UTF-8").trim();
+                if (stamp.equals(old) && shared.length() > 200) {
+                    return; // cache hit — skip expensive rebuild
+                }
+            } catch (IOException ignored) {}
+        }
+        // Full rebuild into shared path (cwd = HOME for shared)
+        writeFullEnv(sharedPath, rootfs.getHomePath(), /*includeSessionBits*/ false);
+        try (FileOutputStream fos = new FileOutputStream(stampFile)) {
+            fos.write(stamp.getBytes("UTF-8"));
+        }
+    }
+
+    private String computeEnvStamp() {
+        StringBuilder s = new StringBuilder();
+        s.append("v3|");
+        s.append(rootfs.isBootstrapReady() ? "1" : "0").append('|');
+        s.append(rootfs.getToyboxPath()).append('|');
+        s.append(rootfs.getNativeLibDir()).append('|');
+        File bin = new File(rootfs.getPrefixPath(), "bin");
+        if (bin.isDirectory()) {
+            File[] kids = bin.listFiles();
+            s.append(kids == null ? 0 : kids.length).append('|');
+            // cheap mtime fingerprint
+            long maxM = bin.lastModified();
+            if (kids != null) {
+                int n = Math.min(kids.length, 30);
+                for (int i = 0; i < n; i++) {
+                    if (kids[i].lastModified() > maxM) maxM = kids[i].lastModified();
+                }
+            }
+            s.append(maxM);
+        } else {
+            s.append("0|0");
+        }
+        return s.toString();
+    }
+
+    private static byte[] readAll(FileInputStream fis) throws IOException {
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = fis.read(buf)) != -1) bos.write(buf, 0, n);
+        return bos.toByteArray();
     }
 
     public void cleanup(String outputPath) {
