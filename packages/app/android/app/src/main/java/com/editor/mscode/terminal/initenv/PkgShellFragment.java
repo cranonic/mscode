@@ -1,295 +1,3 @@
-// package com.editor.mscode.terminal.initenv;
-
-// /**
-//  * Shell-side pkg() package manager functions embedded in mscode_env.sh.
-//  * (curl + ar + tar via linker / toybox)
-//  */
-// public final class PkgShellFragment {
-//     private PkgShellFragment() {}
-
-//     public static void append(StringBuilder sb) {
-//         sb.append("_pkg_repo='https://packages-cf.termux.dev/apt/termux-main'\n");
-//         sb.append("_pkg_cache=\"$HOME/../pkg-cache\"\n");
-//         sb.append("_pkg_arch() {\n");
-//         sb.append("  case \"$(bb uname -m 2>/dev/null)\" in\n");
-//         sb.append("    aarch64|arm64) echo aarch64 ;;\n");
-//         sb.append("    armv7*|armv8*|arm) echo arm ;;\n");
-//         sb.append("    x86_64|amd64) echo x86_64 ;;\n");
-//         sb.append("    i686|i386|x86) echo i686 ;;\n");
-//         sb.append("    *) echo aarch64 ;;\n");
-//         sb.append("  esac\n");
-//         sb.append("}\n");
-//         sb.append("\n");
-//         // Ensure Packages index
-//         sb.append("_pkg_ensure_index() {\n");
-//         sb.append("  mkdir -p \"$_pkg_cache\"\n");
-//         sb.append("  _arch=$(_pkg_arch)\n");
-//         sb.append("  _idx=\"$_pkg_cache/Packages\"\n");
-//         sb.append("  _need=1\n");
-//         sb.append("  if [ -f \"$_idx\" ]; then\n");
-//         sb.append("    _age=$(( $(date +%s) - $(bb stat -c %Y \"$_idx\" 2>/dev/null || echo 0) ))\n");
-//         sb.append("    [ \"$_age\" -lt 86400 ] 2>/dev/null && _need=0\n");
-//         sb.append("  fi\n");
-//         sb.append("  if [ \"$_need\" = 1 ]; then\n");
-//         sb.append("    echo \"[pkg] fetching index ($_arch)…\"\n");
-//         sb.append("    _curl_ca=\n");
-//         sb.append("    [ -n \"$CURL_CA_BUNDLE\" ] && _curl_ca=\"--cacert $CURL_CA_BUNDLE\"\n");
-//         sb.append("    curl -fsSL $_curl_ca -o \"$_pkg_cache/Packages.gz\" \\\n");
-//         sb.append("      \"$_pkg_repo/dists/stable/main/binary-$_arch/Packages.gz\" || return 1\n");
-//         sb.append("    bb gunzip -c \"$_pkg_cache/Packages.gz\" > \"$_idx\" || return 1\n");
-//         sb.append("  fi\n");
-//         sb.append("}\n");
-//         sb.append("\n");
-//         // Resolve Filename: for a package name
-//         sb.append("_pkg_resolve() {\n");
-//         sb.append("  _want=\"$1\"\n");
-//         sb.append("  _pkg_ensure_index || return 1\n");
-//         sb.append("  _fn=\n");
-//         sb.append("  _cur=\n");
-//         sb.append("  while IFS= read -r _line || [ -n \"$_line\" ]; do\n");
-//         sb.append("    case \"$_line\" in\n");
-//         sb.append("      'Package: '*) _cur=${_line#Package: } ;;\n");
-//         sb.append("      'Filename: '*)\n");
-//         sb.append("        if [ \"$_cur\" = \"$_want\" ]; then _fn=${_line#Filename: }; fi\n");
-//         sb.append("        ;;\n");
-//         sb.append("      '') _cur= ;;\n");
-//         sb.append("    esac\n");
-//         sb.append("  done < \"$_pkg_cache/Packages\"\n");
-//         sb.append("  [ -n \"$_fn\" ] || return 1\n");
-//         sb.append("  echo \"$_fn\"\n");
-//         sb.append("}\n");
-//         sb.append("\n");
-//         // Extract .deb → $PREFIX
-//         // toybox has NO `ar` applet — never use `bb ar`.
-//         // Order: $PREFIX/bin/ar (elf) → pure shell System V ar (deb-safe).
-//         sb.append("_pkg_ar_x() {\n");
-//         sb.append("  # Extract ar members of $1 into cwd. No toybox ar.\n");
-//         sb.append("  _ar_file=\"$1\"\n");
-//         sb.append("  if [ -f \"$PREFIX/bin/ar\" ]; then\n");
-//         sb.append("    elf \"$PREFIX/bin/ar\" x \"$_ar_file\" && return 0\n");
-//         sb.append("  fi\n");
-//         sb.append("  # Pure System V ar reader (ASCII headers — works for .deb)\n");
-//         sb.append("  _magic=$(dd if=\"$_ar_file\" bs=8 count=1 2>/dev/null)\n");
-//         sb.append("  case \"$_magic\" in\n");
-//         sb.append("    '!<arch>'*) ;;\n");
-//         sb.append("    *) echo \"[pkg] not an ar archive: $_ar_file\" >&2; return 1 ;;\n");
-//         sb.append("  esac\n");
-//         sb.append("  _off=8\n");
-//         sb.append("  _total=$(bb stat -c %s \"$_ar_file\" 2>/dev/null || echo 0)\n");
-//         sb.append("  [ \"$_total\" -gt 68 ] || return 1\n");
-//         sb.append("  while [ \"$_off\" -lt \"$_total\" ]; do\n");
-//         sb.append("    _hdr=$(dd if=\"$_ar_file\" bs=1 skip=\"$_off\" count=60 2>/dev/null)\n");
-//         sb.append("    [ ${#_hdr} -eq 60 ] || break\n");
-//         sb.append("    _name=$(printf '%s' \"$_hdr\" | dd bs=1 count=16 2>/dev/null)\n");
-//         sb.append("    _name=$(printf '%s' \"$_name\" | sed 's/[[:space:]]*$//;s/\\/$//')\n");
-//         sb.append("    _sz=$(printf '%s' \"$_hdr\" | dd bs=1 skip=48 count=10 2>/dev/null)\n");
-//         sb.append("    _sz=$(printf '%s' \"$_sz\" | sed 's/[[:space:]]//g')\n");
-//         sb.append("    _off=$((_off + 60))\n");
-//         sb.append("    case \"$_name\" in ''|//* ) break ;; esac\n");
-//         sb.append("    case \"$_sz\" in ''|*[!0-9]*) break ;; esac\n");
-//         sb.append("    [ \"$_sz\" -eq 0 ] && continue\n");
-//         sb.append("    # Skip GNU extended name table; still extract real members\n");
-//         sb.append("    case \"$_name\" in\n");
-//         sb.append("      //|/) _off=$((_off + _sz)); [ $((_sz & 1)) -eq 1 ] && _off=$((_off + 1)); continue ;;\n");
-//         sb.append("    esac\n");
-//         sb.append("    dd if=\"$_ar_file\" of=\"$_name\" bs=1 skip=\"$_off\" count=\"$_sz\" 2>/dev/null || return 1\n");
-//         sb.append("    _off=$((_off + _sz))\n");
-//         sb.append("    [ $((_sz & 1)) -eq 1 ] && _off=$((_off + 1))\n");
-//         sb.append("  done\n");
-//         sb.append("  return 0\n");
-//         sb.append("}\n");
-//         sb.append("\n");
-//         sb.append("_pkg_extract_deb() {\n");
-//         sb.append("  _deb=\"$1\"; _name=\"$2\"\n");
-//         sb.append("  _work=\"$_pkg_cache/extract-$_name\"\n");
-//         sb.append("  rm -rf \"$_work\"; mkdir -p \"$_work\"\n");
-//         sb.append("  if ! ( cd \"$_work\" && _pkg_ar_x \"$_deb\" ); then\n");
-//         sb.append("    echo \"[pkg] ar extract failed for $_name\" >&2\n");
-//         sb.append("    return 1\n");
-//         sb.append("  fi\n");
-//         sb.append("  # detect truncated deb (short read leaves tiny/missing data.tar)\n");
-//         sb.append("  _has_data=0\n");
-//         sb.append("  for _f in \"$_work\"/data.tar*; do [ -f \"$_f\" ] && [ -s \"$_f\" ] && _has_data=1; done\n");
-//         sb.append("  if [ \"$_has_data\" = 0 ]; then\n");
-//         sb.append("    echo \"[pkg] missing data.tar — deleting bad cache\"\n");
-//         sb.append("    rm -f \"$_deb\"\n");
-//         sb.append("    return 1\n");
-//         sb.append("  fi\n");
-//         sb.append("  _data=\n");
-//         sb.append("  for _f in \"$_work\"/data.tar*; do\n");
-//         sb.append("    [ -f \"$_f\" ] && _data=\"$_f\" && break\n");
-//         sb.append("  done\n");
-//         sb.append("  [ -n \"$_data\" ] || { echo \"[pkg] no data.tar in deb\" >&2; return 1; }\n");
-//         sb.append("  echo \"[pkg] extracting $(basename \"$_data\") → $PREFIX\"\n");
-//         // Termux debs contain: data/data/com.termux/files/usr/bin/...
-//         // Stage extract, then merge that tree into our $PREFIX.
-//         sb.append("  _stage=\"$_work/stage\"\n");
-//         sb.append("  mkdir -p \"$_stage\"\n");
-//         sb.append("  case \"$_data\" in\n");
-//         sb.append("    *.xz)\n");
-//         sb.append("      if [ -f \"$PREFIX/bin/xz\" ]; then\n");
-//         sb.append("        elf \"$PREFIX/bin/xz\" -dc \"$_data\" | bb tar -xf - -C \"$_stage\" || return 1\n");
-//         sb.append("      else\n");
-//         sb.append("        echo \"[pkg] need $PREFIX/bin/xz to extract data.tar.xz — try: pkg install xz-utils\" >&2; return 1\n");
-//         sb.append("      fi\n");
-//         sb.append("      ;;\n");
-//         sb.append("    *.gz|*.tgz)\n");
-//         sb.append("      bb tar -xzf \"$_data\" -C \"$_stage\" || return 1\n");
-//         sb.append("      ;;\n");
-//         sb.append("    *.zst)\n");
-//         sb.append("      if [ -f \"$PREFIX/bin/zstd\" ]; then\n");
-//         sb.append("        elf \"$PREFIX/bin/zstd\" -dc \"$_data\" | bb tar -xf - -C \"$_stage\" || return 1\n");
-//         sb.append("      else\n");
-//         sb.append("        echo \"[pkg] need $PREFIX/bin/zstd for data.tar.zst — try: pkg install zstd\" >&2; return 1\n");
-//         sb.append("      fi\n");
-//         sb.append("      ;;\n");
-//         sb.append("    *)\n");
-//         sb.append("      bb tar -xf \"$_data\" -C \"$_stage\" || return 1\n");
-//         sb.append("      ;;\n");
-//         sb.append("  esac\n");
-//         sb.append("  _src=\"\"\n");
-//         sb.append("  if [ -d \"$_stage/data/data/com.termux/files/usr\" ]; then\n");
-//         sb.append("    _src=\"$_stage/data/data/com.termux/files/usr\"\n");
-//         sb.append("  elif [ -d \"$_stage/usr\" ]; then\n");
-//         sb.append("    _src=\"$_stage/usr\"\n");
-//         sb.append("  elif [ -d \"$_stage/bin\" ] || [ -d \"$_stage/lib\" ] || [ -d \"$_stage/share\" ]; then\n");
-//         sb.append("    _src=\"$_stage\"\n");
-//         sb.append("  else\n");
-//         sb.append("    _src=$(bb find \"$_stage\" -type d -path '*/files/usr' 2>/dev/null | head -1)\n");
-//         sb.append("  fi\n");
-//         sb.append("  if [ -z \"$_src\" ] || [ ! -d \"$_src\" ]; then\n");
-//         sb.append("    echo \"[pkg] could not locate package files in archive\" >&2\n");
-//         sb.append("    bb find \"$_stage\" -maxdepth 8 2>/dev/null | head -30\n");
-//         sb.append("    return 1\n");
-//         sb.append("  fi\n");
-//         sb.append("  echo \"[pkg] merging $_src → $PREFIX\"\n");
-//         // -a preserve, -f overwrite existing (re-install / shared libs)
-//         sb.append("  bb cp -af \"$_src\"/. \"$PREFIX\"/ || return 1\n");
-//         sb.append("  mkdir -p \"$PREFIX/var/lib/dpkg/info\"\n");
-//         sb.append("  echo \"# mscode\" > \"$PREFIX/var/lib/dpkg/info/$_name.list\"\n");
-//         sb.append("  rm -rf \"$_work\"\n");
-//         sb.append("}\n");
-//         sb.append("\n");
-
-//         // Parse Depends: from Packages index (simple, ignores versions/alternatives)
-//         sb.append("_pkg_depends() {\n");
-//         sb.append("  _want=\"$1\"\n");
-//         sb.append("  _pkg_ensure_index || return 0\n");
-//         sb.append("  _cur=; _deps=\n");
-//         sb.append("  while IFS= read -r _line || [ -n \"$_line\" ]; do\n");
-//         sb.append("    case \"$_line\" in\n");
-//         sb.append("      'Package: '*) _cur=${_line#Package: } ;;\n");
-//         sb.append("      'Depends: '*)\n");
-//         sb.append("        if [ \"$_cur\" = \"$_want\" ]; then _deps=${_line#Depends: }; fi\n");
-//         sb.append("        ;;\n");
-//         sb.append("      '') _cur= ;;\n");
-//         sb.append("    esac\n");
-//         sb.append("  done < \"$_pkg_cache/Packages\"\n");
-//         sb.append("  # split on commas; strip version constraints and |\n");
-//         sb.append("  echo \"$_deps\" | tr ',' '\\n' | while IFS= read -r _d; do\n");
-//         sb.append("    _d=$(echo \"$_d\" | sed 's/|.*//' | sed 's/(.*//' | sed 's/^ *//;s/ *$//')\n");
-//         sb.append("    [ -n \"$_d\" ] && echo \"$_d\"\n");
-//         sb.append("  done\n");
-//         sb.append("}\n");
-//         sb.append("\n");
-//         sb.append("_pkg_is_installed() {\n");
-//         sb.append("  [ -f \"$PREFIX/var/lib/dpkg/info/$1.list\" ]\n");
-//         sb.append("}\n");
-//         sb.append("\n");
-//         sb.append("_pkg_install_one() {\n");
-//         sb.append("  _p=\"$1\"\n");
-//         sb.append("  # depth guard for recursive deps\n");
-//         sb.append("  _pkg_depth=${_pkg_depth:-0}\n");
-//         sb.append("  if [ \"$_pkg_depth\" -gt 15 ]; then\n");
-//         sb.append("    echo \"[pkg] dependency depth exceeded at $_p\" >&2; return 1\n");
-//         sb.append("  fi\n");
-//         sb.append("  if _pkg_is_installed \"$_p\"; then\n");
-//         sb.append("    echo \"[pkg] already installed: $_p\"\n");
-//         sb.append("    return 0\n");
-//         sb.append("  fi\n");
-//         sb.append("  echo \"[pkg] resolving $_p…\"\n");
-//         sb.append("  _path=$(_pkg_resolve \"$_p\") || {\n");
-//         sb.append("    echo \"[pkg] package not found: $_p\" >&2; return 1\n");
-//         sb.append("  }\n");
-//         // install dependencies first
-//         sb.append("  _pkg_depth=$((_pkg_depth + 1))\n");
-//         sb.append("  for _dep in $(_pkg_depends \"$_p\"); do\n");
-//         sb.append("    case \"$_dep\" in\n");
-//         // skip virtual/boring deps
-//         sb.append("      ''|bash|coreutils|toybox|termux-am|termux-exec|dash|libandroid-support) ;;\n");
-//         sb.append("      *)\n");
-//         sb.append("        if ! _pkg_is_installed \"$_dep\"; then\n");
-//         sb.append("          echo \"[pkg] dependency: $_dep (for $_p)\"\n");
-//         sb.append("          _pkg_install_one \"$_dep\" || { echo \"[pkg] dep failed: $_dep\" >&2; return 1; }\n");
-//         sb.append("        fi\n");
-//         sb.append("        ;;\n");
-//         sb.append("    esac\n");
-//         sb.append("  done\n");
-//         sb.append("  _pkg_depth=$((_pkg_depth - 1))\n");
-//         sb.append("  _deb=\"$_pkg_cache/$(basename \"$_path\")\"\n");
-//         sb.append("  if [ ! -f \"$_deb\" ]; then\n");
-//         sb.append("    echo \"[pkg] downloading $_path\"\n");
-//         sb.append("    _curl_ca=\n");
-//         sb.append("    [ -n \"$CURL_CA_BUNDLE\" ] && _curl_ca=\"--cacert $CURL_CA_BUNDLE\"\n");
-//         sb.append("    curl -fsSL $_curl_ca -o \"$_deb\" \"$_pkg_repo/$_path\" || return 1\n");
-//         sb.append("  else\n");
-//         sb.append("    echo \"[pkg] cached $(basename \"$_deb\")\"\n");
-//         sb.append("  fi\n");
-//         sb.append("  _pkg_extract_deb \"$_deb\" \"$_p\" || return 1\n");
-//         sb.append("  # refresh command wrappers in THIS session\n");
-//         sb.append("  mscode_wrap 2>/dev/null\n");
-//         sb.append("  echo \"[pkg] ✓ $_p installed\"\n");
-//         sb.append("}\n");
-//         sb.append("\n");
-//         sb.append("pkg() {\n");
-//         sb.append("  case \"$1\" in\n");
-//         sb.append("    install|i)\n");
-//         sb.append("      shift\n");
-//         sb.append("      if [ $# -eq 0 ]; then\n");
-//         sb.append("        echo \"usage: pkg install <package>…\" >&2\n");
-//         sb.append("        return 1\n");
-//         sb.append("      fi\n");
-//         sb.append("      _ok=0\n");
-//         sb.append("      for _pkg in \"$@\"; do\n");
-//         sb.append("        _pkg_install_one \"$_pkg\" || _ok=1\n");
-//         sb.append("      done\n");
-//         sb.append("      return $_ok\n");
-//         sb.append("      ;;\n");
-//         sb.append("    list-installed|li)\n");
-//         sb.append("      if [ -d \"$PREFIX/var/lib/dpkg/info\" ]; then\n");
-//         sb.append("        ls \"$PREFIX/var/lib/dpkg/info\" 2>/dev/null | sed -n 's/\\.list$//p' | sort -u\n");
-//         sb.append("      else\n");
-//         sb.append("        echo \"[pkg] no packages installed yet\"\n");
-//         sb.append("      fi\n");
-//         sb.append("      ;;\n");
-//         sb.append("    search|s)\n");
-//         sb.append("      shift\n");
-//         sb.append("      _q=\"$1\"\n");
-//         sb.append("      if [ -z \"$_q\" ]; then echo \"usage: pkg search <name>\" >&2; return 1; fi\n");
-//         sb.append("      _pkg_ensure_index || return 1\n");
-//         sb.append("      grep -i \"^Package: .*$_q\" \"$_pkg_cache/Packages\" 2>/dev/null | sed 's/^Package: //' | sort -u | head -40\n");
-//         sb.append("      ;;\n");
-//         sb.append("    update|u|upgrade)\n");
-//         sb.append("      rm -f \"$_pkg_cache/Packages\" \"$_pkg_cache/Packages.gz\" 2>/dev/null\n");
-//         sb.append("      _pkg_ensure_index && echo \"[pkg] index updated\"\n");
-//         sb.append("      ;;\n");
-//         sb.append("    *)\n");
-//         sb.append("      echo \"pkg — Termux-style package manager (MS Code)\"\n");
-//         sb.append("      echo \"  pkg install <pkg>    Download & extract into \\$PREFIX\"\n");
-//         sb.append("      echo \"  pkg list-installed   List installed packages\"\n");
-//         sb.append("      echo \"  pkg search <query>   Search package names\"\n");
-//         sb.append("      echo \"  pkg update           Refresh package index\"\n");
-//         sb.append("      echo \"  elf <path> [args]    Run PREFIX binary via linker\"\n");
-//         sb.append("      echo \"PREFIX=$PREFIX  LINKER=$MSCODE_LINKER\"\n");
-//         sb.append("      ;;\n");
-//         sb.append("  esac\n");
-//         sb.append("}\n");
-//         sb.append("\n");
-//     }
-// }
-
-
-
 package com.editor.mscode.terminal.initenv;
 
 /**
@@ -323,7 +31,7 @@ public final class PkgShellFragment {
         sb.append("    [ \"$_age\" -lt 86400 ] 2>/dev/null && _need=0\n");
         sb.append("  fi\n");
         sb.append("  if [ \"$_need\" = 1 ]; then\n");
-        sb.append("    echo \"[pkg] fetching index ($_arch)…\"\n");
+        sb.append("    echo \"[pkg] fetching index ($_arch)…\" >&2\n");
         sb.append("    _curl_ca=\n");
         sb.append("    [ -n \"$CURL_CA_BUNDLE\" ] && _curl_ca=\"--cacert $CURL_CA_BUNDLE\"\n");
         sb.append("    curl -fsSL $_curl_ca -o \"$_pkg_cache/Packages.gz\" \\\n");
@@ -447,7 +155,7 @@ public final class PkgShellFragment {
         sb.append("    [ -f \"$_f\" ] && _data=\"$_f\" && break\n");
         sb.append("  done\n");
         sb.append("  [ -n \"$_data\" ] || { echo \"[pkg] no data.tar in deb\" >&2; return 1; }\n");
-        sb.append("  echo \"[pkg] extracting $(basename \"$_data\") → $PREFIX\"\n");
+        sb.append("  echo \"[pkg] extracting $(basename \"$_data\") → $PREFIX\" >&2\n");
         // Termux debs contain: data/data/com.termux/files/usr/bin/...
         // Stage extract, then merge that tree into our $PREFIX.
         sb.append("  _stage=\"$_work/stage\"\n");
@@ -489,7 +197,7 @@ public final class PkgShellFragment {
         sb.append("    bb find \"$_stage\" -maxdepth 8 2>/dev/null | head -30\n");
         sb.append("    return 1\n");
         sb.append("  fi\n");
-        sb.append("  echo \"[pkg] merging $_src → $PREFIX\"\n");
+        sb.append("  echo \"[pkg] merging $_src → $PREFIX\" >&2\n");
         // -a preserve, -f overwrite existing (re-install / shared libs)
         sb.append("  bb cp -af \"$_src\"/. \"$PREFIX\"/ || return 1\n");
         sb.append("  mkdir -p \"$PREFIX/var/lib/dpkg/info\"\n");
@@ -531,13 +239,20 @@ public final class PkgShellFragment {
         sb.append("    echo \"[pkg] dependency depth exceeded at $_p\" >&2; return 1\n");
         sb.append("  fi\n");
         sb.append("  if _pkg_is_installed \"$_p\"; then\n");
-        sb.append("    echo \"[pkg] already installed: $_p\"\n");
+        sb.append("    echo \"[pkg] already installed: $_p\" >&2\n");
         sb.append("    return 0\n");
         sb.append("  fi\n");
-        sb.append("  echo \"[pkg] resolving $_p…\"\n");
-        sb.append("  _path=$(_pkg_resolve \"$_p\") || {\n");
+        sb.append("  echo \"[pkg] resolving $_p…\" >&2\n");
+        // Only the Filename path may go to stdout from _pkg_resolve (status is >&2).
+        // tail -1 guards against any accidental noise in the capture.
+        sb.append("  _path=$(_pkg_resolve \"$_p\" | tail -n 1 | tr -d '\\r') || {\n");
         sb.append("    echo \"[pkg] package not found: $_p\" >&2; return 1\n");
         sb.append("  }\n");
+        sb.append("  # sanitize: must look like pool/.../*.deb (no status text mixed in)\n");
+        sb.append("  case \"$_path\" in\n");
+        sb.append("    pool/*.deb|pool/*/*.deb|pool/*/*/*.deb|pool/*/*/*/*.deb|pool/*/*/*/*/*.deb) ;;\n");
+        sb.append("    *) echo \"[pkg] bad path from index: [$_path]\" >&2; return 1 ;;\n");
+        sb.append("  esac\n");
         // install dependencies first
         sb.append("  _pkg_depth=$((_pkg_depth + 1))\n");
         sb.append("  for _dep in $(_pkg_depends \"$_p\"); do\n");
@@ -546,7 +261,7 @@ public final class PkgShellFragment {
         sb.append("      ''|bash|coreutils|toybox|termux-am|termux-exec|dash|libandroid-support) ;;\n");
         sb.append("      *)\n");
         sb.append("        if ! _pkg_is_installed \"$_dep\"; then\n");
-        sb.append("          echo \"[pkg] dependency: $_dep (for $_p)\"\n");
+        sb.append("          echo \"[pkg] dependency: $_dep (for $_p)\" >&2\n");
         sb.append("          _pkg_install_one \"$_dep\" || { echo \"[pkg] dep failed: $_dep\" >&2; return 1; }\n");
         sb.append("        fi\n");
         sb.append("        ;;\n");
@@ -555,17 +270,19 @@ public final class PkgShellFragment {
         sb.append("  _pkg_depth=$((_pkg_depth - 1))\n");
         sb.append("  _deb=\"$_pkg_cache/$(basename \"$_path\")\"\n");
         sb.append("  if [ ! -f \"$_deb\" ]; then\n");
-        sb.append("    echo \"[pkg] downloading $_path\"\n");
+        sb.append("    echo \"[pkg] downloading $_path\" >&2\n");
         sb.append("    _curl_ca=\n");
         sb.append("    [ -n \"$CURL_CA_BUNDLE\" ] && _curl_ca=\"--cacert $CURL_CA_BUNDLE\"\n");
-        sb.append("    curl -fsSL $_curl_ca -o \"$_deb\" \"$_pkg_repo/$_path\" || return 1\n");
+        sb.append("    curl -fsSL $_curl_ca -o \"$_deb\" \"$_pkg_repo/$_path\" || {\n");
+        sb.append("      echo \"[pkg] download failed: $_pkg_repo/$_path\" >&2; rm -f \"$_deb\"; return 1\n");
+        sb.append("    }\n");
         sb.append("  else\n");
-        sb.append("    echo \"[pkg] cached $(basename \"$_deb\")\"\n");
+        sb.append("    echo \"[pkg] cached $(basename \"$_deb\")\" >&2\n");
         sb.append("  fi\n");
         sb.append("  _pkg_extract_deb \"$_deb\" \"$_p\" || return 1\n");
         sb.append("  # refresh command wrappers in THIS session\n");
         sb.append("  mscode_wrap 2>/dev/null\n");
-        sb.append("  echo \"[pkg] ✓ $_p installed\"\n");
+        sb.append("  echo \"[pkg] ✓ $_p installed\" >&2\n");
         sb.append("}\n");
         sb.append("\n");
         sb.append("pkg() {\n");
@@ -598,7 +315,7 @@ public final class PkgShellFragment {
         sb.append("      ;;\n");
         sb.append("    update|u|upgrade)\n");
         sb.append("      rm -f \"$_pkg_cache/Packages\" \"$_pkg_cache/Packages.gz\" 2>/dev/null\n");
-        sb.append("      _pkg_ensure_index && echo \"[pkg] index updated\"\n");
+        sb.append("      _pkg_ensure_index && echo \"[pkg] index updated\" >&2\n");
         sb.append("      ;;\n");
         sb.append("    *)\n");
         sb.append("      echo \"pkg — Termux-style package manager (MS Code)\"\n");
