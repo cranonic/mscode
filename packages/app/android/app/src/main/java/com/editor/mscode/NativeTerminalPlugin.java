@@ -11,7 +11,7 @@ import android.util.Log;
 import com.editor.mscode.terminal.PtyEngine;
 import com.editor.mscode.terminal.TerminalForegroundService;
 import com.editor.mscode.terminal.TerminalSession;
-import com.editor.mscode.terminal.ProotCommandBuilder;
+import com.editor.mscode.terminal.TerminalCommandBuilder;
 import com.editor.mscode.terminal.RootfsManager;
 
 
@@ -440,12 +440,12 @@ public class NativeTerminalPlugin extends Plugin {
             call.reject("Must provide command and sessionId"); return;
         }
 
-        ProotCommandBuilder builder = new ProotCommandBuilder(
+        TerminalCommandBuilder builder = new TerminalCommandBuilder(
             new RootfsManager(getContext()), 
             getContext().getApplicationInfo().nativeLibraryDir
         );
         String[] cmd = builder.buildBackgroundCommand(command);
-        Map<String, String> env = builder.getProotEnv();
+        Map<String, String> env = builder.buildBackgroundEnvMap();
 
         terminalService.streamBackgroundExecute(sessionId, cmd, env, cwd, new TerminalForegroundService.BackgroundProcessListener() {
             @Override

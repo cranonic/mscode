@@ -8,8 +8,8 @@ import java.io.IOException;
 /**
  * Writes per-session ENV script for native / Termux-style mode.
  *
- * libbusybox.so is multi-call: applet comes from argv[0] basename.
- * Fix: bb() uses ( exec -a APPLET "$BUSYBOX" args ).
+ * libtoybox.so is multi-call: applet comes from argv[0] basename.
+ * Fix: bb() uses ( exec -a APPLET "$TOYBOX" args ).
  *
  * targetSdk > 28: binaries under filesDir ($PREFIX/bin) are not directly
  * executable. We run them via the system Bionic linker:
@@ -36,7 +36,7 @@ public class InitScriptWriter {
         String home     = rootfs.getHomePath();
         String tmp      = rootfs.getTmpPath();
         String prefix   = rootfs.getPrefixPath();
-        String busybox  = rootfs.getBusyboxPath();
+        String toybox  = rootfs.getToyboxPath();
         String libDir   = rootfs.getNativeLibDir();
         boolean bootOk  = rootfs.isBootstrapReady();
 
@@ -52,7 +52,7 @@ public class InitScriptWriter {
         String safeTmp    = tmp.replace("'", "'\\''");
         String safePrefix = prefix.replace("'", "'\\''");
         String safeLib    = libDir.replace("'", "'\\''");
-        String safeBb     = busybox.replace("'", "'\\''");
+        String safeToybox     = toybox.replace("'", "'\\''");
 
         StringBuilder sb = new StringBuilder();
         sb.append("# MS Code native / Termux-style ENV (sourced by interactive sh)\n");
@@ -92,7 +92,7 @@ public class InitScriptWriter {
         sb.append("  export SSL_CERT_FILE='").append(safePrefix).append("/etc/ssl/certs/ca-certificates.crt'\n");
         sb.append("  export CURL_CA_BUNDLE=\"$SSL_CERT_FILE\"\n");
         sb.append("fi\n");
-        sb.append("export BUSYBOX='").append(safeBb).append("'\n");
+        sb.append("export TOYBOX='").append(safeToybox).append("'\n");
         sb.append("export MSCODE_HOST='").append(safeHost).append("'\n");
         // Termux-style: mscode: ~/.../code/test $  (last 2 segments if deeper)
         sb.append("_mscode_prompt() {\n");
@@ -124,7 +124,7 @@ public class InitScriptWriter {
         sb.append("    esac\n");
         sb.append("  fi\n");
         // argv0=printf selects applet; format is first real arg (do NOT pass extra "printf")
-        sb.append("  ( exec -a printf \"$BUSYBOX\" '\\033[1;32m%s\\033[0m: \\033[1;34m%s\\033[0m $ ' \"$MSCODE_HOST\" \"$_cwd\" )\n");
+        sb.append("  ( exec -a printf \"$TOYBOX\" '\\033[1;32m%s\\033[0m: \\033[1;34m%s\\033[0m $ ' \"$MSCODE_HOST\" \"$_cwd\" )\n");
         sb.append("}\n");
         sb.append("export PS1='$(_mscode_prompt)'\n");
         // Bionic expects these (tzdata warnings otherwise)
@@ -151,12 +151,12 @@ public class InitScriptWriter {
         sb.append("  export PROOT_LOADER32='").append(safeLib).append("/libproot-loader32.so'\n");
         sb.append("fi\n");
         sb.append("export PROOT_TMP_DIR='").append(safeTmp).append("'\n");
-        // Stale APK path after update: recover libproot.so next to loader/busybox
+        // Stale APK path after update: recover libproot.so next to loader/toybox
         sb.append("if [ ! -f \"$MSCODE_PROOT\" ]; then\n");
         sb.append("  if [ -n \"$PROOT_LOADER\" ] && [ -f \"${PROOT_LOADER%/*}/libproot.so\" ]; then\n");
         sb.append("    export MSCODE_PROOT=\"${PROOT_LOADER%/*}/libproot.so\"\n");
-        sb.append("  elif [ -n \"$BUSYBOX\" ] && [ -f \"${BUSYBOX%/*}/libproot.so\" ]; then\n");
-        sb.append("    export MSCODE_PROOT=\"${BUSYBOX%/*}/libproot.so\"\n");
+        sb.append("  elif [ -n \"$TOYBOX\" ] && [ -f \"${TOYBOX%/*}/libproot.so\" ]; then\n");
+        sb.append("    export MSCODE_PROOT=\"${TOYBOX%/*}/libproot.so\"\n");
         sb.append("  fi\n");
         sb.append("fi\n");
         sb.append("\n");
@@ -206,7 +206,7 @@ public class InitScriptWriter {
         sb.append("\n");
 
 
-        // ── Busybox multi-call ────────────────────────────────────────────
+        // ── Toybox multi-call ────────────────────────────────────────────
         sb.append("bb() {\n");
         sb.append("  if [ $# -lt 1 ]; then\n");
         sb.append("    echo \"usage: bb <applet> [args…]\" >&2\n");
@@ -214,12 +214,12 @@ public class InitScriptWriter {
         sb.append("    return 1\n");
         sb.append("  fi\n");
         sb.append("  if [ \"$1\" = \"--list\" ] || [ \"$1\" = \"--help\" ]; then\n");
-        sb.append("    ( exec -a busybox \"$BUSYBOX\" \"$1\" )\n");
+        sb.append("    ( exec -a toybox \"$TOYBOX\" \"$1\" )\n");
         sb.append("    return $?\n");
         sb.append("  fi\n");
         sb.append("  _bb_applet=\"$1\"\n");
         sb.append("  shift\n");
-        sb.append("  ( exec -a \"$_bb_applet\" \"$BUSYBOX\" \"$@\" )\n");
+        sb.append("  ( exec -a \"$_bb_applet\" \"$TOYBOX\" \"$@\" )\n");
         sb.append("}\n");
         sb.append("\n");
 
@@ -399,7 +399,7 @@ public class InitScriptWriter {
         sb.append("    echo '# Auto-generated for bash scripts (neofetch, etc.)'\n");
         sb.append("    echo \"export PREFIX='$PREFIX'\"\n");
         sb.append("    echo \"export TERMUX_PREFIX='$PREFIX'\"\n");
-        sb.append("    echo \"export BUSYBOX='$BUSYBOX'\"\n");
+        sb.append("    echo \"export TOYBOX='$TOYBOX'\"\n");
         sb.append("    echo \"export MSCODE_LINKER='$MSCODE_LINKER'\"\n");
         sb.append("    echo \"export MSCODE_PROOT='$MSCODE_PROOT'\"\n");
         sb.append("    echo \"export PROOT_LOADER='$PROOT_LOADER'\"\n");
@@ -410,13 +410,13 @@ public class InitScriptWriter {
         sb.append("    echo \"export SSL_CERT_FILE='$SSL_CERT_FILE'\"\n");
         sb.append("    echo \"export ANDROID_DATA=/data\"\n");
         sb.append("    echo \"export ANDROID_ROOT=/system\"\n");
-        sb.append("    echo 'bb() { [ $# -lt 1 ] && return 1; local a=\"$1\"; shift; ( exec -a \"$a\" \"$BUSYBOX\" \"$@\" ); }'\n");
+        sb.append("    echo 'bb() { [ $# -lt 1 ] && return 1; local a=\"$1\"; shift; ( exec -a \"$a\" \"$TOYBOX\" \"$@\" ); }'\n");
         sb.append("    echo '_mscode_proot() { \"$MSCODE_PROOT\" --link2symlink --kill-on-exit -0 -r / -b /system -b /data -b /dev -b /proc -b /sys -b /storage -b /sdcard -b /apex -b \"$PREFIX\" -b \"${TMPDIR:-$PREFIX/tmp}:/tmp\" -w \"$PWD\" \"$@\"; }'\n");
         sb.append("    echo 'clang() { [ -f \"$PREFIX/bin/clang\" ] || return 127; _mscode_proot \"$PREFIX/bin/clang\" \"$@\"; }'\n");
         sb.append("    echo '_mscode_clangxx() { _mscode_proot \"$PREFIX/bin/clang++\" \"$@\"; }'\n");
         sb.append("    echo \"alias 'clang++'=_mscode_clangxx\"\n");
 
-        // busybox applets as bash functions
+        // toybox applets as bash functions
         sb.append("    for a in ls cat cp mv rm mkdir grep find tar head tail wc uname clear chmod sed sort awk cut tr uniq basename dirname pwd date touch ln readlink stat which xargs tee ps kill id env seq true false test; do\n");
         sb.append("      echo \"$a() { bb $a \\\"$@\\\"; }\"\n");
         sb.append("    done\n");
@@ -603,7 +603,7 @@ public class InitScriptWriter {
         sb.append("  for _dep in $(_pkg_depends \"$_p\"); do\n");
         sb.append("    case \"$_dep\" in\n");
         // skip virtual/boring deps
-        sb.append("      ''|bash|coreutils|busybox|termux-am|termux-exec|dash|libandroid-support) ;;\n");
+        sb.append("      ''|bash|coreutils|toybox|termux-am|termux-exec|dash|libandroid-support) ;;\n");
         sb.append("      *)\n");
         sb.append("        if ! _pkg_is_installed \"$_dep\"; then\n");
         sb.append("          echo \"[pkg] dependency: $_dep (for $_p)\"\n");

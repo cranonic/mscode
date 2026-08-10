@@ -31,8 +31,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Android Foreground Service that owns all terminal sessions and background processes.
  *
- * Native mode (default): libbusybox.so + optional Termux-style $PREFIX bootstrap.
- * No proot, no Alpine rootfs required.
+ * Native mode (default): libtoybox.so + optional Termux-style $PREFIX bootstrap.
+ * No proot in sessions. proot only for C/C++ helper. No Alpine.
  * PTY / JNI / notification / WakeLock logic is unchanged.
  */
 public class TerminalForegroundService extends Service {
@@ -95,7 +95,7 @@ public class TerminalForegroundService extends Service {
 
     /**
      * Native + Termux bootstrap setup.
-     * Ensures busybox, home/tmp, then downloads/extracts $PREFIX (filesDir/usr).
+     * Ensures toybox, home/tmp, then downloads/extracts $PREFIX (filesDir/usr).
      * Alpine / proot are intentionally skipped.
      */
     public void ensureSetup(String arch) throws Exception {
@@ -144,7 +144,7 @@ public class TerminalForegroundService extends Service {
     private final Object rootfsLock = new Object();
 
     private RootfsManager    rootfs;
-    private ProotCommandBuilder builder;
+    private TerminalCommandBuilder builder;
     private InitScriptWriter  scriptWriter;
 
     private PowerManager.WakeLock wakeLock;
@@ -199,13 +199,13 @@ public class TerminalForegroundService extends Service {
     // ─── Public API ───────────────────────────────────────────────────────────
 
     public void initBuilder(String nativeLibDir) {
-        this.builder = new ProotCommandBuilder(rootfs, nativeLibDir);
+        this.builder = new TerminalCommandBuilder(rootfs, nativeLibDir);
         // Default: native mode (no proot)
-        this.builder.setUseNative(true);
+        // pure native always — no setUseNative needed
     }
 
     /**
-     * Starts a new PTY terminal session (native busybox + Termux $PREFIX).
+     * Starts a new PTY terminal session (native toybox + Termux $PREFIX).
      *
      * @param sessionId   Unique ID.
      * @param projectPath Android path to open in the terminal.
@@ -234,7 +234,7 @@ public class TerminalForegroundService extends Service {
                 }
             } catch (Exception e) {
                 emitLog("Bootstrap not ready yet: " + e.getMessage()
-                        + " (shell still works with busybox)");
+                        + " (shell still works with toybox)");
             }
         }
 
@@ -360,7 +360,7 @@ public class TerminalForegroundService extends Service {
     // ─── Background execute (no PTY) ─────────────────────────────────────────
 
     /**
-     * Runs a command with native busybox ash -c (no PTY).
+     * Runs a command with native toybox ash -c (no PTY).
      */
     public BackgroundResult backgroundExecute(String command) throws Exception {
         if (builder == null)
@@ -490,7 +490,7 @@ public class TerminalForegroundService extends Service {
 
     /**
      * Starts a WebSocket↔stdio bridge.
-     * Command runs under native busybox ash -c.
+     * Command runs under native toybox ash -c.
      */
     public int spawnProcessServer(String shellCommand) throws Exception {
         if (builder == null)

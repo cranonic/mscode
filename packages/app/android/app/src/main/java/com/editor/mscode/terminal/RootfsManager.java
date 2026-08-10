@@ -16,7 +16,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * Manages native environment: busybox + Termux-style Bionic bootstrap ($PREFIX).
+ * Manages native environment: toybox + Termux-style Bionic bootstrap ($PREFIX).
  *
  * Layout (mirrors Termux, no proot):
  *   filesDir/
@@ -27,18 +27,18 @@ import java.util.zip.ZipInputStream;
  *     hostname
  *
  * ─── Native mode (default) ────────────────────────────────────────────────
- *  • libbusybox.so from nativeLibraryDir (jniLibs)
+ *  • libtoybox.so from nativeLibraryDir (jniLibs)
  *  • Optional Termux bootstrap → filesDir/usr ($PREFIX)
- *  • No Alpine, no proot, no talloc required
+ *  • No Alpine. proot only for C/C++ helper
  *
  * ─── Legacy proot mode ────────────────────────────────────────────────────
- *  proot + libtalloc + Alpine rootfs still available if needed.
+ *  proot + libtalloc kept only for C/C++ helper (clang/gcc/tcc). No Alpine.
  *
  * ─── targetSdk > 28 note ──────────────────────────────────────────────────
  *  Binaries under filesDir are not directly executable.
  *  Bootstrap packages install into $PREFIX; execution of those binaries
  *  requires either (a) copying selected tools into nativeLibraryDir as
- *  lib*.so, or (b) a linker wrapper. Busybox applets always work.
+ *  lib*.so, or (b) a linker wrapper. Toybox applets always work.
  */
 public class RootfsManager {
 
@@ -76,9 +76,9 @@ public class RootfsManager {
     public String getFilesDir()     { return filesDir; }
     public String getNativeLibDir() { return nativeLibDir; }
 
-    /** Native busybox path — always under nativeLibraryDir. */
-    public String getBusyboxPath() {
-        return nativeLibDir + "/libbusybox.so";
+    /** Native toybox path — always under nativeLibraryDir. */
+    public String getToyboxPath() {
+        return nativeLibDir + "/libtoybox.so";
     }
 
     /** User home for native / Termux-style sessions. */
@@ -118,18 +118,18 @@ public class RootfsManager {
     // ─── Native + Bootstrap setup ─────────────────────────────────────────────
 
     /**
-     * Ensures libbusybox.so is present and creates home + tmp directories.
+     * Ensures libtoybox.so is present and creates home + tmp directories.
      * Call this for every native session start.
      */
     public void ensureNativeBinaries() throws IOException {
-        File busybox = new File(getBusyboxPath());
-        if (!busybox.exists()) {
+        File toybox = new File(getToyboxPath());
+        if (!toybox.exists()) {
             throw new IOException(
-                "libbusybox.so missing from nativeLibraryDir (" + nativeLibDir + "). " +
-                "Bundle it under jniLibs/<abi>/libbusybox.so"
+                "libtoybox.so missing from nativeLibraryDir (" + nativeLibDir + "). " +
+                "Bundle it under jniLibs/<abi>/libtoybox.so"
             );
         }
-        Log.i(TAG, "Using busybox from nativeLibraryDir: " + busybox.getAbsolutePath());
+        Log.i(TAG, "Using toybox from nativeLibraryDir: " + toybox.getAbsolutePath());
 
         ensureDir(getHomePath());
         ensureDir(getTmpPath());
@@ -206,10 +206,10 @@ public class RootfsManager {
 
     /**
      * Lightweight check used by isRootfsReady / frontend.
-     * Busybox + home is enough to start a shell; bootstrap is optional.
+     * Toybox + home is enough to start a shell; bootstrap is optional.
      */
     public boolean isNativeReady() {
-        return new File(getBusyboxPath()).exists()
+        return new File(getToyboxPath()).exists()
             && new File(getHomePath()).isDirectory()
             && new File(getTmpPath()).isDirectory();
     }
@@ -232,9 +232,9 @@ public class RootfsManager {
      * Prefer native readiness; bootstrap is additive.
      */
     public boolean isRootfsReady() {
-        if (new File(getBusyboxPath()).exists()) {
+        if (new File(getToyboxPath()).exists()) {
             return new File(getHomePath()).isDirectory()
-                || new File(getBusyboxPath()).exists();
+                || new File(getToyboxPath()).exists();
         }
         return new File(getRootfsPath(), "etc/alpine-release").exists();
     }

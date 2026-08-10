@@ -27,7 +27,7 @@ import java.util.zip.GZIPInputStream;
  *
  * Note on execution (targetSdk > 28):
  *   Extracted binaries under filesDir are often not directly executable.
- *   Busybox applets always work. Full package binaries may need a linker
+ *   Toybox applets always work. Full package binaries may need a linker
  *   wrapper or nativeLibraryDir copy in a later phase.
  */
 public class PkgInstaller {
@@ -211,7 +211,7 @@ public class PkgInstaller {
     /**
      * .deb = ar archive: debian-binary, control.tar.*, data.tar.*
      * We only need data.tar.* extracted into $PREFIX.
-     * Uses busybox ar + tar when available; otherwise pure-Java limited ar reader.
+     * Uses toybox ar + tar when available; otherwise pure-Java limited ar reader.
      */
     private void extractDeb(File deb, File prefix, String pkg,
                             File infoDir, ProgressListener log) throws IOException {
@@ -220,24 +220,24 @@ public class PkgInstaller {
         deleteRecursive(work);
         work.mkdirs();
 
-        // Prefer busybox ar if present
-        String busybox = rootfs.getBusyboxPath();
-        boolean usedBusybox = false;
-        if (new File(busybox).exists()) {
+        // Prefer toybox ar if present
+        String toybox = rootfs.getToyboxPath();
+        boolean usedToybox = false;
+        if (new File(toybox).exists()) {
             try {
-                // busybox ar x deb
-                Process p = new ProcessBuilder(busybox, "ar", "x", deb.getAbsolutePath())
+                // toybox ar x deb
+                Process p = new ProcessBuilder(toybox, "ar", "x", deb.getAbsolutePath())
                     .directory(work)
                     .redirectErrorStream(true)
                     .start();
                 int code = p.waitFor();
-                if (code == 0) usedBusybox = true;
+                if (code == 0) usedToybox = true;
             } catch (Exception e) {
-                Log.w(TAG, "busybox ar failed: " + e.getMessage());
+                Log.w(TAG, "toybox ar failed: " + e.getMessage());
             }
         }
 
-        if (!usedBusybox) {
+        if (!usedToybox) {
             // Minimal pure-Java ar extractor
             extractAr(deb, work);
         }
@@ -322,10 +322,10 @@ public class PkgInstaller {
 
     private void extractDataTar(File dataTar, File destDir, ProgressListener log) throws IOException {
         String name = dataTar.getName();
-        String busybox = rootfs.getBusyboxPath();
+        String toybox = rootfs.getToyboxPath();
 
         List<String> cmd = new ArrayList<>();
-        // Prefer system tar for xz/zstd; busybox for gz/plain
+        // Prefer system tar for xz/zstd; toybox for gz/plain
         if (name.endsWith(".xz")) {
             cmd.add("tar");
             cmd.add("-xJf");
@@ -333,8 +333,8 @@ public class PkgInstaller {
             cmd.add("-C");
             cmd.add(destDir.getAbsolutePath());
         } else if (name.endsWith(".gz") || name.endsWith(".tgz")) {
-            if (new File(busybox).exists()) {
-                cmd.add(busybox); cmd.add("tar"); cmd.add("-xzf");
+            if (new File(toybox).exists()) {
+                cmd.add(toybox); cmd.add("tar"); cmd.add("-xzf");
             } else {
                 cmd.add("tar"); cmd.add("-xzf");
             }
@@ -349,8 +349,8 @@ public class PkgInstaller {
             cmd.add("-C");
             cmd.add(destDir.getAbsolutePath());
         } else {
-            if (new File(busybox).exists()) {
-                cmd.add(busybox); cmd.add("tar"); cmd.add("-xf");
+            if (new File(toybox).exists()) {
+                cmd.add(toybox); cmd.add("tar"); cmd.add("-xf");
             } else {
                 cmd.add("tar"); cmd.add("-xf");
             }
