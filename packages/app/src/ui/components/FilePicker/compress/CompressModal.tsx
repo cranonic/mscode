@@ -23,13 +23,11 @@ import {
   planStaging,
   isContentUri,
   isForeignAppPath,
-  isOwnAppPath,
   shellPathFromUri,
   normalizeFsPath,
   type CompressPlan,
   type CompressPhase,
 } from './compressService';
-import type { CompressSource } from './compressTypes';
 import { taskManager } from '@/core/extensionAPI/tasks/taskManager';
 import { registerPlugin } from '@capacitor/core';
 import { Filesystem } from '@capacitor/filesystem';
