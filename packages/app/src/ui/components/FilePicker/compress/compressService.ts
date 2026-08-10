@@ -56,38 +56,47 @@ export function normalizeFsPath(pathOrUri: string): string {
   return p;
 }
 
+/**
+ * Resolve content:// → real path only when the shell can read it.
+ * Termux / foreign app-private paths MUST stay as content:// so SAF staging
+ * can openInputStream; stripping to /data/data/com.termux/... makes shell +
+ * Capacitor both fail (ENOENT / EACCES).
+ */
 export function shellPathFromUri(pathOrUri: string): string {
   if (!pathOrUri || pathOrUri === 'ROOT') return pathOrUri;
   if (!pathOrUri.startsWith('content://')) {
     return normalizeFsPath(pathOrUri);
   }
   try {
-    const doc = pathOrUri.match(/\/document\/([^?#]+)/);
-    if (doc) {
-      const decoded = decodeURIComponent(doc[1]);
-      if (decoded.startsWith('/')) return normalizeFsPath(decoded);
-      if (decoded.startsWith('raw:')) return normalizeFsPath(decoded.slice(4));
+    const tryDecode = (decoded: string): string | null => {
+      let raw: string | null = null;
       if (decoded.startsWith('primary:')) {
         const rel = decoded.slice('primary:'.length);
         return rel
           ? normalizeFsPath('/storage/emulated/0/' + rel)
           : '/storage/emulated/0';
       }
+      if (decoded.startsWith('raw:')) raw = decoded.slice(4);
+      else if (decoded.startsWith('/')) raw = decoded;
+      if (!raw) return null;
+      const n = normalizeFsPath(raw);
+      // Foreign app private → keep content:// for SAF
+      if (isForeignAppPath(n)) return null;
+      return n;
+    };
+
+    const doc = pathOrUri.match(/\/document\/([^?#]+)/);
+    if (doc) {
+      const got = tryDecode(decodeURIComponent(doc[1]));
+      if (got) return got;
     }
     const tree = pathOrUri.match(/\/tree\/([^/?#]+)/);
     if (tree) {
-      const decoded = decodeURIComponent(tree[1]);
-      if (decoded.startsWith('/')) return normalizeFsPath(decoded);
-      if (decoded.startsWith('raw:')) return normalizeFsPath(decoded.slice(4));
-      if (decoded.startsWith('primary:')) {
-        const rel = decoded.slice('primary:'.length);
-        return rel
-          ? normalizeFsPath('/storage/emulated/0/' + rel)
-          : '/storage/emulated/0';
-      }
+      const got = tryDecode(decodeURIComponent(tree[1]));
+      if (got) return got;
     }
   } catch {
-    /* keep */
+    /* keep content:// */
   }
   return pathOrUri;
 }
@@ -469,12 +478,17 @@ export function planStaging(
   toStage: CompressSource[];
   direct: CompressSource[];
 } {
+  // Prefer app-writable tmp (filesDir/tmp or Cache). /data/local/tmp is often
+  // not creatable/writable for the app process on modern Android (ENOENT).
   const base =
-    tmpDir && tmpDir.startsWith('/') && !isForeignAppPath(tmpDir)
+    tmpDir &&
+    tmpDir.startsWith('/') &&
+    !isContentUri(tmpDir) &&
+    !isForeignAppPath(tmpDir)
       ? normalizeFsPath(tmpDir)
-      : '/data/local/tmp';
+      : '';
   const stageDir =
-    base.replace(/\/+$/, '') +
+    (base || '__APP_TMP__').replace(/\/+$/, '') +
     '/mscode_stage_' +
     Date.now() +
     '_' +
@@ -483,8 +497,12 @@ export function planStaging(
   const toStage: CompressSource[] = [];
   const direct: CompressSource[] = [];
   for (const s of sources) {
-    if (needsStaging(s.path)) toStage.push(s);
-    else direct.push({ ...s, path: shellPathFromUri(s.path) });
+    // Keep original path for staging (content:// must not be stripped)
+    if (needsStaging(s.path) || isContentUri(s.path)) {
+      toStage.push(s);
+    } else {
+      direct.push({ ...s, path: shellPathFromUri(s.path) });
+    }
   }
   return {
     needsStage: toStage.length > 0,

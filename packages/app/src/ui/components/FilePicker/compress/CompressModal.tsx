@@ -30,10 +30,65 @@ import {
 } from './compressService';
 import { taskManager } from '@/core/extensionAPI/tasks/taskManager';
 import { registerPlugin } from '@capacitor/core';
-import { Filesystem } from '@capacitor/filesystem';
+import { Filesystem, Directory } from '@capacitor/filesystem';
 const NativeTerminal = registerPlugin<any>('NativeTerminal');
 const SafStorage = registerPlugin<any>('SafStorage');
 import './CompressModal.css';
+
+/** App-writable tmp for staging (never rely on /data/local/tmp alone). */
+async function resolveAppTmpDir(): Promise<string> {
+  const fromWindow =
+    typeof window !== 'undefined' &&
+    ((window as any).__MSCODE_TMPDIR || (window as any).mscode?.tmpDir);
+  if (fromWindow && typeof fromWindow === 'string' && fromWindow.startsWith('/')) {
+    return fromWindow.replace(/\/+$/, '');
+  }
+  try {
+    const uriRes = await Filesystem.getUri({
+      directory: Directory.Cache,
+      path: 'compress_stage',
+    });
+    let p = (uriRes.uri || '').replace(/^file:\/\//, '');
+    if (p.startsWith('//')) p = p.slice(1);
+    if (p) {
+      try {
+        await Filesystem.mkdir({
+          path: 'compress_stage',
+          directory: Directory.Cache,
+          recursive: true,
+        });
+      } catch {
+        /* exists */
+      }
+      return p.replace(/\/+$/, '');
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const uriRes = await Filesystem.getUri({
+      directory: Directory.Data,
+      path: 'tmp',
+    });
+    let p = (uriRes.uri || '').replace(/^file:\/\//, '');
+    if (p.startsWith('//')) p = p.slice(1);
+    if (p) {
+      try {
+        await Filesystem.mkdir({
+          path: 'tmp',
+          directory: Directory.Data,
+          recursive: true,
+        });
+      } catch {
+        /* exists */
+      }
+      return p.replace(/\/+$/, '');
+    }
+  } catch {
+    /* fall through */
+  }
+  return '/data/local/tmp';
+}
 
 export interface CompressModalProps {
   isOpen: boolean;
@@ -126,16 +181,27 @@ export const CompressModal: React.FC<CompressModalProps> = ({
     stageDir: string,
   ): Promise<CompressSource> => {
     const destPath = stageDir.replace(/\/+$/, '') + '/' + src.name;
-    if (isContentUri(src.path)) {
+    // Prefer original content:// for SAF; never strip Termux to /data/data/...
+    const srcPath = src.path;
+
+    if (isContentUri(srcPath)) {
       await SafStorage.copyUriToPath({
-        uri: src.path,
+        uri: srcPath,
         destPath,
         recursive: !!src.isDirectory,
       });
       return { path: destPath, name: src.name, isDirectory: src.isDirectory };
     }
+
+    // Foreign absolute path without content:// — cannot read from this app
+    if (isForeignAppPath(srcPath)) {
+      throw new Error(
+        'Termux/private path needs SAF (content://). Re-open that folder via Add Storage.',
+      );
+    }
+
     // Absolute filesystem path (own app or shared) — Capacitor copy
-    const from = normalizeFsPath(shellPathFromUri(src.path));
+    const from = normalizeFsPath(shellPathFromUri(srcPath));
     try {
       const stat = await Filesystem.stat({ path: from });
       if (stat.type === 'directory') {
@@ -152,6 +218,15 @@ export const CompressModal: React.FC<CompressModalProps> = ({
           );
         }
       } else {
+        // Ensure parent exists
+        const parent = destPath.replace(/\/[^/]+$/, '');
+        if (parent && parent !== destPath) {
+          try {
+            await Filesystem.mkdir({ path: parent, recursive: true });
+          } catch {
+            /* exists */
+          }
+        }
         await Filesystem.copy({ from, to: destPath });
       }
     } catch (e) {
@@ -193,20 +268,16 @@ export const CompressModal: React.FC<CompressModalProps> = ({
     setPhase('checking');
     progressState.current = { percent: 0, status: 'Checking…', phase: 'checking' };
 
-    const tmpHint =
-      (typeof window !== 'undefined' &&
-        ((window as any).__MSCODE_TMPDIR ||
-          (window as any).mscode?.tmpDir)) ||
-      undefined;
+    const appTmp = await resolveAppTmpDir();
+    const tmpHint = appTmp;
 
     // ── Stage Termux / SAF / foreign paths so the shell can read them ──
-    let effectiveSources: CompressSource[] = sources.map((s) => ({
-      ...s,
-      path: shellPathFromUri(s.path),
-    }));
+    // Keep original paths for staging decision (content:// must stay content://)
+    let effectiveSources: CompressSource[] = sources.slice();
     let stageDir: string | undefined;
 
     const staging = planStaging(sources, tmpHint);
+    // Replace placeholder / empty base with real app tmp
     if (staging.needsStage) {
       setPhase('staging');
       setStatusLine('Staging files for compress…');
@@ -215,16 +286,30 @@ export const CompressModal: React.FC<CompressModalProps> = ({
         status: 'Staging…',
         phase: 'staging',
       };
-      stageDir = staging.stageDir;
+      stageDir = staging.stageDir.includes('__APP_TMP__')
+        ? staging.stageDir.replace('__APP_TMP__', appTmp)
+        : staging.stageDir.startsWith(appTmp)
+          ? staging.stageDir
+          : appTmp.replace(/\/+$/, '') +
+            '/mscode_stage_' +
+            Date.now() +
+            '_' +
+            Math.floor(Math.random() * 1e6);
+
       try {
-        // Ensure stage root exists via shell (always works for app tmp / local tmp)
+        // Create stage root via shell (app UID) — more reliable than /data/local/tmp
         const { result: mkResult } = taskManager.execute(
           'mkdir -p ' + JSON.stringify(stageDir),
-          tmpHint || '/data/local/tmp',
+          appTmp,
           () => {},
           'Stage mkdir',
         );
-        await mkResult;
+        const mk = await mkResult;
+        if (mk.exitCode !== 0) {
+          throw new Error(
+            'Cannot create stage dir: ' + stageDir + ' (exit ' + mk.exitCode + ')',
+          );
+        }
 
         const staged: CompressSource[] = [...staging.direct];
         let i = 0;
@@ -240,15 +325,14 @@ export const CompressModal: React.FC<CompressModalProps> = ({
             setError(
               `Cannot stage "${s.name}": ${e?.message || e}. ` +
                 (isContentUri(s.path) || isForeignAppPath(s.path)
-                  ? 'Grant SAF access or copy files to Internal Storage / sdcard first.'
+                  ? 'Open that folder via File Picker → Add Storage (SAF), then try again.'
                   : 'Check storage permission.'),
             );
             setBusy(false);
             setPhase('failed');
-            // best-effort cleanup
             taskManager.execute(
               'rm -rf ' + JSON.stringify(stageDir),
-              tmpHint || '/data/local/tmp',
+              appTmp,
               () => {},
               'Stage cleanup',
             );
@@ -263,13 +347,20 @@ export const CompressModal: React.FC<CompressModalProps> = ({
         setPhase('failed');
         return;
       }
+    } else {
+      // No staging — normalize shell-readable paths only
+      effectiveSources = sources.map((s) => ({
+        ...s,
+        path: normalizeFsPath(shellPathFromUri(s.path)),
+      }));
     }
 
-    // Own-app paths are shell-readable (same UID). Normalize only.
-    effectiveSources = effectiveSources.map((s) => ({
-      ...s,
-      path: normalizeFsPath(shellPathFromUri(s.path)),
-    }));
+    // Staged paths are already real absolute paths under app tmp
+    effectiveSources = effectiveSources.map((s) =>
+      isContentUri(s.path)
+        ? s
+        : { ...s, path: normalizeFsPath(shellPathFromUri(s.path)) },
+    );
 
     let plan: CompressPlan;
     try {
@@ -283,7 +374,7 @@ export const CompressModal: React.FC<CompressModalProps> = ({
       if (stageDir) {
         taskManager.execute(
           'rm -rf ' + JSON.stringify(stageDir),
-          tmpHint || '/data/local/tmp',
+          appTmp,
           () => {},
           'Stage cleanup',
         );

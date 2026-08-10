@@ -423,11 +423,40 @@ public class SafStoragePlugin extends Plugin {
         java.io.InputStream in = null;
         java.io.OutputStream out = null;
         try {
-            in = resolver.openInputStream(src);
-            if (in == null) throw new Exception("openInputStream null for " + src);
-            //noinspection ResultOfMethodCallIgnored
-            if (dest.getParentFile() != null) dest.getParentFile().mkdirs();
-            out = new java.io.FileOutputStream(dest);
+            try {
+                in = resolver.openInputStream(src);
+            } catch (Exception e) {
+                throw new Exception(
+                    "SAF read failed for " + src + ": " + e.getMessage()
+                        + " (re-grant folder via Add Storage)",
+                    e
+                );
+            }
+            if (in == null) {
+                throw new Exception(
+                    "SAF openInputStream null for " + src
+                        + " (re-grant folder via Add Storage)"
+                );
+            }
+            java.io.File parent = dest.getParentFile();
+            if (parent != null && !parent.exists()) {
+                //noinspection ResultOfMethodCallIgnored
+                boolean ok = parent.mkdirs();
+                if (!ok && !parent.exists()) {
+                    throw new Exception(
+                        "Cannot create stage dir: " + parent.getAbsolutePath()
+                    );
+                }
+            }
+            try {
+                out = new java.io.FileOutputStream(dest);
+            } catch (Exception e) {
+                throw new Exception(
+                    "Cannot write stage file " + dest.getAbsolutePath()
+                        + ": " + e.getMessage(),
+                    e
+                );
+            }
             byte[] buf = new byte[64 * 1024];
             int n;
             while ((n = in.read(buf)) >= 0) {
