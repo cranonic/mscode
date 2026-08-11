@@ -1,12 +1,13 @@
 // src/features/termis/components/terminal/settings/terminalSettings.ts
 //
-// Terminal-related settings moved out of workbench/*.
-// Keys mirror VS Code–style `terminal.integrated.*` where applicable.
+// Defaults + keys for terminal policy / UI.
+// Full settings UI schema lives in:
+//   features/settings/config/branchs/terminal/terminalSettings.ts
 //
-// LSP-related flags are declared as placeholders only — do not wire until
-// LSP modules are provided.
+// Keep defaults in sync with that section.
 
 export interface TerminalSettingsSchema {
+  'terminal.integrated.username': string;
   'terminal.integrated.fontFamily': string;
   'terminal.integrated.fontSize': number;
   'terminal.integrated.fontWeight': string | number;
@@ -18,11 +19,11 @@ export interface TerminalSettingsSchema {
   'terminal.integrated.tabStopWidth': number;
   'terminal.integrated.fontLigatures': boolean;
   'terminal.integrated.mouseWheelZoom': boolean;
+  'terminal.integrated.macOptionIsMeta': boolean;
+  'terminal.integrated.rightClickSelectsWord': boolean;
+  'terminal.integrated.fastScrollModifier': 'alt' | 'ctrl' | 'shift';
 
-  /** Default backend when + is long-pressed / default New Terminal. */
   'terminal.defaultExecMode': 'native' | 'proot';
-
-  // ── From TERMINAL_CONFIG (user-overridable copies) ──────────────────────
   'terminal.exclusiveMode': boolean;
   'terminal.confirmBeforeKill': boolean;
   'terminal.skipConfirmIfIdle': boolean;
@@ -31,7 +32,6 @@ export interface TerminalSettingsSchema {
   'terminal.maxConcurrentProot': number;
   'terminal.killGraceMs': number;
 
-  // ── LSP placeholders (not wired yet) ───────────────────────────────────
   /** @reserved */
   'terminal.lsp.enabled'?: boolean;
   /** @reserved */
@@ -39,7 +39,8 @@ export interface TerminalSettingsSchema {
 }
 
 export const TERMINAL_SETTINGS_DEFAULTS: TerminalSettingsSchema = {
-  'terminal.integrated.fontFamily': "'Fira Code', 'Cascadia Code', Consolas, monospace",
+  'terminal.integrated.username': 'mscode',
+  'terminal.integrated.fontFamily': '',
   'terminal.integrated.fontSize': 13,
   'terminal.integrated.fontWeight': 'normal',
   'terminal.integrated.letterSpacing': 0,
@@ -50,9 +51,11 @@ export const TERMINAL_SETTINGS_DEFAULTS: TerminalSettingsSchema = {
   'terminal.integrated.tabStopWidth': 8,
   'terminal.integrated.fontLigatures': false,
   'terminal.integrated.mouseWheelZoom': false,
+  'terminal.integrated.macOptionIsMeta': true,
+  'terminal.integrated.rightClickSelectsWord': false,
+  'terminal.integrated.fastScrollModifier': 'alt',
 
   'terminal.defaultExecMode': 'native',
-
   'terminal.exclusiveMode': true,
   'terminal.confirmBeforeKill': true,
   'terminal.skipConfirmIfIdle': true,
@@ -61,12 +64,37 @@ export const TERMINAL_SETTINGS_DEFAULTS: TerminalSettingsSchema = {
   'terminal.maxConcurrentProot': 2,
   'terminal.killGraceMs': 1500,
 
-  // reserved
   'terminal.lsp.enabled': false,
   'terminal.lsp.killWithExclusiveSwitch': true,
 };
 
-/** Setting keys that belong to terminal (for migration from workbench). */
 export const TERMINAL_SETTING_KEYS = Object.keys(
   TERMINAL_SETTINGS_DEFAULTS,
 ) as (keyof TerminalSettingsSchema)[];
+
+/** Apply user overrides onto TERMINAL_CONFIG-style runtime policy. */
+export function policyFromSettings(
+  settings: Partial<TerminalSettingsSchema> | Record<string, unknown>,
+): {
+  exclusiveMode: boolean;
+  confirmBeforeKill: boolean;
+  skipConfirmIfIdle: boolean;
+  maxTotalTabs: number;
+  maxConcurrentNative: number;
+  maxConcurrentProot: number;
+  killGraceMs: number;
+  defaultExecMode: 'native' | 'proot';
+} {
+  const s = settings as Partial<TerminalSettingsSchema>;
+  const d = TERMINAL_SETTINGS_DEFAULTS;
+  return {
+    exclusiveMode: (s['terminal.exclusiveMode'] ?? d['terminal.exclusiveMode']) as boolean,
+    confirmBeforeKill: (s['terminal.confirmBeforeKill'] ?? d['terminal.confirmBeforeKill']) as boolean,
+    skipConfirmIfIdle: (s['terminal.skipConfirmIfIdle'] ?? d['terminal.skipConfirmIfIdle']) as boolean,
+    maxTotalTabs: (s['terminal.maxTotalTabs'] ?? d['terminal.maxTotalTabs']) as number,
+    maxConcurrentNative: (s['terminal.maxConcurrentNative'] ?? d['terminal.maxConcurrentNative']) as number,
+    maxConcurrentProot: (s['terminal.maxConcurrentProot'] ?? d['terminal.maxConcurrentProot']) as number,
+    killGraceMs: (s['terminal.killGraceMs'] ?? d['terminal.killGraceMs']) as number,
+    defaultExecMode: (s['terminal.defaultExecMode'] ?? d['terminal.defaultExecMode']) as 'native' | 'proot',
+  };
+}

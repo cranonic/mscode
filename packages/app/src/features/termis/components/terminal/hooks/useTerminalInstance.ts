@@ -220,6 +220,7 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
         cwd:    instance.workingDir,
         cols:   80,
         rows:   24,
+        execType: (instance.execMode || instance.runtime || 'native') as 'native' | 'proot',
       });
       processRef.current = proc;
       terminalProcessRegistry.register(instance.id, {

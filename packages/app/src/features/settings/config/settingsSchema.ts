@@ -1,6 +1,7 @@
 import { configRegistry } from '@/core/extensionAPI/registry/configurationRegistry';
 import { editorSection } from './branchs/editor/editorSettings'; 
 import { workbenchSection } from './branchs/workbench/workbenchSettings';
+import { terminalSection } from './branchs/terminal/terminalSettings';
 import { lspSection } from './branchs/lsp/lspSettings'; 
  import { gitSection }       from './branchs/git/gitSettings';   // ← NEW
  
@@ -8,6 +9,7 @@ export type { SettingDefinition, SettingType, SettingOption } from '@/core/exten
 
 configRegistry.registerConfiguration(editorSection);
 configRegistry.registerConfiguration(workbenchSection);
+configRegistry.registerConfiguration(terminalSection);
 configRegistry.registerConfiguration(lspSection); 
 configRegistry.registerConfiguration(gitSection);      
 
