@@ -630,13 +630,24 @@ public class TerminalForegroundService extends Service {
                  + "fi";
         }
 
-        // typescript-language-server
+        // typescript-language-server — MUST pass --tsserver-path to global typescript.
+        // Without it initialize fails: "Could not find a valid TypeScript installation"
+        // and the client only sees "LSP initialize timeout".
         if (s.startsWith("typescript-language-server") || s.contains("typescript-language-server")) {
-            String js = prefix + "/lib/node_modules/typescript-language-server/lib/cli.mjs";
-            return "if [ -f \"" + js + "\" ]; then "
-                 + "node \"" + js + "\" --stdio; "
+            String jsMjs = prefix + "/lib/node_modules/typescript-language-server/lib/cli.mjs";
+            String jsJs  = prefix + "/lib/node_modules/typescript-language-server/lib/cli.js";
+            String tsSrv = prefix + "/lib/node_modules/typescript/lib/tsserver.js";
+            return "TS=\"" + tsSrv + "\"; "
+                 + "if [ ! -f \"$TS\" ]; then "
+                 + "echo \"[LSP] typescript missing at $TS — run: npm i -g typescript\" >&2; exit 1; "
+                 + "fi; "
+                 + "if [ -f \"" + jsMjs + "\" ]; then "
+                 + "node \"" + jsMjs + "\" --stdio --tsserver-path \"$TS\"; "
+                 + "elif [ -f \"" + jsJs + "\" ]; then "
+                 + "node \"" + jsJs + "\" --stdio --tsserver-path \"$TS\"; "
                  + "else "
-                 + "node \"$(npm root -g 2>/dev/null)/typescript-language-server/lib/cli.mjs\" --stdio; "
+                 + "node \"$(npm root -g 2>/dev/null)/typescript-language-server/lib/cli.mjs\" "
+                 + "--stdio --tsserver-path \"$TS\"; "
                  + "fi";
         }
 
