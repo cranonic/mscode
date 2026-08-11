@@ -1,8 +1,12 @@
 // src/features/settings/config/branchs/lsp/parts/jstsSettings.ts
 import { generateLspLanguageSettings } from '../lspFactory';
 
+// When the "TypeScript and JavaScript" extension is installed it registers
+// typescript-language-server for js/ts. Core lsp.* toggles still apply;
+// rich preferences live in the extension's settings.json (typescript.*).
+
 export const jsLspProperties = generateLspLanguageSettings(
-  'JavaScript', 'javascript', 'Monaco Built-in',
+  'JavaScript', 'javascript', 'typescript-language-server',
   {
     'lsp.javascript.implicitAny': {
       title:               'Report Implicit Any',
@@ -30,7 +34,7 @@ export const jsLspProperties = generateLspLanguageSettings(
 );
 
 export const tsLspProperties = generateLspLanguageSettings(
-  'TypeScript', 'typescript', 'Monaco Built-in',
+  'TypeScript', 'typescript', 'typescript-language-server',
   {
     'lsp.typescript.strictMode': {
       title:               'Strict Mode',

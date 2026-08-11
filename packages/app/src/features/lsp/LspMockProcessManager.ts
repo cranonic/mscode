@@ -90,6 +90,11 @@ export class LspMockProcessManager {
     public getActiveLanguage(): string | null {
         return this.activeLanguage;
     }
+  
+
+   public sharePort(fromLanguage: string, toLanguage: string): void {
+        console.log(`[Web-Mock] from(${fromLanguage}) to ${toLanguage}`);
+    }
 }
 
 /**
