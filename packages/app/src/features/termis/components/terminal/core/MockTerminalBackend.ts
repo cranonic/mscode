@@ -1,4 +1,4 @@
-// src/features/terminal/core/MockTerminalBackend.ts
+// src/features/termis/components/terminal/core/MockTerminalBackend.ts
 
 export class MockTerminalBackend {
   private cwd: string;

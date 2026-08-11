@@ -1,4 +1,4 @@
-// src/features/termis/components/output/components/OutputPanel.tsx
+// src/features/termis/components/output/components/output/components/OutputPanel.tsx
 
 import React, { useRef, useState } from 'react';
 import { useOutputStore }  from '../store/outputStore';

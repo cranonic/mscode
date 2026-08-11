@@ -1,4 +1,4 @@
-// src/features/output/hooks/useOutputEditor.ts
+// src/features/termis/components/output/hooks/useOutputEditor.ts
 
 import { useEffect, useRef } from 'react';
 import * as monaco from 'monaco-editor';

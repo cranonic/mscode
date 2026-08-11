@@ -1,4 +1,4 @@
-// src/features/terminal/hooks/useTerminalInstance.ts
+// src/features/termis/components/terminal/hooks/useTerminalInstance.ts
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { TerminalProcess }  from '../core/TerminalProcess';

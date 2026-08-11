@@ -1,4 +1,4 @@
-// src/features/terminal/core/XtermAdapter.ts
+// src/features/termis/components/terminal/core/XtermAdapter.ts
 //
 // Sets up an xterm.js Terminal instance with addons and connects it
 // to a TerminalProcess.

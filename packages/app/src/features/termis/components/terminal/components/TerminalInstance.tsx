@@ -1,4 +1,4 @@
-// src/features/terminal/components/TerminalInstance.tsx
+// src/features/termis/components/terminal/components/TerminalInstance.tsx
 import React, { useCallback, useRef } from 'react';
 import { useTerminalInstance } from '../hooks/useTerminalInstance';
 import { StartDropSVG, EndDropSVG, DROP_W } from '@/features/editor/components/Teardrops/components/TeardropsShapes';

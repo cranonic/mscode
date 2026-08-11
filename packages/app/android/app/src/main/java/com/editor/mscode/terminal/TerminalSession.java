@@ -16,10 +16,16 @@ public class TerminalSession {
     /** "local" | "server" — cosmetic label forwarded to frontend. */
     public String type = "local";
 
+    /**
+     * Backend exec mode: "native" (Bionic + $PREFIX) or "proot" (Alpine guest).
+     * Used for exclusive-mode kill and mixed-session policy.
+     */
+    public String execType = "native";
+
     /** Master PTY file descriptor (returned by nativeCreateSubprocess). */
     public int ptyFd = -1;
 
-    /** PID of the proot child process. */
+    /** PID of the child process (sh or proot). */
     public int childPid = -1;
 
     /** Wrapper around ptyFd so Android can GC-manage the fd. */

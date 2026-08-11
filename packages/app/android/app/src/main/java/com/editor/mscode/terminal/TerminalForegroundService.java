@@ -215,7 +215,7 @@ public class TerminalForegroundService extends Service {
     }
 
     /**
-     * Starts a new PTY terminal session (native toybox + Termux $PREFIX).
+     * Starts a new PTY terminal session.
      *
      * @param sessionId   Unique ID.
      * @param projectPath Android path to open in the terminal.
@@ -223,10 +223,17 @@ public class TerminalForegroundService extends Service {
      * @param arch        Device ABI (used for bootstrap if needed).
      * @param rows        Initial terminal rows.
      * @param cols        Initial terminal columns.
+     * @param execType    "native" | "proot" — exclusive-mode tag.
      */
     public void startSession(String sessionId, String projectPath,
                              String type, String arch,
                              int rows, int cols) throws Exception {
+        startSession(sessionId, projectPath, type, arch, rows, cols, "native");
+    }
+
+    public void startSession(String sessionId, String projectPath,
+                             String type, String arch,
+                             int rows, int cols, String execType) throws Exception {
 
         if (sessions.containsKey(sessionId))
             throw new IllegalStateException("Session '" + sessionId + "' already exists");
@@ -234,10 +241,11 @@ public class TerminalForegroundService extends Service {
         if (builder == null)
             throw new IllegalStateException("Builder not initialised — call initBuilder() first");
 
-        // Native + bootstrap (no Alpine / proot)
+        String mode = ("proot".equals(execType)) ? "proot" : "native";
+
+        // Native bootstrap always (proot Alpine download is separate / future)
         synchronized (rootfsLock) {
             rootfs.ensureNativeBinaries();
-            // Bootstrap is best-effort on session start — full install via initSetup()
             try {
                 if (!rootfs.isBootstrapReady()) {
                     rootfs.ensureBootstrap(arch);
@@ -246,9 +254,10 @@ public class TerminalForegroundService extends Service {
                 emitLog("Bootstrap not ready yet: " + e.getMessage()
                         + " (shell still works with toybox)");
             }
+            // TODO: if mode==proot, ensureAlpineRootfs(arch) downloads minirootfs from network
         }
 
-        // Cwd: use Android path directly (no proot mapping)
+        // Cwd: use Android path directly (no proot mapping yet)
         String cwd = (projectPath != null && new File(projectPath).isDirectory())
             ? projectPath
             : rootfs.getHomePath();
@@ -257,16 +266,17 @@ public class TerminalForegroundService extends Service {
         String initPath = rootfs.getFilesDir() + "/init_" + sessionId + ".sh";
         scriptWriter.write(initPath, cwd);
 
+        // For now both modes use native builder; proot command builder wires later
         String[] cmd = builder.buildSessionCommand(initPath);
-        // ENV=initPath so interactive sh sources bb()/aliases + PREFIX
         String[] env = builder.buildSessionEnv(initPath);
 
-        emitLog("🚀 Starting [" + sessionId + "] native " + type
+        emitLog("🚀 Starting [" + sessionId + "] execType=" + mode + " " + type
                 + " PREFIX=" + rootfs.getPrefixPath()
                 + " → " + cwd);
 
         TerminalSession session = new TerminalSession(sessionId);
         session.type = type;
+        session.execType = mode;
         sessions.put(sessionId, session);
 
         int[] pids = new int[1];
@@ -345,6 +355,59 @@ public class TerminalForegroundService extends Service {
         } else {
             updateNotification(sessions.size() + " session(s) running");
         }
+    }
+
+    /**
+     * Exclusive-mode helper: kill every PTY session tagged with {@code execType}
+     * ("native" | "proot"). Also tears down background jobs / process servers when
+     * the frontend KILL_SCOPE includes them (best-effort here).
+     */
+    public int killAllSessionsOfType(String execType) {
+        if (execType == null || execType.isEmpty()) return 0;
+        String mode = execType;
+        java.util.ArrayList<String> ids = new java.util.ArrayList<>();
+        for (TerminalSession s : sessions.values()) {
+            if (s != null && mode.equals(s.execType)) {
+                ids.add(s.id);
+            }
+        }
+        for (String id : ids) {
+            try {
+                // soft: interrupt process group
+                sendInterrupt(id);
+            } catch (Exception ignored) {}
+        }
+        // brief grace is handled on the JS side; force close immediately here
+        for (String id : ids) {
+            try {
+                closeSession(id);
+            } catch (Exception ignored) {}
+        }
+        // Background + process servers — scope decided by caller; we clear all bg
+        // when switching away from native (bg is native-only today).
+        if ("native".equals(mode)) {
+            try {
+                for (String bgId : new java.util.ArrayList<>(backgroundProcesses.keySet())) {
+                    killBackgroundProcess(bgId);
+                }
+            } catch (Exception ignored) {}
+            try {
+                stopAllProcessServers();
+            } catch (Exception ignored) {}
+        }
+        emitLog("killAllSessionsOfType(" + mode + ") closed " + ids.size() + " session(s)");
+        return ids.size();
+    }
+
+    /** Distinct execTypes currently running (for exclusive-check). */
+    public java.util.List<String> getActiveExecTypes() {
+        java.util.LinkedHashSet<String> set = new java.util.LinkedHashSet<>();
+        for (TerminalSession s : sessions.values()) {
+            if (s != null && s.running) {
+                set.add(s.execType != null ? s.execType : "native");
+            }
+        }
+        return new java.util.ArrayList<>(set);
     }
 
     public boolean isRunning(String sessionId) {

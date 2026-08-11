@@ -1,4 +1,4 @@
-// src/hooks/useTerminalBoot.ts
+// src/features/termis/components/terminal/hooks/useTerminalBoot.ts
 
 import { useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';

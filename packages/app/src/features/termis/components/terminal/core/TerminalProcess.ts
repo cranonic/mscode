@@ -1,4 +1,4 @@
-// src/features/terminal/core/TerminalProcess.ts
+// src/features/termis/components/terminal/core/TerminalProcess.ts
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { MockTerminalBackend } from './MockTerminalBackend';
@@ -14,7 +14,16 @@ interface NativeTerminalPlugin {
    * 
    * @param options Structure defining execution identifiers and environmental variables.
    */
-  start(options: { id: string; projectPath?: string; type?: string }): Promise<void>; 
+  start(options: {
+    id: string;
+    projectPath?: string;
+    type?: string;
+    execType?: 'native' | 'proot';
+    rows?: number;
+    cols?: number;
+  }): Promise<void>;
+  killAllSessionsOfType?(options: { execType: string }): Promise<{ killed: number }>;
+  getActiveExecTypes?(): Promise<{ types: string[] }>;
 
   /**
    * Streams sequence vectors into standard input streams managed by active runtime instances.
@@ -92,6 +101,8 @@ export interface ProcessOptions {
   cwd?:       string;
   cols?:      number;
   rows?:      number;
+  /** Backend: native bionic vs Alpine proot */
+  execType?:  'native' | 'proot';
 }
 
 /**
@@ -163,9 +174,12 @@ export class TerminalProcess {
         });
 
         // Instructs native framework platforms to allocate corresponding operational contexts
-        await NativeTerminal.start({ 
-          id: this.id, 
-          projectPath: this.options.cwd 
+        await NativeTerminal.start({
+          id: this.id,
+          projectPath: this.options.cwd,
+          execType: this.options.execType || 'native',
+          cols: this.options.cols,
+          rows: this.options.rows,
         });
         
         this.emit({ type: 'ready' });

@@ -11,7 +11,7 @@ import android.util.Log;
 import com.editor.mscode.terminal.PtyEngine;
 import com.editor.mscode.terminal.TerminalForegroundService;
 import com.editor.mscode.terminal.TerminalSession;
-import com.editor.mscode.terminal.TerminalCommandBuilder;
+import com.editor.mscode.terminal.ProotCommandBuilder;
 import com.editor.mscode.terminal.RootfsManager;
 
 
@@ -254,8 +254,8 @@ public class NativeTerminalPlugin extends Plugin {
     // ═════════════════════════════════════════════════════════════════════════
 
     /**
-     * start({id, projectPath?, type?, rows?, cols?})
-     * Starts a new PTY terminal session via the foreground service.
+     * start({id, projectPath?, type?, rows?, cols?, execType?})
+     * execType: "native" | "proot" (default native)
      */
     @PluginMethod
     public void start(PluginCall call) {
@@ -265,6 +265,7 @@ public class NativeTerminalPlugin extends Plugin {
         String sessionId   = call.getString("id", "default");
         String projectPath = call.getString("projectPath", "");
         String type        = call.getString("type", "local");
+        String execType    = call.getString("execType", "native");
         int rows           = call.getInt("rows", 24);
         int cols           = call.getInt("cols", 80);
 
@@ -274,16 +275,47 @@ public class NativeTerminalPlugin extends Plugin {
             return;
         }
 
-        // Run on a background thread to prevent blocking the Capacitor bridge
         new Thread(() -> {
             try {
-                terminalService.startSession(sessionId, projectPath, type, arch, rows, cols);
+                terminalService.startSession(sessionId, projectPath, type, arch, rows, cols, execType);
                 call.resolve();
             } catch (Exception e) {
                 Log.e(TAG, "start() failed", e);
                 call.reject("Failed to start session: " + e.getMessage(), e);
             }
         }).start();
+    }
+
+    /** killAllSessionsOfType({ execType: "native"|"proot" }) */
+    @PluginMethod
+    public void killAllSessionsOfType(PluginCall call) {
+        if (!checkService(call)) return;
+        String execType = call.getString("execType", "");
+        try {
+            int n = terminalService.killAllSessionsOfType(execType);
+            JSObject ret = new JSObject();
+            ret.put("killed", n);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "killAllSessionsOfType failed", e);
+            call.reject("killAllSessionsOfType failed: " + e.getMessage(), e);
+        }
+    }
+
+    /** getActiveExecTypes() → { types: string[] } */
+    @PluginMethod
+    public void getActiveExecTypes(PluginCall call) {
+        if (!checkService(call)) return;
+        try {
+            java.util.List<String> types = terminalService.getActiveExecTypes();
+            JSObject ret = new JSObject();
+            com.getcapacitor.JSArray arr = new com.getcapacitor.JSArray();
+            for (String t : types) arr.put(t);
+            ret.put("types", arr);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("getActiveExecTypes failed: " + e.getMessage(), e);
+        }
     }
 
     @PluginMethod
@@ -440,12 +472,12 @@ public class NativeTerminalPlugin extends Plugin {
             call.reject("Must provide command and sessionId"); return;
         }
 
-        TerminalCommandBuilder builder = new TerminalCommandBuilder(
+        ProotCommandBuilder builder = new ProotCommandBuilder(
             new RootfsManager(getContext()), 
             getContext().getApplicationInfo().nativeLibraryDir
         );
         String[] cmd = builder.buildBackgroundCommand(command);
-        Map<String, String> env = builder.buildBackgroundEnvMap();
+        Map<String, String> env = builder.getProotEnv();
 
         terminalService.streamBackgroundExecute(sessionId, cmd, env, cwd, new TerminalForegroundService.BackgroundProcessListener() {
             @Override

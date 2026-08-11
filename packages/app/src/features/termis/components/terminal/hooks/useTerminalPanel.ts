@@ -1,11 +1,11 @@
-// src/features/termis/components/parts/terminal/hooks/useTerminalPanel.ts
+// src/features/termis/components/terminal/hooks/useTerminalPanel.ts
 //
 // Manages the bottom panel: open/close, height via drag.
 // Thin wrapper over terminalStore & termisStore — keeps components clean.
 
 import { useCallback } from 'react';
 import { useTerminalStore } from '../store/terminalStore';
-import { useTermisStore } from '@/features/termis/store/termisStore';
+import { useTermisStore } from '../../../store/termisStore';
 
 export function useTerminalPanel() {
   //  Terminal Specific Store
