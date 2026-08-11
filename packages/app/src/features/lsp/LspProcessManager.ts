@@ -30,10 +30,24 @@ export class LspProcessManager {
 
     public registerDynamicConfig(language: string, config: any): void {
         this.dynamicConfigs[language] = config;
+        console.log(`[LSP] dynamic config registered for "${language}"`);
     }
 
     public removeDynamicConfig(language: string): void {
         delete this.dynamicConfigs[language];
+    }
+
+    /**
+     * Reuse an already-spawned process port for a sibling language id
+     * (e.g. typescript → javascript / tsx after one typescript-language-server boot).
+     */
+    public sharePort(fromLanguage: string, toLanguage: string): void {
+        const port = this.activePorts.get(fromLanguage);
+        if (port == null) return;
+        this.activePorts.set(toLanguage, port);
+        if (this.aliveLanguages.has(fromLanguage)) {
+            this.aliveLanguages.add(toLanguage);
+        }
     }
 
     // ─── Low-level streaming ───────────────────────────────
