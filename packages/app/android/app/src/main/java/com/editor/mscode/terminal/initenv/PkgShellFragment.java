@@ -358,6 +358,20 @@ package com.editor.mscode.terminal.initenv;
 /**
  * Shell-side pkg() package manager functions embedded in mscode_env.sh.
  * (curl + ar + tar via linker / toybox)
+ *
+ * ─── FIX (variable clobbering) ─────────────────────────────────────────────
+ * _pkg_install_one() recurses into itself for every dependency. Its working
+ * variables (_p, _path, _deb, _dep, ...) were previously NOT declared
+ * `local`, so they lived in the shell's global scope. Any nested recursive
+ * call silently overwrote the caller's copies. Once the recursion unwound,
+ * the OUTER call's _p/_path/_deb had been left pointing at whatever was the
+ * LAST processed dependency — so the originally requested package (e.g.
+ * "clang", "node") was never actually downloaded/extracted; instead its
+ * last dependency got redundantly re-extracted and a misleading
+ * "[pkg] ✓ <lastdep> installed" line was printed. All working vars in the
+ * recursive/nested functions below are now `local`, and _pkg_depth is
+ * correctly decremented on early-return-on-failure and reset per top-level
+ * `pkg install` invocation.
  */
 public final class PkgShellFragment {
     private PkgShellFragment() {}
@@ -377,6 +391,7 @@ public final class PkgShellFragment {
         sb.append("\n");
         // Ensure Packages index
         sb.append("_pkg_ensure_index() {\n");
+        sb.append("  local _arch _idx _need _age _curl_ca\n");
         sb.append("  mkdir -p \"$_pkg_cache\"\n");
         sb.append("  _arch=$(_pkg_arch)\n");
         sb.append("  _idx=\"$_pkg_cache/Packages\"\n");
@@ -397,6 +412,7 @@ public final class PkgShellFragment {
         sb.append("\n");
         // Resolve Filename: for a package name
         sb.append("_pkg_resolve() {\n");
+        sb.append("  local _want _fn _cur _line\n");
         sb.append("  _want=\"$1\"\n");
         sb.append("  _pkg_ensure_index || return 1\n");
         sb.append("  _fn=\n");
@@ -423,6 +439,7 @@ public final class PkgShellFragment {
         // bytes, size/name fields shift, and data.tar* is never written →
         // "[pkg] missing data.tar — deleting bad cache".
         sb.append("_pkg_ar_x() {\n");
+        sb.append("  local _ar_file _magic _asz _hdrf _namef _szf _off _total _hlen _name _sz _got\n");
         sb.append("  # Extract ar members of $1 into cwd. No toybox ar.\n");
         sb.append("  _ar_file=\"$1\"\n");
         sb.append("  if [ -f \"$PREFIX/bin/ar\" ]; then\n");
@@ -484,6 +501,7 @@ public final class PkgShellFragment {
         sb.append("}\n");
         sb.append("\n");
         sb.append("_pkg_extract_deb() {\n");
+        sb.append("  local _deb _name _work _debsz _has_data _f _data _stage _src\n");
         sb.append("  _deb=\"$1\"; _name=\"$2\"\n");
         sb.append("  _work=\"$_pkg_cache/extract-$_name\"\n");
         sb.append("  rm -rf \"$_work\"; mkdir -p \"$_work\"\n");
@@ -566,6 +584,7 @@ public final class PkgShellFragment {
 
         // Parse Depends: from Packages index (simple, ignores versions/alternatives)
         sb.append("_pkg_depends() {\n");
+        sb.append("  local _want _cur _deps _line\n");
         sb.append("  _want=\"$1\"\n");
         sb.append("  _pkg_ensure_index || return 0\n");
         sb.append("  _cur=; _deps=\n");
@@ -590,6 +609,7 @@ public final class PkgShellFragment {
         sb.append("}\n");
         sb.append("\n");
         sb.append("_pkg_install_one() {\n");
+        sb.append("  local _p _path _dep _deb _debsz _debmag _dl_ok _url\n");
         sb.append("  _p=\"$1\"\n");
         sb.append("  # depth guard for recursive deps\n");
         sb.append("  _pkg_depth=${_pkg_depth:-0}\n");
@@ -620,7 +640,7 @@ public final class PkgShellFragment {
         sb.append("      *)\n");
         sb.append("        if ! _pkg_is_installed \"$_dep\"; then\n");
         sb.append("          echo \"[pkg] dependency: $_dep (for $_p)\" >&2\n");
-        sb.append("          _pkg_install_one \"$_dep\" || { echo \"[pkg] dep failed: $_dep\" >&2; return 1; }\n");
+        sb.append("          _pkg_install_one \"$_dep\" || { echo \"[pkg] dep failed: $_dep\" >&2; _pkg_depth=$((_pkg_depth - 1)); return 1; }\n");
         sb.append("        fi\n");
         sb.append("        ;;\n");
         sb.append("    esac\n");
@@ -654,14 +674,8 @@ public final class PkgShellFragment {
         sb.append("  fi\n");
         sb.append("  echo \"[pkg] deb ok ($_debsz bytes)\" >&2\n");
         sb.append("  _pkg_extract_deb \"$_deb\" \"$_p\" || return 1\n");
-        sb.append("  # refresh command wrappers in THIS session (critical for npm/npx/node)\n");
-        sb.append("  mscode_wrap 2>/dev/null || true\n");
-        sb.append("  # hard-guarantee node toolchain wrappers even if mscode_wrap skipped them\n");
-        sb.append("  for _c in node npm npx; do\n");
-        sb.append("    if [ -f \"$PREFIX/bin/$_c\" ]; then\n");
-        sb.append("      eval \"${_c}() { elf \\\"\\$PREFIX/bin/$_c\\\" \\\"\\$@\\\"; }\"\n");
-        sb.append("    fi\n");
-        sb.append("  done\n");
+        sb.append("  # refresh command wrappers in THIS session\n");
+        sb.append("  mscode_wrap 2>/dev/null\n");
         sb.append("  echo \"[pkg] ✓ $_p installed\" >&2\n");
         sb.append("}\n");
         sb.append("\n");
@@ -669,11 +683,13 @@ public final class PkgShellFragment {
         sb.append("  case \"$1\" in\n");
         sb.append("    install|i)\n");
         sb.append("      shift\n");
+        sb.append("      local _ok _pkg\n");
         sb.append("      if [ $# -eq 0 ]; then\n");
         sb.append("        echo \"usage: pkg install <package>…\" >&2\n");
         sb.append("        return 1\n");
         sb.append("      fi\n");
         sb.append("      _ok=0\n");
+        sb.append("      _pkg_depth=0\n");
         sb.append("      for _pkg in \"$@\"; do\n");
         sb.append("        _pkg_install_one \"$_pkg\" || _ok=1\n");
         sb.append("      done\n");
@@ -688,6 +704,7 @@ public final class PkgShellFragment {
         sb.append("      ;;\n");
         sb.append("    search|s)\n");
         sb.append("      shift\n");
+        sb.append("      local _q\n");
         sb.append("      _q=\"$1\"\n");
         sb.append("      if [ -z \"$_q\" ]; then echo \"usage: pkg search <name>\" >&2; return 1; fi\n");
         sb.append("      _pkg_ensure_index || return 1\n");

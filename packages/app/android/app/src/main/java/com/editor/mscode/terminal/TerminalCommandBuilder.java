@@ -355,11 +355,10 @@ public class TerminalCommandBuilder {
         w.append("export PREFIX='").append(safePrefix).append("'; ");
         w.append("export TERMUX_PREFIX='").append(safePrefix).append("'; ");
         w.append("export TOYBOX='").append(safeToybox).append("'; ");
-        // PREFIX first so installed tools win; never rely on direct exec of filesDir bins
-        w.append("export PATH=\"")
+        w.append("export PATH=\"/system/bin:/system/xbin:")
          .append(safePrefix).append("/bin:")
          .append(safePrefix).append("/bin/applets:")
-         .append(safeLib).append(":/system/bin:/system/xbin\"; ");
+         .append(safeLib).append("\"; ");
         w.append("export LD_LIBRARY_PATH=\"")
          .append(safePrefix).append("/lib:")
          .append(safeLib).append("\"; ");
@@ -369,34 +368,26 @@ public class TerminalCommandBuilder {
         w.append("MSCODE_LINKER=/system/bin/linker64; ");
         w.append("[ -x /system/bin/linker64 ] || MSCODE_LINKER=/system/bin/linker; ");
         w.append("export MSCODE_LINKER; ");
-        // Source shared env so elf()/pkg/mscode_wrap/node/npm wrappers exist
+        // Source shared env so zip()/elf/pkg/mscode_wrap exist
         w.append("[ -f '").append(safeEnv).append("' ] && . '").append(safeEnv).append("'; ");
-        // Re-assert PATH after env (env may reorder)
-        w.append("export PATH=\"")
+        // Re-assert PATH after env
+        w.append("export PATH=\"/system/bin:/system/xbin:")
          .append(safePrefix).append("/bin:")
          .append(safePrefix).append("/bin/applets:")
-         .append(safeLib).append(":/system/bin:/system/xbin\"; ");
-        // Clear toybox-collision function names only (keep node/npm/python wrappers)
+         .append(safeLib).append("\"; ");
+        // Clear any leftover busybox functions; keep only toybox + PREFIX tools
         w.append("for _c in ls cat cp mv rm mkdir rmdir grep find head tail wc uname ");
         w.append("chmod chown sed sort cut tr uniq basename dirname pwd echo printf sleep date touch ");
         w.append("ln readlink stat du df ps kill id which xargs tee md5sum base64 gzip diff ");
         w.append("yes true false test env printenv seq expr realpath mktemp clear; do ");
         w.append("unset -f $_c 2>/dev/null; done; ");
         w.append("unalias -a 2>/dev/null; ");
-        // Guarantee node toolchain even if shared env was stale (pre-nodejs install)
-        w.append("for _c in node npm npx; do ");
-        w.append("  if [ -f \"$PREFIX/bin/$_c\" ]; then ");
-        w.append("    eval \"${_c}() { elf \\\"\\$PREFIX/bin/$_c\\\" \\\"\\$@\\\"; }\"; ");
-        w.append("  fi; ");
-        w.append("done; ");
-        // runpfx: prefer shell function (elf wrapper), else linker on binary
+        // runpfx fallback if wrapper missing
         w.append("runpfx() {");
         w.append(" _n=\"$1\"; shift; _b=\"$PREFIX/bin/$_n\";");
         w.append(" if type \"$_n\" >/dev/null 2>&1; then \"$_n\" \"$@\"; return $?; fi;");
         w.append(" if [ -f \"$_b\" ]; then");
-        w.append("  if command -v elf >/dev/null 2>&1; then elf \"$_b\" \"$@\";");
-        w.append("  elif [ -n \"$MSCODE_LINKER\" ]; then \"$MSCODE_LINKER\" \"$_b\" \"$@\";");
-        w.append("  else \"$_b\" \"$@\"; fi;");
+        w.append("  if [ -x \"$_b\" ]; then \"$_b\" \"$@\"; else \"$MSCODE_LINKER\" \"$_b\" \"$@\"; fi;");
         w.append("  return $?; fi; return 127; }; ");
         w.append(shellCommand);
         cmd.add(w.toString());
