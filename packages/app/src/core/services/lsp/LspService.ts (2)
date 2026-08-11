@@ -120,9 +120,6 @@ export class LspService implements ILspService {
     const s          = this.state;
     s.languageId     = languageId;
     s.rootUri        = toLspUri(options.rootUri ?? 'file:///sdcard');
-    // Extension resolveOptions may set initializationOptions (tsserver.path, etc.)
-    s.initializationOptions =
-      (options.initializationOptions as Record<string, unknown> | undefined) ?? {};
     s.initialized    = false;
     s.isInitializing = true;
     s.openedUris.clear();

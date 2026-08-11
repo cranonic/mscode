@@ -67,13 +67,6 @@ export interface LspOptions {
   inlayHints?: boolean;
   rootUri?: string;
   fileUri?: string;
-  /**
-   * Passed through to LSP `initialize.initializationOptions`
-   * (e.g. typescript-language-server `tsserver.path`, clangd flags).
-   */
-  initializationOptions?: Record<string, unknown>;
-  /** Allow extension resolveOptions to merge arbitrary keys. */
-  [key: string]: unknown;
 }
 
 // ─── SHARED MUTABLE SYSTEM STATE CARRIER ──────────────────────────────────────
@@ -104,11 +97,6 @@ export interface LspState {
   languageId: string;
   /** Primary working file path tracking project workspaces */
   rootUri: string;
-  /**
-   * Server-specific initialize payload (from connect options /
-   * extension resolveOptions.initializationOptions).
-   */
-  initializationOptions: Record<string, unknown>;
   /** Unprocessed data string buffer collecting fragmented raw stream segments */
   buffer: string;
   /** Active binary decoder translating incoming raw character values uniformly */
@@ -140,7 +128,6 @@ export function createInitialState(): LspState {
 
     languageId: '',
     rootUri: 'file:///sdcard',
-    initializationOptions: {},
     buffer: '',
     decoder: new TextDecoder('utf-8'),
 

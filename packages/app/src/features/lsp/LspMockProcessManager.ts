@@ -1,3 +1,4 @@
+
 // src/features/lsp/LspMockProcessManager.ts
 /**
  * Manages the execution lifecycle and active configurations of simulated
@@ -85,15 +86,22 @@ export class LspMockProcessManager {
     }
 
     /**
+     * Mirror LspProcessManager.sharePort — reuse active process for sibling language ids
+     * (e.g. typescript → javascript / tsx).
+     */
+    public sharePort(fromLanguage: string, toLanguage: string): void {
+        if (this.activeLanguage === fromLanguage || this.aliveLanguages.has(fromLanguage)) {
+            this.aliveLanguages.add(toLanguage);
+            this.activeLanguage = toLanguage;
+            console.log(`[Web-Mock] sharePort(${fromLanguage} → ${toLanguage})`);
+        }
+    }
+
+    /**
      * Accesses internal tracking flags to safely resolve the active operational language context.
      */
     public getActiveLanguage(): string | null {
         return this.activeLanguage;
-    }
-  
-
-   public sharePort(fromLanguage: string, toLanguage: string): void {
-        console.log(`[Web-Mock] from(${fromLanguage}) to ${toLanguage}`);
     }
 }
 

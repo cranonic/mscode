@@ -136,17 +136,11 @@ export function getWorkspaceName(rootUri: string): string {
  * @param state The central language server operational state cache context.
  */
 export async function initializeLsp(state: LspState): Promise<void> {
-  // Merge host defaults with extension-provided options (e.g. tsserver.path)
-  const initializationOptions: Record<string, unknown> = {
-    clangdFileStatus: true,
-    ...(state.initializationOptions ?? {}),
-  };
-
   const result = await sendRequest(state, 'initialize', {
     processId: null,
     rootUri: state.rootUri,
     capabilities: CLIENT_CAPABILITIES,
-    initializationOptions,
+    initializationOptions: { clangdFileStatus: true },
     workspaceFolders: [{ uri: state.rootUri, name: getWorkspaceName(state.rootUri) }],
   });
 
