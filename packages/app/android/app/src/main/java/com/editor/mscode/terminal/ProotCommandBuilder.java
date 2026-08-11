@@ -34,7 +34,9 @@ public class ProotCommandBuilder {
         this.rootfsPath   = mgr.getRootfsPath();
         this.filesDir     = mgr.getFilesDir();
         this.nativeLibDir = nativeLibDir;
-        this.tmpPath      = mgr.getTmpPath();
+        // Prefer Alpine guest tmp; fall back to host filesDir/tmp
+        File alpineTmp = new File(this.rootfsPath, "tmp");
+        this.tmpPath = alpineTmp.getAbsolutePath();
     }
 
     // ─── Terminal session command ─────────────────────────────────────────────
@@ -102,8 +104,8 @@ public class ProotCommandBuilder {
         map.put("LANG",            "C.UTF-8");
         map.put("PATH",            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
         map.put("MSCODE_EXEC_MODE", "proot");
-        // ONLY nativeLibraryDir. Android will NOT load .so from filesDir.
-        map.put("LD_LIBRARY_PATH", nativeLibDir);
+        // nativeLibDir for loaders; filesDir for libtalloc.so.2 installed at runtime
+        map.put("LD_LIBRARY_PATH", filesDir + ":" + nativeLibDir);
         return map;
     }
 
@@ -158,7 +160,7 @@ public class ProotCommandBuilder {
         env.add("PS1=\\[\\e[1;32m\\]\\h\\[\\e[0m\\]:\\[\\e[1;34m\\]$(pwd | awk -F/ '{if (NF>3) print \"../\"$(NF-1)\"/\"$NF; else if (NF>=2) print $(NF-1)\"/\"$NF; else print $0}')\\[\\e[0m\\]\\$ ");
         env.add("TMPDIR=" + tmpPath);
         env.add("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
-        env.add("LD_LIBRARY_PATH=" + nativeLibDir);
+        env.add("LD_LIBRARY_PATH=" + filesDir + ":" + nativeLibDir);
         env.add("MSCODE_EXEC_MODE=proot");
     }
 }

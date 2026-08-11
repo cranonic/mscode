@@ -317,32 +317,61 @@ public class RootfsManager {
         }
     }
 
+    /** True when Alpine minirootfs is extracted under alpine_core. */
+    public boolean isAlpineReady() {
+        return new File(getRootfsPath(), "etc/alpine-release").exists();
+    }
+
     /**
-     * Ensures Alpine rootfs is extracted (legacy — skip for native).
+     * Ensures Alpine rootfs is extracted for proot sessions.
+     * Priority: already extracted → assets alpine-&lt;arch&gt;.zip → CDN download.
      */
     public void ensureRootfs(String arch) throws IOException {
         String rootfsPath = getRootfsPath();
 
-        if (new File(rootfsPath, "etc/alpine-release").exists()) return;
-
-        String assetName = "alpine-" + arch + ".zip";
-        if (hasAsset(assetName)) {
-            Log.i(TAG, "Extracting bundled Alpine (" + assetName + ")...");
-            extractAlpineFromAsset(assetName, rootfsPath);
+        if (isAlpineReady()) {
+            Log.i(TAG, "Alpine rootfs ready: " + rootfsPath);
             return;
         }
 
-        String alpineUrl = arch.equals("aarch64")
+        String a = normalizeAlpineArch(arch);
+        String assetName = "alpine-" + a + ".zip";
+        if (hasAsset(assetName)) {
+            Log.i(TAG, "Extracting bundled Alpine (" + assetName + ")...");
+            extractAlpineFromAsset(assetName, rootfsPath);
+            if (!isAlpineReady()) {
+                throw new IOException(
+                    "Extracted " + assetName + " but etc/alpine-release missing under " + rootfsPath);
+            }
+            Log.i(TAG, "Alpine rootfs extracted from assets → " + rootfsPath);
+            return;
+        }
+
+        String alpineUrl = "aarch64".equals(a)
             ? "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/aarch64/alpine-minirootfs-3.23.3-aarch64.tar.gz"
             : "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-minirootfs-3.21.0-x86_64.tar.gz";
 
-        Log.i(TAG, "Downloading Alpine rootfs for " + arch + "...");
+        Log.i(TAG, "No asset " + assetName + " — downloading Alpine rootfs for " + a + "...");
         File tarGz = new File(filesDir, "alpine.tar.gz");
         downloadFile(alpineUrl, tarGz);
         new File(rootfsPath).mkdirs();
         extractTarGz(rootfsPath, tarGz);
         //noinspection ResultOfMethodCallIgnored
         tarGz.delete();
+        if (!isAlpineReady()) {
+            throw new IOException("Downloaded Alpine but etc/alpine-release missing under " + rootfsPath);
+        }
+    }
+
+    /** Map Android ABI → Alpine arch name used in alpine-aarch64.zip assets. */
+    private static String normalizeAlpineArch(String arch) {
+        if (arch == null) return "aarch64";
+        String a = arch.toLowerCase();
+        if ("arm64".equals(a) || "arm64-v8a".equals(a) || "aarch64".equals(a)) return "aarch64";
+        if ("x86_64".equals(a) || "amd64".equals(a)) return "x86_64";
+        if ("x86".equals(a) || "i686".equals(a)) return "x86";
+        if (a.startsWith("arm")) return "armv7";
+        return a;
     }
 
     // ─── Hostname helpers ─────────────────────────────────────────────────────

@@ -154,7 +154,10 @@ public class TerminalForegroundService extends Service {
     private final Object rootfsLock = new Object();
 
     private RootfsManager    rootfs;
-    private TerminalCommandBuilder builder;
+    /** Native (Bionic + $PREFIX) session builder. */
+    private TerminalCommandBuilder nativeBuilder;
+    /** Alpine proot session builder. */
+    private ProotCommandBuilder prootBuilder;
     private InitScriptWriter  scriptWriter;
 
     private PowerManager.WakeLock wakeLock;
@@ -209,9 +212,8 @@ public class TerminalForegroundService extends Service {
     // ─── Public API ───────────────────────────────────────────────────────────
 
     public void initBuilder(String nativeLibDir) {
-        this.builder = new TerminalCommandBuilder(rootfs, nativeLibDir);
-        // Default: native mode (no proot)
-        // pure native always — no setUseNative needed
+        this.nativeBuilder = new TerminalCommandBuilder(rootfs, nativeLibDir);
+        this.prootBuilder  = new ProotCommandBuilder(rootfs, nativeLibDir);
     }
 
     /**
@@ -238,41 +240,66 @@ public class TerminalForegroundService extends Service {
         if (sessions.containsKey(sessionId))
             throw new IllegalStateException("Session '" + sessionId + "' already exists");
 
-        if (builder == null)
+        if (nativeBuilder == null || prootBuilder == null)
             throw new IllegalStateException("Builder not initialised — call initBuilder() first");
 
         String mode = ("proot".equals(execType)) ? "proot" : "native";
-
-        // Native bootstrap always (proot Alpine download is separate / future)
-        synchronized (rootfsLock) {
-            rootfs.ensureNativeBinaries();
-            try {
-                if (!rootfs.isBootstrapReady()) {
-                    rootfs.ensureBootstrap(arch);
-                }
-            } catch (Exception e) {
-                emitLog("Bootstrap not ready yet: " + e.getMessage()
-                        + " (shell still works with toybox)");
-            }
-            // TODO: if mode==proot, ensureAlpineRootfs(arch) downloads minirootfs from network
-        }
-
-        // Cwd: use Android path directly (no proot mapping yet)
-        String cwd = (projectPath != null && new File(projectPath).isDirectory())
-            ? projectPath
-            : rootfs.getHomePath();
-
-        // Thin per-session init (sources cached mscode_env.sh — fast)
+        String[] cmd;
+        String[] env;
+        String cwd;
         String initPath = rootfs.getFilesDir() + "/init_" + sessionId + ".sh";
-        scriptWriter.write(initPath, cwd);
+        String workDir;
 
-        // For now both modes use native builder; proot command builder wires later
-        String[] cmd = builder.buildSessionCommand(initPath);
-        String[] env = builder.buildSessionEnv(initPath);
+        if ("proot".equals(mode)) {
+            // ── Alpine via proot ──────────────────────────────────────────────
+            synchronized (rootfsLock) {
+                rootfs.ensureBinaries(arch);
+                rootfs.ensureRootfs(arch);
+                rootfs.ensureTmpDir();
+                // Alpine guest tmp under rootfs
+                new File(rootfs.getRootfsPath(), "tmp").mkdirs();
+            }
 
-        emitLog("🚀 Starting [" + sessionId + "] execType=" + mode + " " + type
-                + " PREFIX=" + rootfs.getPrefixPath()
-                + " → " + cwd);
+            cwd = (projectPath != null && new File(projectPath).isDirectory())
+                ? projectPath
+                : "/root";
+
+            scriptWriter.writeProot(initPath, cwd);
+            cmd = prootBuilder.buildSessionCommand(initPath);
+            env = prootBuilder.buildSessionEnv();
+            // proot itself runs from host filesDir (loaders resolve here)
+            workDir = rootfs.getFilesDir();
+
+            emitLog("🚀 Starting [" + sessionId + "] PROOT Alpine " + type
+                    + " rootfs=" + rootfs.getRootfsPath()
+                    + " → " + cwd);
+        } else {
+            // ── Native Bionic + $PREFIX ───────────────────────────────────────
+            synchronized (rootfsLock) {
+                rootfs.ensureNativeBinaries();
+                try {
+                    if (!rootfs.isBootstrapReady()) {
+                        rootfs.ensureBootstrap(arch);
+                    }
+                } catch (Exception e) {
+                    emitLog("Bootstrap not ready yet: " + e.getMessage()
+                            + " (shell still works with toybox)");
+                }
+            }
+
+            cwd = (projectPath != null && new File(projectPath).isDirectory())
+                ? projectPath
+                : rootfs.getHomePath();
+
+            scriptWriter.write(initPath, cwd);
+            cmd = nativeBuilder.buildSessionCommand(initPath);
+            env = nativeBuilder.buildSessionEnv(initPath);
+            workDir = rootfs.getHomePath();
+
+            emitLog("🚀 Starting [" + sessionId + "] NATIVE " + type
+                    + " PREFIX=" + rootfs.getPrefixPath()
+                    + " → " + cwd);
+        }
 
         TerminalSession session = new TerminalSession(sessionId);
         session.type = type;
@@ -280,9 +307,8 @@ public class TerminalForegroundService extends Service {
         sessions.put(sessionId, session);
 
         int[] pids = new int[1];
-        // Working directory = home (init script will cd to project)
         session.ptyFd = PtyEngine.createSubprocess(cmd, env,
-                                                    rootfs.getHomePath(),
+                                                    workDir,
                                                     pids, rows, cols);
         if (session.ptyFd < 0) {
             sessions.remove(sessionId);
@@ -429,7 +455,7 @@ public class TerminalForegroundService extends Service {
      * Runs a command with native toybox ash -c (no PTY).
      */
     public BackgroundResult backgroundExecute(String command) throws Exception {
-        if (builder == null)
+        if (nativeBuilder == null)
             throw new IllegalStateException("Builder not initialised");
 
         // Ensure dirs exist
@@ -437,11 +463,11 @@ public class TerminalForegroundService extends Service {
             rootfs.ensureNativeBinaries();
         }
 
-        String[] cmd = builder.buildBackgroundCommand(command);
+        String[] cmd = nativeBuilder.buildBackgroundCommand(command);
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.environment().clear();
-        pb.environment().putAll(builder.buildBackgroundEnvMap());
+        pb.environment().putAll(nativeBuilder.buildBackgroundEnvMap());
         pb.directory(new File(rootfs.getHomePath()));
         pb.redirectErrorStream(true);
 
@@ -559,7 +585,7 @@ public class TerminalForegroundService extends Service {
      * Command runs under native toybox ash -c.
      */
     public int spawnProcessServer(String shellCommand) throws Exception {
-        if (builder == null)
+        if (nativeBuilder == null)
             throw new IllegalStateException("Builder not initialised");
 
         synchronized (rootfsLock) {
@@ -572,8 +598,8 @@ public class TerminalForegroundService extends Service {
         String rewritten = rewriteLspCommand(shellCommand);
         emitLog("🔌 LSP cmd: " + rewritten);
 
-        String[] cmd = builder.buildBackgroundCommand(rewritten);
-        java.util.Map<String, String> envMap = builder.buildBackgroundEnvMap();
+        String[] cmd = nativeBuilder.buildBackgroundCommand(rewritten);
+        java.util.Map<String, String> envMap = nativeBuilder.buildBackgroundEnvMap();
 
         int port = ProcessServer.findFreePort();
         ProcessServer server = new ProcessServer(port, cmd, envMap);
