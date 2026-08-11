@@ -65,7 +65,7 @@ const trimSeparators = (items: MenuItem[]): MenuItem[] =>
       item.type !== 'separator' || arr.slice(idx + 1).some(r => r.type !== 'separator')
     );
 
-export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested, isClosing, openSide = 'right' }) => {
+export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested, isClosing, openSide = 'left' }) => {
   // Selector (not the whole store) so this component only re-renders when
   // closeMenu itself changes identity — not on every unrelated store mutation
   // (e.g. registerMenuItem calls happening anywhere else in the app).

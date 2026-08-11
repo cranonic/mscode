@@ -111,10 +111,35 @@ public final class BashEnvWriter {
         b.append("clang() { [ -f \"$PREFIX/bin/clang\" ] || return 127; _mscode_proot \"$PREFIX/bin/clang\" \"$@\"; }\n");
         b.append("_mscode_clangxx() { _mscode_proot \"$PREFIX/bin/clang++\" \"$@\"; }\n");
         b.append("alias 'clang++'=_mscode_clangxx\n");
-        b.append("elf() { local _b=\"$1\"; shift; [ -f \"$_b\" ] || return 127; if [ -n \"$MSCODE_LINKER\" ]; then \"$MSCODE_LINKER\" \"$_b\" \"$@\"; else \"$_b\" \"$@\"; fi; }\n");
+        // Full-ish elf: shebang scripts (npm) need node rewrite, not raw linker on the script
+        b.append("elf() {\n");
+        b.append("  local _b=\"$1\"; shift; [ -f \"$_b\" ] || return 127\n");
+        b.append("  local _hd; _hd=$(head -c 2 \"$_b\" 2>/dev/null)\n");
+        b.append("  if [ \"$_hd\" = '#!' ]; then\n");
+        b.append("    local _sb; _sb=$(head -n 1 \"$_b\" 2>/dev/null)\n");
+        b.append("    if [ -f \"$PREFIX/bin/node\" ] && case \"$_sb\" in *node*|*nodejs*) true;; *) false;; esac; then\n");
+        b.append("      if [ -n \"$MSCODE_LINKER\" ]; then \"$MSCODE_LINKER\" \"$PREFIX/bin/node\" \"$_b\" \"$@\"; else \"$PREFIX/bin/node\" \"$_b\" \"$@\"; fi\n");
+        b.append("      return $?\n");
+        b.append("    fi\n");
+        b.append("    if [ -f \"$PREFIX/bin/bash\" ] && case \"$_sb\" in *bash*) true;; *) false;; esac; then\n");
+        b.append("      if [ -n \"$MSCODE_LINKER\" ]; then \"$MSCODE_LINKER\" \"$PREFIX/bin/bash\" \"$_b\" \"$@\"; else \"$PREFIX/bin/bash\" \"$_b\" \"$@\"; fi\n");
+        b.append("      return $?\n");
+        b.append("    fi\n");
+        b.append("    /system/bin/sh \"$_b\" \"$@\"; return $?\n");
+        b.append("  fi\n");
+        b.append("  if [ -n \"$MSCODE_LINKER\" ]; then \"$MSCODE_LINKER\" \"$_b\" \"$@\"; else \"$_b\" \"$@\"; fi\n");
+        b.append("}\n");
 
         for (String a : ToyboxAppletsFragment.TOYBOX_APPLETS) {
             b.append(a).append("() { bb ").append(a).append(" \"$@\"; }\n");
+        }
+
+        // Critical node tooling first
+        for (String crit : new String[] { "node", "npm", "npx", "python", "python3", "pip", "pip3" }) {
+            File critFile = new File(prefix, "bin/" + crit);
+            if (critFile.isFile() || (bins != null && fileNamed(bins, crit))) {
+                b.append(crit).append("() { elf \"$PREFIX/bin/").append(crit).append("\" \"$@\"; }\n");
+            }
         }
 
         if (bins != null) {
@@ -123,6 +148,9 @@ public final class BashEnvWriter {
                 String name = binFile.getName();
                 if (!ShellNameUtil.isValidShellName(name)) continue;
                 if ("clang".equals(name) || "clang++".equals(name)) continue;
+                if ("node".equals(name) || "npm".equals(name) || "npx".equals(name)
+                        || "python".equals(name) || "python3".equals(name)
+                        || "pip".equals(name) || "pip3".equals(name)) continue;
                 String safePath = ShellNameUtil.shellSingleQuote(binFile.getAbsolutePath());
                 b.append(name).append("() { elf '").append(safePath).append("' \"$@\"; }\n");
                 if (++wrapped > 400) break;
@@ -139,6 +167,14 @@ public final class BashEnvWriter {
 
         // readline inputrc — soft-wrap long lines (Termux-style, no '<' scroll marker)
         writeInputrc(etc);
+    }
+
+    private static boolean fileNamed(File[] bins, String name) {
+        if (bins == null || name == null) return false;
+        for (File f : bins) {
+            if (f != null && name.equals(f.getName())) return true;
+        }
+        return false;
     }
 
     /**

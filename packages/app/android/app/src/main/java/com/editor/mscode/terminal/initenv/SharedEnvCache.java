@@ -48,7 +48,7 @@ public class SharedEnvCache {
 
     private String computeEnvStamp() {
         StringBuilder s = new StringBuilder();
-        s.append("v9|"); // bump when PkgShellFragment / env fragments change
+        s.append("v10|"); // bump when PkgShellFragment / env fragments change (npm/elf fix)
         s.append(rootfs.isBootstrapReady() ? "1" : "0").append('|');
         s.append(rootfs.getToyboxPath()).append('|');
         s.append(rootfs.getNativeLibDir()).append('|');
