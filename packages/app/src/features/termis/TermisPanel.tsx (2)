@@ -4,8 +4,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useTermisStore } from './store/termisStore';
 import { useTerminalStore } from './components/terminal/store/terminalStore';
 import type { ExecMode } from './components/terminal';
-import { applyTerminalPolicy, TERMINAL_CONFIG } from './components/terminal';
-import { useSettingsStore } from '@/features/settings/store/settingsStore';
 import { useExplorerStore } from '@/features/explorer/store/exploreStore';
 import { OutputPanel } from './components/output/components/OutputPanel';
 import { ProblemsPanel } from './components/problems/ProblemsPanel';
@@ -40,16 +38,6 @@ export const TermisPanel: React.FC<{ mode?: 'panel' | 'fullscreen' }> = ({ mode 
 
   const openMenuDirect = useMenuStore(s => s.openMenuDirect);
   const workspacePath = useExplorerStore(s => s.workspacePath);
-  const settings = useSettingsStore(s => s.settings);
-
-  // Keep runtime TERMINAL_CONFIG in sync with Settings → Terminal → Backend
-  useEffect(() => {
-    applyTerminalPolicy(settings);
-  }, [settings]);
-
-  const exclusiveMode = TERMINAL_CONFIG.EXCLUSIVE_MODE;
-  const defaultExecMode = TERMINAL_CONFIG.DEFAULT_EXEC_MODE;
-
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -129,31 +117,17 @@ export const TermisPanel: React.FC<{ mode?: 'panel' | 'fullscreen' }> = ({ mode 
     // User stays on picker conceptually — menu already closed; they can press + again
   };
 
-  /** Spawn using Settings → Default Terminal Backend (no picker). */
   const handleNewTerminal = () => {
-    void openNewTerminal(defaultExecMode);
+    void openNewTerminal('native');
   };
 
-  /**
-   * + button behaviour:
-   *  - exclusiveMode ON  → spawn defaultExecMode directly (no menu)
-   *  - exclusiveMode OFF → show Native / PRoot picker (both allowed side-by-side)
-   */
-  const handlePlusClick = (e: React.MouseEvent) => {
+  const openNewTerminalMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (isSwitchingMode) {
       setStatusToast('Cleaning up other sessions… please wait.');
       return;
     }
-
-    // Exclusive: one backend only — just open the configured default
-    if (exclusiveMode) {
-      void openNewTerminal(defaultExecMode);
-      return;
-    }
-
-    // Both allowed → show picker
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const x = Math.round(rect.left);
     const y = Math.round(rect.bottom + 4);
@@ -234,13 +208,9 @@ export const TermisPanel: React.FC<{ mode?: 'panel' | 'fullscreen' }> = ({ mode 
             <>
               <button
                 type="button"
-                title={
-                  exclusiveMode
-                    ? `New Terminal (${defaultExecMode === 'proot' ? 'Linux proot' : 'Android bionic'})`
-                    : 'New Terminal — choose backend'
-                }
+                title="New Terminal"
                 disabled={isSwitchingMode}
-                onClick={handlePlusClick}
+                onClick={openNewTerminalMenu}
               >
                 <Icon name="add" size={14} />
               </button>

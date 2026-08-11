@@ -200,7 +200,7 @@ export const terminalSection: IConfigurationSection = {
       order: 50,
       tags: ['terminal', 'backend'],
       markdownDescription:
-        'Default backend for **New Terminal** (empty state / quick create).\n\n- **native** — Android bionic + Termux `$PREFIX`\n- **proot** — Alpine Linux via proot (`alpine-*.zip` assets)',
+        'Default backend for **New Terminal** (`+` / empty state).\n\n- **native** — Android bionic + Termux `$PREFIX`\n- **proot** — Alpine Linux via proot\n\nWhen **Exclusive Native / PRoot** is ON, `+` always opens this backend (no picker). When Exclusive is OFF, `+` shows a Native / PRoot menu instead.',
       enum: ['native', 'proot'],
       enumItemLabels: ['Android bionic (native)', 'Linux Alpine (proot)'],
     },
@@ -213,7 +213,7 @@ export const terminalSection: IConfigurationSection = {
       order: 51,
       tags: ['terminal', 'backend'],
       markdownDescription:
-        'When enabled, only one backend type may have live sessions. Opening the other type closes existing sessions of the previous type (with optional confirm).',
+        '**ON (default):** only one backend type may have live sessions. Opening the other type closes existing sessions of the previous type (see Confirm Before Exclusive Kill).\n\n**OFF:** both native and proot may run side-by-side. The Termis `+` button then shows a picker (Android bionic / Linux proot) instead of spawning the default only.',
     },
 
     'terminal.confirmBeforeKill': {

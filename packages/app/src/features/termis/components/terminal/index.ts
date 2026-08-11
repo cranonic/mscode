@@ -2,6 +2,7 @@
 
 export {
   TERMINAL_CONFIG,
+  applyTerminalPolicy,
   oppositeExecMode,
   type TerminalConfig,
   type ExecMode,
@@ -37,5 +38,6 @@ export { PROOT_ENV, alpineUrlForArch } from './proot/prootEnv';
 export {
   TERMINAL_SETTINGS_DEFAULTS,
   TERMINAL_SETTING_KEYS,
+  policyFromSettings,
   type TerminalSettingsSchema,
 } from './settings/terminalSettings';
