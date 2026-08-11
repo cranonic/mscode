@@ -12,6 +12,7 @@ import com.editor.mscode.terminal.PtyEngine;
 import com.editor.mscode.terminal.TerminalForegroundService;
 import com.editor.mscode.terminal.TerminalSession;
 import com.editor.mscode.terminal.ProotCommandBuilder;
+import com.editor.mscode.terminal.TerminalCommandBuilder;
 import com.editor.mscode.terminal.RootfsManager;
 
 
@@ -460,39 +461,76 @@ public class NativeTerminalPlugin extends Plugin {
     
     
     // Capacitor Plugin Wrapper for Streaming
-    
     @PluginMethod
     public void streamBackgroundExecute(PluginCall call) {
         if (!checkService(call)) return;
-        String command = call.getString("command");
+        String command   = call.getString("command");
         String sessionId = call.getString("sessionId");
-        String cwd = call.getString("cwd");
-
+        String cwd       = call.getString("cwd");
+        String execType  = call.getString("execType", "native"); // default native — was hardcoded proot before
+    
         if (command == null || sessionId == null) {
             call.reject("Must provide command and sessionId"); return;
         }
-
-        ProotCommandBuilder builder = new ProotCommandBuilder(
-            new RootfsManager(getContext()), 
-            getContext().getApplicationInfo().nativeLibraryDir
-        );
-        String[] cmd = builder.buildBackgroundCommand(command);
-        Map<String, String> env = builder.getProotEnv();
-
-        terminalService.streamBackgroundExecute(sessionId, cmd, env, cwd, new TerminalForegroundService.BackgroundProcessListener() {
-            @Override
-            public void onData(String data) {
-                JSObject ret = new JSObject();
-                ret.put("sessionId", sessionId); ret.put("data", data);
-                notifyListeners("onBackgroundData", ret);
+    
+        String arch = getArch();
+        if (arch == null) {
+            call.reject("Unsupported ABI");
+            return;
+        }
+    
+        new Thread(() -> {
+            try {
+                String[] cmd;
+                Map<String, String> env;
+    
+                if ("proot".equals(execType)) {
+                    // Legacy Alpine path — must ensure rootfs exists before using it.
+                    RootfsManager rootfsMgr = new RootfsManager(getContext());
+                    rootfsMgr.ensureBinaries(arch);
+                    rootfsMgr.ensureRootfs(arch);
+                    ProotCommandBuilder builder = new ProotCommandBuilder(
+                        rootfsMgr, getContext().getApplicationInfo().nativeLibraryDir);
+                    cmd = builder.buildBackgroundCommand(command);
+                    env = builder.getProotEnv();
+                } else {
+                    // Native (Bionic + $PREFIX) — matches what the service actually preps.
+                    TerminalCommandBuilder builder = new TerminalCommandBuilder(
+                        new RootfsManager(getContext()),
+                        getContext().getApplicationInfo().nativeLibraryDir);
+                    cmd = builder.buildBackgroundCommand(command);
+                    env = builder.buildBackgroundEnvMap();
+                }
+    
+                terminalService.streamBackgroundExecute(sessionId, cmd, env, cwd,
+                    new TerminalForegroundService.BackgroundProcessListener() {
+                        @Override
+                        public void onData(String data) {
+                            JSObject ret = new JSObject();
+                            ret.put("sessionId", sessionId); ret.put("data", data);
+                            notifyListeners("onBackgroundData", ret);
+                        }
+                        @Override
+                        public void onExit(int exitCode) {
+                            JSObject ret = new JSObject();
+                            ret.put("sessionId", sessionId); ret.put("exitCode", exitCode);
+                            notifyListeners("onBackgroundExit", ret);
+                        }
+                    });
+            } catch (Exception e) {
+                Log.e(TAG, "streamBackgroundExecute setup failed", e);
+                JSObject dataRet = new JSObject();
+                dataRet.put("sessionId", sessionId);
+                dataRet.put("data", "\n[Setup Error] " + e.getMessage() + "\n");
+                notifyListeners("onBackgroundData", dataRet);
+    
+                JSObject exitRet = new JSObject();
+                exitRet.put("sessionId", sessionId);
+                exitRet.put("exitCode", -1);
+                notifyListeners("onBackgroundExit", exitRet);
             }
-            @Override
-            public void onExit(int exitCode) {
-                JSObject ret = new JSObject();
-                ret.put("sessionId", sessionId); ret.put("exitCode", exitCode);
-                notifyListeners("onBackgroundExit", ret);
-            }
-        });
+        }, "stream-bg-setup").start();
+    
         call.resolve();
     }
 
