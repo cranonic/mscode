@@ -26,39 +26,19 @@ export const activeLspService = (isWeb ? mockLspService : realLspService) as ILs
 const activeProcessManager = isWeb ? lspMockProcessManager : realProcessManager;
 
 
-/**
- * Languages Monaco can handle alone when NO extension registered an external server.
- * If `dynamicConfigs[langId]` exists (e.g. TypeScript extension → typescript-language-server),
- * external LSP wins and Monaco diagnostics for that language are turned off.
- */
-const MONACO_FALLBACK_LANGS = new Set([
-  'javascript', 'typescript', 'javascriptreact', 'typescriptreact',
-  'json', 'html', 'css', 'scss', 'less',
+// Built-in languages handled entirely by Monaco workers
+const BUILTIN_LANGS = new Set([
+  'javascript', 'typescript', 'json', 'html', 'css', 'scss', 'less',
 ]);
-
-/** True Monaco-only (no real external server expected). */
-const MONACO_ONLY_LANGS = new Set(['json', 'html', 'css', 'scss', 'less']);
 
 let lastNotifiedLang: string | null = null;
 
 function refractorLangId(langId: string): string {
   const map: Record<string, string> = {
-    javascript: 'Js', typescript: 'Ts',
-    javascriptreact: 'Jsx', typescriptreact: 'Tsx',
-    python: 'Py', markdown: 'Md', cpp: 'C++', c: 'C',
+    javascript: 'Js', typescript: 'Ts', python: 'Py',
+    markdown: 'Md', cpp: 'C++', c: 'C',
   };
   return map[langId] ?? (langId.charAt(0).toUpperCase() + langId.slice(1));
-}
-
-function getDynamicConfig(langId: string): any | undefined {
-  const configs = (activeProcessManager as any).dynamicConfigs as Record<string, any> | undefined;
-  if (!configs) return undefined;
-  if (configs[langId]) return configs[langId];
-  // TS/JS family often shares one server registered under typescript
-  if (langId === 'typescriptreact' && configs['typescript']) return configs['typescript'];
-  if (langId === 'javascriptreact' && configs['javascript']) return configs['javascript'];
-  if (langId === 'javascript' && configs['typescript']) return configs['typescript'];
-  return undefined;
 }
 
 // ─── Real file URI from tab ────────────────────────────────────────────────────
@@ -86,22 +66,6 @@ function resolveFileUri(
   return `file:///sdcard/${tab?.title ?? 'untitled'}`;
 }
 
-/** Silence Monaco TS/JS worker when external typescript-language-server is active. */
-function disableMonacoTsDiagnostics(langId: string) {
-  const monacoLangs = monaco.languages as any;
-  if (!monacoLangs?.typescript) return;
-  const defaults =
-    langId === 'javascript' || langId === 'javascriptreact'
-      ? monacoLangs.typescript.javascriptDefaults
-      : monacoLangs.typescript.typescriptDefaults;
-  if (!defaults?.setDiagnosticsOptions) return;
-  defaults.setDiagnosticsOptions({
-    noSemanticValidation: true,
-    noSyntaxValidation: true,
-    diagnosticCodesToIgnore: [],
-  });
-}
-
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useLspSync(editorInstance: any, tabId: string) {
@@ -126,16 +90,8 @@ export function useLspSync(editorInstance: any, tabId: string) {
 
     const langId    = model.getLanguageId();
     const notifId   = `lsp-boot-${langId}`;
-    const isEnabled = settings[`lsp.${langId}.enabled`]
-      ?? settings[`lsp.${langId === 'typescriptreact' ? 'typescript' : langId === 'javascriptreact' ? 'javascript' : langId}.enabled`]
-      ?? true;
-
-    const dynamicConfig = getDynamicConfig(langId);
-    // External extension registered a server → do NOT treat as Monaco-only
-    const preferExternal = !!dynamicConfig && isEnabled;
-    const isMonacoOnly =
-      MONACO_ONLY_LANGS.has(langId) ||
-      (MONACO_FALLBACK_LANGS.has(langId) && !preferExternal);
+    const isBuiltIn = BUILTIN_LANGS.has(langId);
+    const isEnabled = settings[`lsp.${langId}.enabled`] ?? true;
 
     // ── Active tab's real file path ────────────────────────────────────────
     const activeTab  = tabs.find(t => t.id === activeTabId);
@@ -143,23 +99,20 @@ export function useLspSync(editorInstance: any, tabId: string) {
 
     // Always register the per-model URI so _getDocUri() works correctly
     // This must happen BEFORE any LSP call (connect, notifyDocumentOpen, etc.)
-    if (!isMonacoOnly) {
+    if (!isBuiltIn) {
       activeLspService.registerModelUri(model, fileUri);
     }
 
-    // 1. MONACO BUILT-IN ONLY (json/html/css, or ts/js without extension)
-    if (isMonacoOnly) {
+    // 1. BUILT-IN LANGUAGES (Monaco Workers)
+    if (isBuiltIn) {
       const monacoLangs = monaco.languages as any;
 
-      if (langId === 'javascript' || langId === 'typescript'
-          || langId === 'javascriptreact' || langId === 'typescriptreact') {
-        const defaults = (langId === 'javascript' || langId === 'javascriptreact')
+      if (langId === 'javascript' || langId === 'typescript') {
+        const defaults = langId === 'javascript'
           ? monacoLangs.typescript.javascriptDefaults
           : monacoLangs.typescript.typescriptDefaults;
 
-        const baseLang = (langId === 'javascriptreact') ? 'javascript'
-          : (langId === 'typescriptreact') ? 'typescript' : langId;
-        const isLinting = settings[`lsp.${baseLang}.linting`] ?? true;
+        const isLinting = settings[`lsp.${langId}.linting`] ?? true;
         defaults.setDiagnosticsOptions({
           noSemanticValidation: !isEnabled || !isLinting,
           noSyntaxValidation:   !isEnabled || !isLinting,
@@ -167,16 +120,13 @@ export function useLspSync(editorInstance: any, tabId: string) {
         });
 
         const currentOpts = defaults.getCompilerOptions() || {};
-        if (baseLang === 'javascript') {
+        if (langId === 'javascript') {
           defaults.setCompilerOptions({
             ...currentOpts,
             allowNonTsExtensions: true,
             noImplicitAny:    !!settings['lsp.javascript.implicitAny'],
             strictNullChecks: !!settings['lsp.javascript.strictNullChecks'],
             target: monacoLangs.typescript.ScriptTarget.ESNext,
-            jsx: monacoLangs.typescript.JsxEmit?.ReactJSX
-              ?? monacoLangs.typescript.JsxEmit?.React
-              ?? currentOpts.jsx,
           });
         } else {
           defaults.setCompilerOptions({
@@ -186,9 +136,6 @@ export function useLspSync(editorInstance: any, tabId: string) {
             noUnusedLocals:     !!settings['lsp.typescript.unusedLocals'],
             noUnusedParameters: !!settings['lsp.typescript.unusedParameters'],
             target: monacoLangs.typescript.ScriptTarget.ESNext,
-            jsx: monacoLangs.typescript.JsxEmit?.ReactJSX
-              ?? monacoLangs.typescript.JsxEmit?.React
-              ?? currentOpts.jsx,
           });
         }
         defaults.setEagerModelSync(true);
@@ -256,33 +203,20 @@ export function useLspSync(editorInstance: any, tabId: string) {
         });
       }
 
-      // Disconnect external LSP only when this language is truly Monaco-only
-      // (e.g. switched from Python → JSON). Do not kill a TS external server
-      // while viewing another Monaco-only tab of a different family — stopServer()
-      // without args kills ALL; only stop if current external lang is unrelated.
+      // Disconnect any external LSP if we switched to a built-in
       if (activeLspService.isConnected) {
-        const currentLang = activeProcessManager.getActiveLanguage?.() ?? null;
-        if (currentLang && !MONACO_FALLBACK_LANGS.has(currentLang)) {
-          activeLspService.disconnect();
-          activeProcessManager.stopServer(currentLang);
-          lastNotifiedLang = null;
-        }
+        activeLspService.disconnect();
+        activeProcessManager.stopServer();
+        lastNotifiedLang = null;
       }
       return;
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // 2. EXTERNAL LANGUAGES (Python, C/C++, Rust, TypeScript extension, …)
+    // 2. EXTERNAL LANGUAGES (Python, C/C++, Rust, …)
     // ══════════════════════════════════════════════════════════════════════
 
-    // Avoid double diagnostics: mute Monaco TS worker when external server owns TS/JS
-    if (
-      langId === 'typescript' || langId === 'javascript'
-      || langId === 'typescriptreact' || langId === 'javascriptreact'
-    ) {
-      disableMonacoTsDiagnostics(langId);
-    }
-
+    const dynamicConfig = (activeProcessManager as any).dynamicConfigs?.[langId];
     const currentLang = activeProcessManager.getActiveLanguage?.() ?? null;
 
     if (!dynamicConfig || !isEnabled) {
@@ -296,6 +230,7 @@ export function useLspSync(editorInstance: any, tabId: string) {
       return;
     }
 
+  
     // Same language but WebSocket died (app backgrounded / Android killed process)
     // → drop stale port cache so startServer respawns instead of reconnecting dead port.
     if (currentLang === langId && !activeLspService.isConnected) {
@@ -303,27 +238,24 @@ export function useLspSync(editorInstance: any, tabId: string) {
       activeProcessManager.stopServer?.(langId);
     }
 
-    // Same TS family (typescript ↔ javascript ↔ tsx) sharing one process
-    const sameFamily = (a: string | null, b: string) => {
-      if (!a) return false;
-      if (a === b) return true;
-      const tsFamily = new Set(['typescript', 'typescriptreact', 'javascript', 'javascriptreact']);
-      return tsFamily.has(a) && tsFamily.has(b);
-    };
-
     // ══════════════════════════════════════════════════════════════════════
-    // SAME language / family, server process running, WebSocket connected
+    // SAME language, server process running, WebSocket connected
+    //    (may still be initializing — race window handled via waitUntilReady)
+    //    → DON'T reconnect. Never call connect() while a connection is live.
     // ══════════════════════════════════════════════════════════════════════
     if (
-      sameFamily(currentLang, langId) &&
-      activeLspService.isConnected
+      currentLang === langId &&
+      activeLspService.isConnected  // WebSocket is open (even if handshake ongoing)
     ) {
       activeLspService.registerModelUri(model, fileUri);
 
       if (activeLspService.initialized) {
+        // Handshake already done — send didOpen immediately
         activeLspService.notifyDocumentOpen(model);
         console.log(`[LSP] Tab switch within ${langId} — didOpen sent, no reconnect`);
       } else {
+        // WebSocket is open but handshake still running (rare race window).
+        // Wait for it, THEN send didOpen. Do NOT call connect() again.
         console.log(`[LSP] Tab switch within ${langId} — waiting for handshake…`);
         activeLspService.waitUntilReady()
           .then(() => {
@@ -334,19 +266,20 @@ export function useLspSync(editorInstance: any, tabId: string) {
             console.warn(`[LSP] waitUntilReady rejected during tab switch:`, e);
           });
       }
-      return;
+      return; // sync return to useEffect, no boot()
     }
 
     // DIFFERENT language OR server not running → full boot
-    if (currentLang && !sameFamily(currentLang, langId)) {
+    if (currentLang && currentLang !== langId) {
       activeLspService.disconnect();
+      // Kill the previous language's native process + WS server
       activeProcessManager.stopServer(currentLang);
     }
 
     // Output channel for this language server's logs
     const channelName   = `LSP: ${refractorLangId(langId)}`;
     useOutputStore.getState().createChannel(channelName);
-
+    
     const outputChannel = {
       appendLine: (text: string) => {
         useOutputStore.getState().appendLog(channelName, `${text}\n`);
@@ -370,11 +303,6 @@ export function useLspSync(editorInstance: any, tabId: string) {
     const boot = async () => {
       try {
         outputChannel.appendLine(`[INFO] Starting ${langId} language server…`);
-        if (preferExternal && MONACO_FALLBACK_LANGS.has(langId)) {
-          outputChannel.appendLine(
-            `[INFO] Extension registered external server — skipping Monaco Native for ${langId}.`,
-          );
-        }
 
         useStatusBarStore.getState().updateItem('lsp-status', {
           label: `Starting ${refractorLangId(langId)}…`, icon: 'sync', spin: true,
@@ -386,29 +314,11 @@ export function useLspSync(editorInstance: any, tabId: string) {
           message: 'Checking dependencies…',
         });
 
-        // Prefer primary key the extension registered under
-        const startKey =
-          (activeProcessManager as any).dynamicConfigs?.[langId]
-            ? langId
-            : (langId === 'typescriptreact' || langId === 'javascript' || langId === 'javascriptreact')
-              && (activeProcessManager as any).dynamicConfigs?.['typescript']
-              ? 'typescript'
-              : langId;
-
-        const port = await activeProcessManager.startServer(startKey);
+        const port = await activeProcessManager.startServer(langId);
         if (!port) {
           outputChannel.appendLine(`[ERROR] Failed to start ${langId} server process.`);
           bootingRef.current = false;
           return;
-        }
-
-        // Share port across TS/JS family so tab switches reuse the process
-        if (startKey === 'typescript' || startKey === 'javascript') {
-          for (const sib of ['typescript', 'typescriptreact', 'javascript', 'javascriptreact']) {
-            if (sib !== startKey) {
-              activeProcessManager.sharePort?.(startKey, sib);
-            }
-          }
         }
 
         outputChannel.appendLine(`[INFO] Server process on port ${port}. Connecting…`);
@@ -420,28 +330,23 @@ export function useLspSync(editorInstance: any, tabId: string) {
           return lastSlash > 0 ? lspFileUri.substring(0, lastSlash) : 'file:///sdcard';
         })();
 
-        const settingsLang =
-          langId === 'typescriptreact' ? 'typescript'
-            : langId === 'javascriptreact' ? 'javascript'
-              : langId;
-
         let lspOptions: Record<string, any> = {
-          hover:               settings[`lsp.${settingsLang}.hover`]               ?? true,
-          completion:          settings[`lsp.${settingsLang}.completion`]          ?? true,
-          linting:             settings[`lsp.${settingsLang}.linting`]             ?? true,
-          references:          settings[`lsp.${settingsLang}.references`]          ?? true,
-          documentHighlight:   settings[`lsp.${settingsLang}.documentHighlight`]   ?? true,
-          documentSymbol:      settings[`lsp.${settingsLang}.documentSymbol`]      ?? true,
-          codeActions:         settings[`lsp.${settingsLang}.codeActions`]         ?? true,
-          codeLens:            settings[`lsp.${settingsLang}.codeLens`]            ?? false,
-          foldingRange:        settings[`lsp.${settingsLang}.foldingRange`]        ?? true,
-          inlayHints:          settings[`lsp.${settingsLang}.inlayHints`]
-            ?? settings['typescript.inlayHints.enabled']
-            ?? true,
-          semanticTokens:      settings[`lsp.${settingsLang}.semanticHighlighting`] ?? true,
-          onTypeFormatting:    settings[`lsp.${settingsLang}.formatOnType`]        ?? false,
+          hover:               settings[`lsp.${langId}.hover`]               ?? true,
+          completion:          settings[`lsp.${langId}.completion`]          ?? true,
+          linting:             settings[`lsp.${langId}.linting`]             ?? true,
+          references:          settings[`lsp.${langId}.references`]          ?? true,
+          documentHighlight:   settings[`lsp.${langId}.documentHighlight`]   ?? true,
+          documentSymbol:      settings[`lsp.${langId}.documentSymbol`]      ?? true,
+          codeActions:         settings[`lsp.${langId}.codeActions`]         ?? true,
+          codeLens:            settings[`lsp.${langId}.codeLens`]            ?? false,
+          foldingRange:        settings[`lsp.${langId}.foldingRange`]        ?? true,
+          inlayHints:          settings[`lsp.${langId}.inlayHints`]          ?? false,
+          semanticTokens:      settings[`lsp.${langId}.semanticHighlighting`] ?? true,
+          onTypeFormatting:    settings[`lsp.${langId}.formatOnType`]        ?? false,
           colorProvider:       true,
           rootUri,
+          // fileUri not passed here — per-model URIs are registered via
+          //    registerModelUri() above, before boot() is called.
         };
 
         if (typeof dynamicConfig.resolveOptions === 'function') {
@@ -472,7 +377,6 @@ export function useLspSync(editorInstance: any, tabId: string) {
         outputChannel.appendLine(`[INFO] ${refractorLangId(langId)} LSP ready.`);
         outputChannel.show();
 
-        activeProcessManager.markAlive?.(startKey);
         activeProcessManager.markAlive?.(langId);
 
         useStatusBarStore.getState().updateItem('lsp-status', {
@@ -534,5 +438,5 @@ export function useLspSync(editorInstance: any, tabId: string) {
       bootingRef.current = false;
     };
 
-  }, [editorInstance, settings, activeTabId, tabId, tabs]);
+  }, [editorInstance, settings, activeTabId, tabId]);
 }
