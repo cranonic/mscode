@@ -643,9 +643,13 @@ public class TerminalForegroundService extends Service {
                  + "fi";
         }
 
-        // typescript-language-server — need a real tsserver.js.
-        // Device logs: typescript@7.0.2 installed but only LICENSE/README (no lib/tsserver.js).
-        // Pin typescript@5.x which ships lib/tsserver.js; search broadly after install.
+        // typescript-language-server needs classic lib/tsserver.js.
+        // TypeScript 7 (npm "typescript@7") is native Go and REMOVED tsserver.js
+        // (see MS blog / GitHub issues). Use @typescript/typescript6 compat package
+        // which still ships the JS language service.
+        // Refs:
+        //  - https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/
+        //  - https://github.com/mastra-ai/mastra/issues/19601
         if (s.startsWith("typescript-language-server") || s.contains("typescript-language-server")) {
             String jsMjs = prefix + "/lib/node_modules/typescript-language-server/lib/cli.mjs";
             String jsJs  = prefix + "/lib/node_modules/typescript-language-server/lib/cli.js";
@@ -654,8 +658,7 @@ public class TerminalForegroundService extends Service {
                  + "  for c in "
                  + "    \"$PREFIX/lib/node_modules/typescript/lib/tsserver.js\" "
                  + "    \"$PREFIX/node_modules/typescript/lib/tsserver.js\" "
-                 + "    \"$(npm root -g 2>/dev/null)/typescript/lib/tsserver.js\" "
-                 + "    \"$HOME/.npm-global/lib/node_modules/typescript/lib/tsserver.js\"; do "
+                 + "    \"$(npm root -g 2>/dev/null)/typescript/lib/tsserver.js\"; do "
                  + "    [ -f \"$c\" ] && TS=\"$c\" && break; "
                  + "  done; "
                  + "  if [ -z \"$TS\" ]; then "
@@ -665,17 +668,19 @@ public class TerminalForegroundService extends Service {
                  + "resolve_ts; "
                  + "echo \"[LSP] resolved tsserver=$TS exists=$([ -n \"$TS\" ] && [ -f \"$TS\" ] && echo yes || echo no)\" >&2; "
                  + "echo \"[LSP] npm root -g=$(npm root -g 2>/dev/null) PREFIX=$PREFIX\" >&2; "
-                 + "echo \"[LSP] typescript package top: $(ls \"$PREFIX/lib/node_modules/typescript\" 2>&1 | head -8)\" >&2; "
+                 + "echo \"[LSP] typescript top: $(ls \"$PREFIX/lib/node_modules/typescript\" 2>&1 | head -8)\" >&2; "
                  + "if [ -z \"$TS\" ] || [ ! -f \"$TS\" ]; then "
-                 + "  echo \"[LSP] auto-install: typescript@5.7.3 + typescript-language-server (pin 5.x for tsserver.js)\" >&2; "
+                 + "  echo \"[LSP] TS7 has no tsserver.js — installing @typescript/typescript6 (classic JS API)\" >&2; "
                  + "  npm uninstall -g --prefix \"$PREFIX\" typescript 2>/dev/null; "
-                 + "  npm install -g --prefix \"$PREFIX\" typescript@5.7.3 typescript-language-server@latest >&2; "
+                 + "  npm install -g --prefix \"$PREFIX\" "
+                 + "    \"typescript@npm:@typescript/typescript6@^6.0.2\" "
+                 + "    typescript-language-server@latest >&2; "
                  + "  resolve_ts; "
                  + "  echo \"[LSP] after install tsserver=$TS exists=$([ -n \"$TS\" ] && [ -f \"$TS\" ] && echo yes || echo no)\" >&2; "
-                 + "  echo \"[LSP] lib dir: $(ls \"$PREFIX/lib/node_modules/typescript/lib\" 2>&1 | head -10)\" >&2; "
+                 + "  echo \"[LSP] lib dir: $(ls \"$PREFIX/lib/node_modules/typescript/lib\" 2>&1 | head -12)\" >&2; "
                  + "fi; "
                  + "if [ -z \"$TS\" ] || [ ! -f \"$TS\" ]; then "
-                 + "  echo \"[LSP] typescript STILL missing tsserver.js\" >&2; "
+                 + "  echo \"[LSP] STILL no tsserver.js — try: npm i -g --prefix $PREFIX typescript@5.9\" >&2; "
                  + "  npm list -g --prefix \"$PREFIX\" --depth=0 >&2; "
                  + "  find \"$PREFIX\" -name 'tsserver.js' 2>/dev/null | head -5 >&2; "
                  + "  exit 1; "
