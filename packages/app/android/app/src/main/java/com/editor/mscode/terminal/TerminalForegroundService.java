@@ -643,13 +643,11 @@ public class TerminalForegroundService extends Service {
                  + "fi";
         }
 
-        // typescript-language-server needs classic lib/tsserver.js.
-        // TypeScript 7 (npm "typescript@7") is native Go and REMOVED tsserver.js
-        // (see MS blog / GitHub issues). Use @typescript/typescript6 compat package
-        // which still ships the JS language service.
-        // Refs:
-        //  - https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/
-        //  - https://github.com/mastra-ai/mastra/issues/19601
+        // typescript-language-server needs classic lib/tsserver.js (not TS7 native).
+        // After TLS starts it spawns a child `node tsserver.js`. On Android
+        // $PREFIX/bin/node often must run via MSCODE_LINKER; child_process.spawn
+        // does not use shell functions, so we put a linker shim first on PATH.
+        // Also avoid huge maxTsServerMemory (set in initOptions from JS).
         if (s.startsWith("typescript-language-server") || s.contains("typescript-language-server")) {
             String jsMjs = prefix + "/lib/node_modules/typescript-language-server/lib/cli.mjs";
             String jsJs  = prefix + "/lib/node_modules/typescript-language-server/lib/cli.js";
@@ -668,23 +666,31 @@ public class TerminalForegroundService extends Service {
                  + "resolve_ts; "
                  + "echo \"[LSP] resolved tsserver=$TS exists=$([ -n \"$TS\" ] && [ -f \"$TS\" ] && echo yes || echo no)\" >&2; "
                  + "echo \"[LSP] npm root -g=$(npm root -g 2>/dev/null) PREFIX=$PREFIX\" >&2; "
-                 + "echo \"[LSP] typescript top: $(ls \"$PREFIX/lib/node_modules/typescript\" 2>&1 | head -8)\" >&2; "
                  + "if [ -z \"$TS\" ] || [ ! -f \"$TS\" ]; then "
-                 + "  echo \"[LSP] TS7 has no tsserver.js — installing @typescript/typescript6 (classic JS API)\" >&2; "
+                 + "  echo \"[LSP] installing typescript@npm:@typescript/typescript6 + language-server\" >&2; "
                  + "  npm uninstall -g --prefix \"$PREFIX\" typescript 2>/dev/null; "
                  + "  npm install -g --prefix \"$PREFIX\" "
                  + "    \"typescript@npm:@typescript/typescript6@^6.0.2\" "
                  + "    typescript-language-server@latest >&2; "
                  + "  resolve_ts; "
-                 + "  echo \"[LSP] after install tsserver=$TS exists=$([ -n \"$TS\" ] && [ -f \"$TS\" ] && echo yes || echo no)\" >&2; "
-                 + "  echo \"[LSP] lib dir: $(ls \"$PREFIX/lib/node_modules/typescript/lib\" 2>&1 | head -12)\" >&2; "
                  + "fi; "
                  + "if [ -z \"$TS\" ] || [ ! -f \"$TS\" ]; then "
-                 + "  echo \"[LSP] STILL no tsserver.js — try: npm i -g --prefix $PREFIX typescript@5.9\" >&2; "
-                 + "  npm list -g --prefix \"$PREFIX\" --depth=0 >&2; "
-                 + "  find \"$PREFIX\" -name 'tsserver.js' 2>/dev/null | head -5 >&2; "
-                 + "  exit 1; "
+                 + "  echo \"[LSP] STILL no tsserver.js\" >&2; exit 1; "
                  + "fi; "
+                 + "SHIMDIR=\"${TMPDIR:-/data/local/tmp}/mscode-node-shim\"; "
+                 + "mkdir -p \"$SHIMDIR\"; "
+                 + "printf '%s\\n' '#!/system/bin/sh' "
+                 + "  'N=\"$PREFIX/bin/node\"' "
+                 + "  'if [ -n \"$MSCODE_LINKER\" ] && [ -f \"$N\" ]; then' "
+                 + "  '  exec \"$MSCODE_LINKER\" \"$N\" \"$@\"' "
+                 + "  'fi' "
+                 + "  'exec \"$N\" \"$@\"' "
+                 + "  > \"$SHIMDIR/node\"; "
+                 + "chmod 755 \"$SHIMDIR/node\"; "
+                 + "export PATH=\"$SHIMDIR:$PATH\"; "
+                 + "echo \"[LSP] node shim PATH head=$SHIMDIR which=$(command -v node)\" >&2; "
+                 + "node -e \"console.error('[LSP] node ok', process.version, 'execPath='+process.execPath)\" >&2 "
+                 + "  || { echo \"[LSP] node shim failed\" >&2; exit 1; }; "
                  + "if [ -f \"" + jsMjs + "\" ]; then "
                  + "node \"" + jsMjs + "\" --stdio; "
                  + "elif [ -f \"" + jsJs + "\" ]; then "

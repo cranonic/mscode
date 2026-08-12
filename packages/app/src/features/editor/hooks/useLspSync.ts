@@ -484,14 +484,16 @@ export function useLspSync(editorInstance: any, tabId: string) {
             const prefix = setup?.prefix as string | undefined;
             if (prefix) {
               const tsLib = `${prefix}/lib/node_modules/typescript/lib`;
+              const tsFile = `${tsLib}/tsserver.js`;
               lspOptions.initializationOptions = {
                 ...(lspOptions.initializationOptions || {}),
                 tsserver: {
                   ...(lspOptions.initializationOptions?.tsserver || {}),
-                  path: tsLib,
+                  // Prefer file path; TLS accepts file or lib directory
+                  path: tsFile,
                 },
               };
-              outputChannel.appendLine(`[DEBUG] tsserver.path → ${tsLib}`);
+              outputChannel.appendLine(`[DEBUG] tsserver.path → ${tsFile}`);
             }
           } catch (e) {
             outputChannel.appendLine(`[WARN] checkSetup() for tsserver.path failed: ${e}`);
