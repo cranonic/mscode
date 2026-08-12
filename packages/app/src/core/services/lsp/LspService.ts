@@ -165,9 +165,16 @@ export class LspService implements ILspService {
 
     // ── onmessage: decode and feed into the transport buffer ────────────────
     s.ws.onmessage = (event) => {
-      const raw = typeof event.data === 'string'
-        ? event.data
+      const isBin = typeof event.data !== 'string';
+      const raw = !isBin
+        ? (event.data as string)
         : s.decoder.decode(event.data as ArrayBuffer, { stream: true });
+
+      if (s.isInitializing) {
+        console.log(
+          `[LSP] onmessage during init: ${isBin ? 'binary' : 'text'} len=${raw.length}`,
+        );
+      }
 
       s.buffer += raw;
 
@@ -178,8 +185,8 @@ export class LspService implements ILspService {
     };
 
     // ── onerror: reject init promise if still in handshake ──────────────────
-    s.ws.onerror = () => {
-      console.warn('[LSP] WebSocket error');
+    s.ws.onerror = (ev) => {
+      console.warn('[LSP] WebSocket error', ev);
       if (s.isInitializing) {
         s.isInitializing = false;
         s._initReject?.(new Error('WebSocket error during handshake'));

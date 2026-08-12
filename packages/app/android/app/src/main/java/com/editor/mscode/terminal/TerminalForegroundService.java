@@ -596,16 +596,29 @@ public class TerminalForegroundService extends Service {
         // PREFIX/bin/* is not directly executable (targetSdk>28); hyphenated
         // names cannot be shell functions either.
         String rewritten = rewriteLspCommand(shellCommand);
-        emitLog("🔌 LSP cmd: " + rewritten);
+        emitLog("🔌 LSP raw cmd: " + shellCommand);
+        emitLog("🔌 LSP rewritten: " + rewritten);
 
         String[] cmd = nativeBuilder.buildBackgroundCommand(rewritten);
         java.util.Map<String, String> envMap = nativeBuilder.buildBackgroundEnvMap();
 
+        emitLog("🔌 LSP argv: " + java.util.Arrays.toString(cmd));
+        if (envMap != null) {
+            String prefix = envMap.get("PREFIX");
+            String path = envMap.get("PATH");
+            String home = envMap.get("HOME");
+            emitLog("🔌 LSP env PREFIX=" + prefix + " HOME=" + home);
+            emitLog("🔌 LSP env PATH=" + (path != null && path.length() > 160
+                ? path.substring(0, 160) + "…" : path));
+        }
+
         int port = ProcessServer.findFreePort();
-        ProcessServer server = new ProcessServer(port, cmd, envMap);
+        // Forward ProcessServer stderr / exit / spawn lines → onLog → JS Output panel
+        ProcessServer server = new ProcessServer(port, cmd, envMap, this::emitLog);
         server.startAndAwait();
         processServers.put(port, server);
-        emitLog("🔌 ProcessServer listening on port " + port);
+        emitLog("🔌 ProcessServer listening on port " + port
+            + " (stderr/exit will appear as [LSP] / [LSP-stderr] logs)");
         return port;
     }
 

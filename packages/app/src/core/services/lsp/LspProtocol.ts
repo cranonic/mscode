@@ -142,17 +142,39 @@ export async function initializeLsp(state: LspState): Promise<void> {
     ...(state.initializationOptions ?? {}),
   };
 
-  const result = await sendRequest(state, 'initialize', {
-    processId: null,
-    rootUri: state.rootUri,
-    capabilities: CLIENT_CAPABILITIES,
-    initializationOptions,
-    workspaceFolders: [{ uri: state.rootUri, name: getWorkspaceName(state.rootUri) }],
-  });
+  console.log(
+    '[LSP] initialize → rootUri=',
+    state.rootUri,
+    ' initOptKeys=',
+    Object.keys(initializationOptions),
+    ' tsserver=',
+    JSON.stringify((initializationOptions as any).tsserver ?? null),
+  );
 
-  sendNotify(state, 'initialized', {});
-  state.initialized = true;
-  console.log('[LSP] Handshake verified. Acknowledged capabilities:', (result as any)?.capabilities ?? {});
+  try {
+    const result = await sendRequest(state, 'initialize', {
+      processId: null,
+      rootUri: state.rootUri,
+      capabilities: CLIENT_CAPABILITIES,
+      initializationOptions,
+      workspaceFolders: [{ uri: state.rootUri, name: getWorkspaceName(state.rootUri) }],
+    });
+
+    sendNotify(state, 'initialized', {});
+    state.initialized = true;
+    const caps = (result as any)?.capabilities ?? {};
+    console.log(
+      '[LSP] Handshake OK. Server caps:',
+      Object.keys(caps).join(', ') || '(none)',
+    );
+  } catch (e: any) {
+    const msg =
+      e?.message ||
+      e?.lspError?.message ||
+      (typeof e === 'object' ? JSON.stringify(e) : String(e));
+    console.error('[LSP] initialize FAILED:', msg);
+    throw e instanceof Error ? e : new Error(msg);
+  }
 }
 
 // ─── DIAGNOSTICS & TELEMETRY HANDLERS ─────────────────────────────────────────

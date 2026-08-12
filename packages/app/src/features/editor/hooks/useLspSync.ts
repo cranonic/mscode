@@ -1,8 +1,10 @@
 // src/features/editor/hooks/useLspSync.ts
 
 import { useEffect, useRef } from 'react';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import * as monaco from 'monaco-editor';
+
+const NativeTerminal = registerPlugin<any>('NativeTerminal');
 import { useSettingsStore }      from '@/features/settings/store/settingsStore';
 import { useStatusBarStore } from '@/features/statusbar/store/statusBarStore';
 import { useNotificationStore }  from '@/store/notificationStore';
@@ -395,9 +397,29 @@ export function useLspSync(editorInstance: any, tabId: string) {
               ? 'typescript'
               : langId;
 
+        // Native onLog → Output panel (no logcat needed — same path as terminal)
+        let nativeLogHandle: { remove: () => void } | null = null;
+        try {
+          if (Capacitor.isNativePlatform()) {
+            nativeLogHandle = await NativeTerminal.addListener(
+              'onLog',
+              (ev: { message?: string }) => {
+                const line = ev?.message ?? '';
+                if (!line) return;
+                if (/\[LSP|typescript|tsserver|ProcessServer|node |PATH=|PREFIX=/i.test(line)) {
+                  outputChannel.appendLine(line);
+                }
+              },
+            );
+          }
+        } catch (e) {
+          outputChannel.appendLine(`[DEBUG] onLog bridge unavailable: ${e}`);
+        }
+
         const port = await activeProcessManager.startServer(startKey);
         if (!port) {
           outputChannel.appendLine(`[ERROR] Failed to start ${langId} server process.`);
+          try { nativeLogHandle?.remove(); } catch (_) {}
           bootingRef.current = false;
           return;
         }
@@ -412,6 +434,7 @@ export function useLspSync(editorInstance: any, tabId: string) {
         }
 
         outputChannel.appendLine(`[INFO] Server process on port ${port}. Connecting…`);
+        outputChannel.appendLine(`[DEBUG] Watch for [LSP-stderr] / process exited lines below`);
 
         // Compute rootUri from the file's directory
         const rootUri = (() => {
@@ -448,23 +471,33 @@ export function useLspSync(editorInstance: any, tabId: string) {
           lspOptions = { ...lspOptions, ...dynamicConfig.resolveOptions(settings) };
         }
 
+        outputChannel.appendLine(`[DEBUG] rootUri=${rootUri}`);
+        outputChannel.appendLine(
+          `[DEBUG] initOptions.tsserver=${JSON.stringify(lspOptions.initializationOptions?.tsserver ?? null)}`,
+        );
+
         // connect() opens WebSocket + does LSP initialize handshake
         activeLspService.connect(langId, `ws://127.0.0.1:${port}`, lspOptions);
 
-        // Wait for handshake — allow longer on cold Android start
-        await new Promise<void>((resolve, reject) => {
-          const start    = Date.now();
-          const interval = setInterval(() => {
-            if (activeLspService.initialized) {
-              clearInterval(interval);
-              resolve();
-            }
-            if (Date.now() - start > 45_000) {
-              clearInterval(interval);
-              reject(new Error('LSP initialize timeout'));
-            }
-          }, 100);
-        });
+        // Prefer waitUntilReady so real initialize errors surface (not only timeout)
+        try {
+          await Promise.race([
+            activeLspService.waitUntilReady(),
+            new Promise<void>((_, reject) =>
+              setTimeout(
+                () => reject(new Error(
+                  'LSP initialize timeout (45s) — check [LSP-stderr] / process exited above',
+                )),
+                45_000,
+              ),
+            ),
+          ]);
+        } finally {
+          // Keep native logs a bit longer so late stderr still appears
+          setTimeout(() => {
+            try { nativeLogHandle?.remove(); } catch (_) {}
+          }, 2000);
+        }
 
         activeLspService.registerModelUri(model, fileUri);
         activeLspService.notifyDocumentOpen(model);
@@ -488,8 +521,18 @@ export function useLspSync(editorInstance: any, tabId: string) {
         lastNotifiedLang = langId;
 
       } catch (err: any) {
-        const msg = err?.message ?? String(err);
+        const msg =
+          err?.message ||
+          err?.lspError?.message ||
+          (typeof err === 'object' ? JSON.stringify(err) : String(err));
         outputChannel.appendLine(`[ERROR] ${msg}`);
+        if (err?.lspError) {
+          outputChannel.appendLine(`[ERROR] lspError: ${JSON.stringify(err.lspError)}`);
+        }
+        outputChannel.appendLine(
+          `[DEBUG] Tips: look for [LSP-stderr] / process exited / rewritten cmd above`,
+        );
+        outputChannel.show();
         console.error(`[LSP-Sync] Boot error for ${langId}:`, err);
 
         // Stale port after background kill — clear cache and auto-retry once

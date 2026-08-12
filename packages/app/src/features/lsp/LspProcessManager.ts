@@ -236,18 +236,43 @@ export class LspProcessManager {
             }
 
             consoleLogs += `\n> Booting language server process…\n`;
+            consoleLogs += `> serverCmd: ${config.serverCmd}\n`;
             useNotificationStore.getState().updateNotification(notifId, {
                 message: 'Booting up server…',
                 fullMessage: consoleLogs,
             });
 
+            // Pipe native emitLog / ProcessServer stderr into notification + console
+            // (user builds via CI — no logcat; onLog is the debug channel)
+            let logHandle: { remove: () => void } | null = null;
+            try {
+                logHandle = await NativeTerminal.addListener('onLog', (ev: { message?: string }) => {
+                    const line = ev?.message ?? '';
+                    if (!line) return;
+                    // Only keep LSP-related noise during this boot
+                    if (!/LSP|typescript|tsserver|node|pkg/i.test(line)) return;
+                    consoleLogs += line + '\n';
+                    console.log('[LSP-native]', line);
+                    useNotificationStore.getState().updateNotification(notifId, {
+                        fullMessage: consoleLogs,
+                    });
+                });
+            } catch (e) {
+                console.warn('[LSP] onLog listener failed:', e);
+            }
+
             const result = await NativeTerminal.spawnLsp({ command: config.serverCmd });
+
+            // Keep listener briefly so first stderr lines after spawn arrive
+            await new Promise(r => setTimeout(r, 400));
+            try { logHandle?.remove(); } catch (_) {}
 
             if (result?.port) {
                 this.activePorts.set(language, result.port);
-
+                consoleLogs += `> spawnLsp returned port ${result.port}\n`;
                 useNotificationStore.getState().updateNotification(notifId, {
                     message: 'Server process spawned. Connecting to editor…',
+                    fullMessage: consoleLogs,
                 });
                 return result.port;
             }

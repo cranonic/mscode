@@ -119,10 +119,24 @@ export function processBuffer(
 
     try {
       const msg = JSON.parse(jsonStr);
-      console.log(`[LSP] [← RECV]`, msg?.method ?? `id:${msg?.id}`);
+      if (msg?.error) {
+        console.error(
+          '[LSP] [← RECV ERROR]',
+          `id:${msg.id}`,
+          JSON.stringify(msg.error),
+        );
+      } else {
+        console.log(
+          `[LSP] [← RECV]`,
+          msg?.method ?? `id:${msg?.id}`,
+          msg?.result && typeof msg.result === 'object'
+            ? `(keys: ${Object.keys(msg.result).slice(0, 8).join(',')})`
+            : '',
+        );
+      }
       onMessage(msg);
     } catch (e) {
-      console.error('[LSP] Stream chunk parsing exception:', e);
+      console.error('[LSP] Stream chunk parsing exception:', e, 'raw=', jsonStr.slice(0, 200));
     }
   }
 }
@@ -156,7 +170,17 @@ export function dispatchMessage(
     if (pending) {
       state.pendingRequests.delete(msg.id);
       if (msg.error) {
-        pending.reject(msg.error);
+        const errObj = msg.error;
+        const detail =
+          typeof errObj === 'object'
+            ? (errObj.message || JSON.stringify(errObj))
+            : String(errObj);
+        console.error('[LSP] request failed id=' + msg.id + ':', detail);
+        pending.reject(
+          errObj instanceof Error
+            ? errObj
+            : Object.assign(new Error(detail), { lspError: errObj }),
+        );
       } else {
         pending.resolve(msg.result);
       }
