@@ -686,12 +686,12 @@ public class TerminalForegroundService extends Service {
                  + "  exit 1; "
                  + "fi; "
                  + "if [ -f \"" + jsMjs + "\" ]; then "
-                 + "node \"" + jsMjs + "\" --stdio --tsserver-path \"$TS\"; "
+                 + "node \"" + jsMjs + "\" --stdio; "
                  + "elif [ -f \"" + jsJs + "\" ]; then "
-                 + "node \"" + jsJs + "\" --stdio --tsserver-path \"$TS\"; "
+                 + "node \"" + jsJs + "\" --stdio; "
                  + "else "
                  + "NR=\"$(npm root -g 2>/dev/null)\"; "
-                 + "node \"$NR/typescript-language-server/lib/cli.mjs\" --stdio --tsserver-path \"$TS\"; "
+                 + "node \"$NR/typescript-language-server/lib/cli.mjs\" --stdio; "
                  + "fi";
         }
 

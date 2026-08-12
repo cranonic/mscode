@@ -471,6 +471,33 @@ export function useLspSync(editorInstance: any, tabId: string) {
           lspOptions = { ...lspOptions, ...dynamicConfig.resolveOptions(settings) };
         }
 
+        // typescript-language-server v4.1+ dropped CLI --tsserver-path.
+        // Workspace is under /sdcard while TS lives under $PREFIX — must set
+        // initializationOptions.tsserver.path explicitly.
+        if (
+          ['typescript', 'typescriptreact', 'javascript', 'javascriptreact'].includes(langId) &&
+          Capacitor.isNativePlatform() &&
+          !settings['typescript.tsdk']
+        ) {
+          try {
+            const setup = await NativeTerminal.checkSetup();
+            const prefix = setup?.prefix as string | undefined;
+            if (prefix) {
+              const tsLib = `${prefix}/lib/node_modules/typescript/lib`;
+              lspOptions.initializationOptions = {
+                ...(lspOptions.initializationOptions || {}),
+                tsserver: {
+                  ...(lspOptions.initializationOptions?.tsserver || {}),
+                  path: tsLib,
+                },
+              };
+              outputChannel.appendLine(`[DEBUG] tsserver.path → ${tsLib}`);
+            }
+          } catch (e) {
+            outputChannel.appendLine(`[WARN] checkSetup() for tsserver.path failed: ${e}`);
+          }
+        }
+
         outputChannel.appendLine(`[DEBUG] rootUri=${rootUri}`);
         outputChannel.appendLine(
           `[DEBUG] initOptions.tsserver=${JSON.stringify(lspOptions.initializationOptions?.tsserver ?? null)}`,
