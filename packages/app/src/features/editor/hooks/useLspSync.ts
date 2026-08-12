@@ -485,12 +485,15 @@ export function useLspSync(editorInstance: any, tabId: string) {
             if (prefix) {
               const tsLib = `${prefix}/lib/node_modules/typescript/lib`;
               const tsFile = `${tsLib}/tsserver.js`;
+              const prevTs = lspOptions.initializationOptions?.tsserver || {};
               lspOptions.initializationOptions = {
                 ...(lspOptions.initializationOptions || {}),
                 tsserver: {
-                  ...(lspOptions.initializationOptions?.tsserver || {}),
+                  ...prevTs,
                   // Prefer file path; TLS accepts file or lib directory
                   path: tsFile,
+                  // Mobile: 3072MB max often kills the child process
+                  maxTsServerMemory: Math.min(Number(prevTs.maxTsServerMemory) || 512, 768),
                 },
               };
               outputChannel.appendLine(`[DEBUG] tsserver.path → ${tsFile}`);

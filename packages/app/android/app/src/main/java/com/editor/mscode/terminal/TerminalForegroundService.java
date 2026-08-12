@@ -643,11 +643,11 @@ public class TerminalForegroundService extends Service {
                  + "fi";
         }
 
-        // typescript-language-server needs classic lib/tsserver.js (not TS7 native).
-        // After TLS starts it spawns a child `node tsserver.js`. On Android
-        // $PREFIX/bin/node often must run via MSCODE_LINKER; child_process.spawn
-        // does not use shell functions, so we put a linker shim first on PATH.
-        // Also avoid huge maxTsServerMemory (set in initOptions from JS).
+        // typescript-language-server needs classic lib/tsserver.js (not TS7).
+        // Child tsserver is spawned via process.execPath. When parent node is
+        // started through Android linker, execPath becomes linker64 and the
+        // child dies (exit 1). Fix: LD_PRELOAD libtermux-exec.so (jniLibs) so
+        // $PREFIX/bin/node is directly exec-able and execPath stays correct.
         if (s.startsWith("typescript-language-server") || s.contains("typescript-language-server")) {
             String jsMjs = prefix + "/lib/node_modules/typescript-language-server/lib/cli.mjs";
             String jsJs  = prefix + "/lib/node_modules/typescript-language-server/lib/cli.js";
@@ -665,9 +665,8 @@ public class TerminalForegroundService extends Service {
                  + "}; "
                  + "resolve_ts; "
                  + "echo \"[LSP] resolved tsserver=$TS exists=$([ -n \"$TS\" ] && [ -f \"$TS\" ] && echo yes || echo no)\" >&2; "
-                 + "echo \"[LSP] npm root -g=$(npm root -g 2>/dev/null) PREFIX=$PREFIX\" >&2; "
                  + "if [ -z \"$TS\" ] || [ ! -f \"$TS\" ]; then "
-                 + "  echo \"[LSP] installing typescript@npm:@typescript/typescript6 + language-server\" >&2; "
+                 + "  echo \"[LSP] installing @typescript/typescript6 + language-server\" >&2; "
                  + "  npm uninstall -g --prefix \"$PREFIX\" typescript 2>/dev/null; "
                  + "  npm install -g --prefix \"$PREFIX\" "
                  + "    \"typescript@npm:@typescript/typescript6@^6.0.2\" "
@@ -677,20 +676,26 @@ public class TerminalForegroundService extends Service {
                  + "if [ -z \"$TS\" ] || [ ! -f \"$TS\" ]; then "
                  + "  echo \"[LSP] STILL no tsserver.js\" >&2; exit 1; "
                  + "fi; "
-                 + "SHIMDIR=\"${TMPDIR:-/data/local/tmp}/mscode-node-shim\"; "
-                 + "mkdir -p \"$SHIMDIR\"; "
-                 + "printf '%s\\n' '#!/system/bin/sh' "
-                 + "  'N=\"$PREFIX/bin/node\"' "
-                 + "  'if [ -n \"$MSCODE_LINKER\" ] && [ -f \"$N\" ]; then' "
-                 + "  '  exec \"$MSCODE_LINKER\" \"$N\" \"$@\"' "
-                 + "  'fi' "
-                 + "  'exec \"$N\" \"$@\"' "
-                 + "  > \"$SHIMDIR/node\"; "
-                 + "chmod 755 \"$SHIMDIR/node\"; "
-                 + "export PATH=\"$SHIMDIR:$PATH\"; "
-                 + "echo \"[LSP] node shim PATH head=$SHIMDIR which=$(command -v node)\" >&2; "
+                 + "TEXEC=\"\"; "
+                 + "OLDIFS=\"$IFS\"; IFS=\":\"; "
+                 + "for _d in $LD_LIBRARY_PATH; do "
+                 + "  if [ -f \"$_d/libtermux-exec.so\" ]; then TEXEC=\"$_d/libtermux-exec.so\"; break; fi; "
+                 + "done; IFS=\"$OLDIFS\"; "
+                 + "if [ -n \"$TEXEC\" ]; then "
+                 + "  export LD_PRELOAD=\"$TEXEC${LD_PRELOAD:+:$LD_PRELOAD}\"; "
+                 + "  echo \"[LSP] LD_PRELOAD=$LD_PRELOAD\" >&2; "
+                 + "else "
+                 + "  echo \"[LSP] WARN: libtermux-exec.so not found on LD_LIBRARY_PATH\" >&2; "
+                 + "fi; "
+                 + "if [ -f \"$PREFIX/bin/node\" ]; then "
+                 + "  export PATH=\"$PREFIX/bin:$PATH\"; "
+                 + "fi; "
+                 + "echo \"[LSP] which node=$(command -v node)\" >&2; "
                  + "node -e \"console.error('[LSP] node ok', process.version, 'execPath='+process.execPath)\" >&2 "
-                 + "  || { echo \"[LSP] node shim failed\" >&2; exit 1; }; "
+                 + "  || { echo \"[LSP] node failed\" >&2; exit 1; }; "
+                 + "case \"$(node -e \"process.stdout.write(process.execPath)\")\" in "
+                 + "  *linker*) echo \"[LSP] WARN: execPath is still linker — child tsserver may fail\" >&2 ;; "
+                 + "esac; "
                  + "if [ -f \"" + jsMjs + "\" ]; then "
                  + "node \"" + jsMjs + "\" --stdio; "
                  + "elif [ -f \"" + jsJs + "\" ]; then "
