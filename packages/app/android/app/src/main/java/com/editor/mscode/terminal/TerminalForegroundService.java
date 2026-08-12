@@ -644,27 +644,41 @@ public class TerminalForegroundService extends Service {
         }
 
         // typescript-language-server — MUST pass --tsserver-path to a real tsserver.js.
-        // npm -g may land under PREFIX or $(npm root -g); probe several locations.
+        // Auto-install into $PREFIX when missing (JS postInstall was often skipped).
         if (s.startsWith("typescript-language-server") || s.contains("typescript-language-server")) {
             String jsMjs = prefix + "/lib/node_modules/typescript-language-server/lib/cli.mjs";
             String jsJs  = prefix + "/lib/node_modules/typescript-language-server/lib/cli.js";
             String tsSrv = prefix + "/lib/node_modules/typescript/lib/tsserver.js";
             return "TS=\"" + tsSrv + "\"; "
-                 + "if [ ! -f \"$TS\" ]; then "
-                 + "  NR=\"$(npm root -g 2>/dev/null)\"; "
-                 + "  [ -n \"$NR\" ] && [ -f \"$NR/typescript/lib/tsserver.js\" ] && TS=\"$NR/typescript/lib/tsserver.js\"; "
-                 + "fi; "
-                 + "if [ ! -f \"$TS\" ]; then "
-                 + "  for c in \"$PREFIX/lib/node_modules/typescript/lib/tsserver.js\" "
-                 + "           \"$HOME/.npm-global/lib/node_modules/typescript/lib/tsserver.js\"; do "
-                 + "    [ -f \"$c\" ] && TS=\"$c\" && break; "
-                 + "  done; "
-                 + "fi; "
+                 + "resolve_ts() { "
+                 + "  TS=\"" + tsSrv + "\"; "
+                 + "  if [ ! -f \"$TS\" ]; then "
+                 + "    NR=\"$(npm root -g 2>/dev/null)\"; "
+                 + "    [ -n \"$NR\" ] && [ -f \"$NR/typescript/lib/tsserver.js\" ] && TS=\"$NR/typescript/lib/tsserver.js\"; "
+                 + "  fi; "
+                 + "  if [ ! -f \"$TS\" ]; then "
+                 + "    for c in \"$PREFIX/lib/node_modules/typescript/lib/tsserver.js\" "
+                 + "             \"$HOME/.npm-global/lib/node_modules/typescript/lib/tsserver.js\"; do "
+                 + "      [ -f \"$c\" ] && TS=\"$c\" && break; "
+                 + "    done; "
+                 + "  fi; "
+                 + "}; "
+                 + "resolve_ts; "
                  + "echo \"[LSP] resolved tsserver=$TS exists=$([ -f \"$TS\" ] && echo yes || echo no)\" >&2; "
                  + "echo \"[LSP] npm root -g=$(npm root -g 2>/dev/null)\" >&2; "
                  + "echo \"[LSP] PREFIX=$PREFIX\" >&2; "
+                 + "echo \"[LSP] ls node_modules/typescript: $(ls \"$PREFIX/lib/node_modules/typescript\" 2>&1 | head -3)\" >&2; "
                  + "if [ ! -f \"$TS\" ]; then "
-                 + "echo \"[LSP] typescript missing — run: npm i -g --prefix \\\"$PREFIX\\\" typescript\" >&2; exit 1; "
+                 + "  echo \"[LSP] auto-install: npm i -g --prefix $PREFIX typescript typescript-language-server\" >&2; "
+                 + "  npm install -g --prefix \"$PREFIX\" typescript@latest typescript-language-server@latest >&2; "
+                 + "  resolve_ts; "
+                 + "  echo \"[LSP] after install tsserver=$TS exists=$([ -f \"$TS\" ] && echo yes || echo no)\" >&2; "
+                 + "fi; "
+                 + "if [ ! -f \"$TS\" ]; then "
+                 + "  echo \"[LSP] typescript STILL missing after npm install\" >&2; "
+                 + "  echo \"[LSP] npm list -g --prefix $PREFIX --depth=0:\" >&2; "
+                 + "  npm list -g --prefix \"$PREFIX\" --depth=0 >&2; "
+                 + "  exit 1; "
                  + "fi; "
                  + "if [ -f \"" + jsMjs + "\" ]; then "
                  + "node \"" + jsMjs + "\" --stdio --tsserver-path \"$TS\"; "
