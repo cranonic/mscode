@@ -186,7 +186,27 @@ export class LspProcessManager {
                 command: config.checkCmd
             });
 
-            if (checkRes.exitCode === 0) {
+            // Log raw result — previous bug: install skipped while tsserver.js missing
+            const checkCode = checkRes?.exitCode ?? checkRes?.code ?? -1;
+            consoleLogs += `> checkCmd exitCode=${checkCode} (raw=${JSON.stringify(checkRes)})\n`;
+
+            let needInstall = checkCode !== 0;
+
+            // Safety net for TypeScript: never trust a green check without tsserver.js
+            if (!needInstall && /typescript-language-server/i.test(config.serverCmd || '')) {
+                const tsVerify = await NativeTerminal.backgroundExecute({
+                    sessionId: notifId + '_tsverify',
+                    command: 'test -f "$PREFIX/lib/node_modules/typescript/lib/tsserver.js" && echo TS_OK || echo TS_MISSING',
+                });
+                const verifyOut = String(tsVerify?.stdout ?? tsVerify?.output ?? tsVerify?.data ?? '');
+                consoleLogs += `> tsserver verify: exit=${tsVerify?.exitCode ?? tsVerify?.code} out=${verifyOut}\n`;
+                if ((tsVerify?.exitCode ?? tsVerify?.code) !== 0 || /TS_MISSING/.test(verifyOut)) {
+                    consoleLogs += `> tsserver.js missing — forcing postInstall despite checkCmd success\n`;
+                    needInstall = true;
+                }
+            }
+
+            if (!needInstall) {
                 consoleLogs += `> Server binary found! Skipping installation.\n`;
                 useNotificationStore.getState().updateNotification(notifId, {
                     message: 'Dependencies verified. Booting up server…',
@@ -232,6 +252,8 @@ export class LspProcessManager {
 
                         if (exitCode !== 0) throw new Error(`Setup command failed: ${cmd}`);
                     }
+                } else {
+                    consoleLogs += `> No postInstall hooks for ${language}\n`;
                 }
             }
 
