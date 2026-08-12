@@ -644,13 +644,50 @@ public class TerminalForegroundService extends Service {
         }
 
         // typescript-language-server needs classic lib/tsserver.js (not TS7).
-        // Child tsserver is spawned via process.execPath. When parent node is
-        // started through Android linker, execPath becomes linker64 and the
-        // child dies (exit 1). Fix: LD_PRELOAD libtermux-exec.so (jniLibs) so
-        // $PREFIX/bin/node is directly exec-able and execPath stays correct.
+        //
+        // ── Why this is tricky (Android targetSdk>28) ───────────────────────
+        // $PREFIX/bin/node cannot be execve()'d directly: app-private storage
+        // is noexec (W^X), so a bare exec gets "Permission denied" straight
+        // from the kernel — no userspace trick (LD_PRELOAD included) rescues
+        // that, because Android's bionic linker strips LD_PRELOAD for
+        // non-debuggable/release apps before it ever gets a chance to hook.
+        // Confirmed empirically: LD_PRELOAD=libtermux-exec.so present in env,
+        // exec still denied.
+        //
+        // The only invocation that actually succeeds is the manual
+        // "system linker execution" trick termux-exec itself documents:
+        //   /system/bin/linker64 /path/to/node ...
+        // ($MSCODE_LINKER manually loads node's ELF via mmap/read, which only
+        // needs read access, not exec access.)
+        //
+        // The cost: termux-exec's own docs confirm this is a *known*
+        // limitation — anything that inspects /proc/self/exe (which is what
+        // Node's process.execPath resolves through) now sees linker64, not
+        // node. typescript-language-server forks the tsserver child via
+        // child_process.fork(), which defaults its spawn executable to
+        // process.execPath — so the child dies instantly (exit 1).
+        //
+        // Fix: process.execPath is a plain writable property. We inject a
+        // tiny wrapper .mjs that runs first, patches process.execPath back to
+        // the real node binary, then dynamically imports the real cli.mjs.
+        // process.argv is untouched by dynamic import(), so cli.mjs's own
+        // `--stdio` arg parsing still works unmodified.
         if (s.startsWith("typescript-language-server") || s.contains("typescript-language-server")) {
-            String jsMjs = prefix + "/lib/node_modules/typescript-language-server/lib/cli.mjs";
-            String jsJs  = prefix + "/lib/node_modules/typescript-language-server/lib/cli.js";
+            String jsMjs   = prefix + "/lib/node_modules/typescript-language-server/lib/cli.mjs";
+            String jsJs    = prefix + "/lib/node_modules/typescript-language-server/lib/cli.js";
+            String nodeBin = prefix + "/bin/node";
+            String tmpDir  = rootfs.getTmpPath();
+            String wrapper = tmpDir + "/mscode_ts_execpath_fix.mjs";
+
+            String wrapperBody =
+                  "process.execPath = \"" + nodeBin + "\";\n"
+                + "const target = \"" + jsMjs + "\";\n"
+                + "const fallback = \"" + jsJs + "\";\n"
+                + "const { existsSync } = await import('node:fs');\n"
+                + "const { pathToFileURL } = await import('node:url');\n"
+                + "const entry = existsSync(target) ? target : fallback;\n"
+                + "await import(pathToFileURL(entry).href);\n";
+
             return "resolve_ts() { "
                  + "  TS=\"\"; "
                  + "  for c in "
@@ -676,38 +713,19 @@ public class TerminalForegroundService extends Service {
                  + "if [ -z \"$TS\" ] || [ ! -f \"$TS\" ]; then "
                  + "  echo \"[LSP] STILL no tsserver.js\" >&2; exit 1; "
                  + "fi; "
-                 // ── node exec fix (targetSdk>28) ────────────────────────────
-                 // $PREFIX/bin/node lives under app-private storage, so a
-                 // direct execve() is denied by the OS ("Permission denied")
-                 // — this happens at the kernel level, before any ELF
-                 // loading, so nothing done INSIDE this script can rescue it.
-                 // libtermux-exec.so must already be preloaded into THIS
-                 // shell's own process image via LD_PRELOAD set in the
-                 // ProcessBuilder environment (see
-                 // TerminalCommandBuilder#buildBackgroundEnvMap) *before*
-                 // this shell was spawned. We only verify + log here —
-                 // exporting LD_PRELOAD at this point would be too late.
                  + "unset -f node 2>/dev/null; "
-                 + "NODE_BIN=\"$PREFIX/bin/node\"; "
+                 + "NODE_BIN=\"" + nodeBin + "\"; "
                  + "if [ ! -f \"$NODE_BIN\" ]; then "
                  + "  echo \"[LSP] node binary missing at $NODE_BIN\" >&2; exit 1; "
                  + "fi; "
-                 + "if [ -z \"$LD_PRELOAD\" ]; then "
-                 + "  echo \"[LSP] WARN: LD_PRELOAD not set for this process — node exec will likely fail with Permission denied. Check buildBackgroundEnvMap().\" >&2; "
-                 + "else "
-                 + "  echo \"[LSP] LD_PRELOAD=$LD_PRELOAD\" >&2; "
-                 + "fi; "
-                 + "echo \"[LSP] using node bin=$NODE_BIN\" >&2; "
-                 + "\"$NODE_BIN\" -e \"console.error('[LSP] node ok', process.version, 'execPath='+process.execPath)\" >&2 "
-                 + "  || { echo \"[LSP] node exec failed — libtermux-exec.so hook did not take effect\" >&2; exit 1; }; "
-                 + "if [ -f \"" + jsMjs + "\" ]; then "
-                 + "\"$NODE_BIN\" \"" + jsMjs + "\" --stdio; "
-                 + "elif [ -f \"" + jsJs + "\" ]; then "
-                 + "\"$NODE_BIN\" \"" + jsJs + "\" --stdio; "
-                 + "else "
-                 + "NR=\"$(npm root -g 2>/dev/null)\"; "
-                 + "\"$NODE_BIN\" \"$NR/typescript-language-server/lib/cli.mjs\" --stdio; "
-                 + "fi";
+                 + "mkdir -p \"" + tmpDir + "\" 2>/dev/null; "
+                 + "cat > \"" + wrapper + "\" <<'MSCODE_TS_WRAP_EOF'\n"
+                 + wrapperBody
+                 + "MSCODE_TS_WRAP_EOF\n"
+                 + "echo \"[LSP] using node bin=$NODE_BIN via $MSCODE_LINKER (execPath patched by wrapper)\" >&2; "
+                 + "\"$MSCODE_LINKER\" \"$NODE_BIN\" -e \"console.error('[LSP] node ok', process.version)\" >&2 "
+                 + "  || { echo \"[LSP] node exec via linker failed\" >&2; exit 1; }; "
+                 + "exec \"$MSCODE_LINKER\" \"$NODE_BIN\" \"" + wrapper + "\" --stdio;";
         }
 
         // clangd — real ELF under $PREFIX/bin; must run via linker (targetSdk>28)
