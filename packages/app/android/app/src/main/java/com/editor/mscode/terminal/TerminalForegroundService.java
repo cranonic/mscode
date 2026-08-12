@@ -644,50 +644,16 @@ public class TerminalForegroundService extends Service {
         }
 
         // typescript-language-server needs classic lib/tsserver.js (not TS7).
-        //
-        // ── Why this is tricky (Android targetSdk>28) ───────────────────────
-        // $PREFIX/bin/node cannot be execve()'d directly: app-private storage
-        // is noexec (W^X), so a bare exec gets "Permission denied" straight
-        // from the kernel — no userspace trick (LD_PRELOAD included) rescues
-        // that, because Android's bionic linker strips LD_PRELOAD for
-        // non-debuggable/release apps before it ever gets a chance to hook.
-        // Confirmed empirically: LD_PRELOAD=libtermux-exec.so present in env,
-        // exec still denied.
-        //
-        // The only invocation that actually succeeds is the manual
-        // "system linker execution" trick termux-exec itself documents:
-        //   /system/bin/linker64 /path/to/node ...
-        // ($MSCODE_LINKER manually loads node's ELF via mmap/read, which only
-        // needs read access, not exec access.)
-        //
-        // The cost: termux-exec's own docs confirm this is a *known*
-        // limitation — anything that inspects /proc/self/exe (which is what
-        // Node's process.execPath resolves through) now sees linker64, not
-        // node. typescript-language-server forks the tsserver child via
-        // child_process.fork(), which defaults its spawn executable to
-        // process.execPath — so the child dies instantly (exit 1).
-        //
-        // Fix: process.execPath is a plain writable property. We inject a
-        // tiny wrapper .mjs that runs first, patches process.execPath back to
-        // the real node binary, then dynamically imports the real cli.mjs.
-        // process.argv is untouched by dynamic import(), so cli.mjs's own
-        // `--stdio` arg parsing still works unmodified.
+        // Outer TLS can handshake while the inner tsserver child (forked by TLS)
+        // still fails: on Android filesDir ELFs need linker, and Node fork() uses
+        // execve(process.execPath) which does NOT go through shell wrappers.
+        // Fix: LD_PRELOAD libtermux-exec.so + a small preload that overrides
+        // child_process.fork/spawn to invoke $MSCODE_LINKER $NODE_BIN when needed.
         if (s.startsWith("typescript-language-server") || s.contains("typescript-language-server")) {
-            String jsMjs   = prefix + "/lib/node_modules/typescript-language-server/lib/cli.mjs";
-            String jsJs    = prefix + "/lib/node_modules/typescript-language-server/lib/cli.js";
+            String jsMjs = prefix + "/lib/node_modules/typescript-language-server/lib/cli.mjs";
+            String jsJs  = prefix + "/lib/node_modules/typescript-language-server/lib/cli.js";
             String nodeBin = prefix + "/bin/node";
-            String tmpDir  = rootfs.getTmpPath();
-            String wrapper = tmpDir + "/mscode_ts_execpath_fix.mjs";
-
-            String wrapperBody =
-                  "process.execPath = \"" + nodeBin + "\";\n"
-                + "const target = \"" + jsMjs + "\";\n"
-                + "const fallback = \"" + jsJs + "\";\n"
-                + "const { existsSync } = await import('node:fs');\n"
-                + "const { pathToFileURL } = await import('node:url');\n"
-                + "const entry = existsSync(target) ? target : fallback;\n"
-                + "await import(pathToFileURL(entry).href);\n";
-
+            String wrapJs = "mscode_ts_fork_fix.cjs";
             return "resolve_ts() { "
                  + "  TS=\"\"; "
                  + "  for c in "
@@ -715,17 +681,89 @@ public class TerminalForegroundService extends Service {
                  + "fi; "
                  + "unset -f node 2>/dev/null; "
                  + "NODE_BIN=\"" + nodeBin + "\"; "
-                 + "if [ ! -f \"$NODE_BIN\" ]; then "
-                 + "  echo \"[LSP] node binary missing at $NODE_BIN\" >&2; exit 1; "
+                 + "if [ ! -f \"$NODE_BIN\" ]; then echo \"[LSP] node missing $NODE_BIN\" >&2; exit 1; fi; "
+                 + "if [ -z \"$MSCODE_LINKER\" ]; then "
+                 + "  MSCODE_LINKER=/system/bin/linker64; "
+                 + "  [ -x \"$MSCODE_LINKER\" ] || MSCODE_LINKER=/system/bin/linker; "
+                 + "  export MSCODE_LINKER; "
                  + "fi; "
-                 + "mkdir -p \"" + tmpDir + "\" 2>/dev/null; "
-                 + "cat > \"" + wrapper + "\" <<'MSCODE_TS_WRAP_EOF'\n"
-                 + wrapperBody
-                 + "MSCODE_TS_WRAP_EOF\n"
-                 + "echo \"[LSP] using node bin=$NODE_BIN via $MSCODE_LINKER (execPath patched by wrapper)\" >&2; "
+                 + "TEXEC=\"\"; OLDIFS=\"$IFS\"; IFS=\":\"; "
+                 + "for _d in $LD_LIBRARY_PATH; do "
+                 + "  [ -f \"$_d/libtermux-exec.so\" ] && TEXEC=\"$_d/libtermux-exec.so\" && break; "
+                 + "done; IFS=\"$OLDIFS\"; "
+                 + "if [ -n \"$TEXEC\" ]; then "
+                 + "  export LD_PRELOAD=\"$TEXEC${LD_PRELOAD:+:$LD_PRELOAD}\"; "
+                 + "  echo \"[LSP] LD_PRELOAD=$LD_PRELOAD\" >&2; "
+                 + "else "
+                 + "  echo \"[LSP] WARN: libtermux-exec.so not found\" >&2; "
+                 + "fi; "
+                 + "WRAP=\"$TMPDIR/" + wrapJs + "\"; "
+                 + "cat > \"$WRAP\" << 'MSCODE_FORK_EOF'\n"
+                 + "'use strict';\n"
+                 + "const cp = require('child_process');\n"
+                 + "const fs = require('fs');\n"
+                 + "const path = require('path');\n"
+                 + "const NODE_BIN = process.env.MSCODE_NODE_BIN || process.execPath;\n"
+                 + "const LINKER = process.env.MSCODE_LINKER || '';\n"
+                 + "try { Object.defineProperty(process, 'execPath', { value: NODE_BIN, configurable: true }); } catch (_) { process.execPath = NODE_BIN; }\n"
+                 + "function needsLinker(file) {\n"
+                 + "  if (!LINKER || !file) return false;\n"
+                 + "  if (file.indexOf('/linker') !== -1) return false;\n"
+                 + "  // App filesDir / PREFIX binaries usually not directly executable\n"
+                 + "  if (file.indexOf('/data/user/') !== -1 || file.indexOf('/data/data/') !== -1) return true;\n"
+                 + "  try { fs.accessSync(file, fs.constants.X_OK); return false; } catch (_) { return true; }\n"
+                 + "}\n"
+                 + "function wrapArgs(file, args) {\n"
+                 + "  args = args ? Array.from(args) : [];\n"
+                 + "  if (!needsLinker(file)) return { cmd: file, args: args };\n"
+                 + "  // linker64 <elf> <args...>\n"
+                 + "  return { cmd: LINKER, args: [file].concat(args) };\n"
+                 + "}\n"
+                 + "const _spawn = cp.spawn;\n"
+                 + "const _spawnSync = cp.spawnSync;\n"
+                 + "const _fork = cp.fork;\n"
+                 + "cp.spawn = function(file, args, options) {\n"
+                 + "  if (Array.isArray(file)) { options = args; args = file; file = process.execPath; }\n"
+                 + "  const w = wrapArgs(file, args);\n"
+                 + "  if (w.cmd !== file) console.error('[LSP-fork] spawn via linker:', w.cmd, w.args[0]);\n"
+                 + "  return _spawn.call(cp, w.cmd, w.args, options);\n"
+                 + "};\n"
+                 + "cp.spawnSync = function(file, args, options) {\n"
+                 + "  if (Array.isArray(file)) { options = args; args = file; file = process.execPath; }\n"
+                 + "  const w = wrapArgs(file, args);\n"
+                 + "  return _spawnSync.call(cp, w.cmd, w.args, options);\n"
+                 + "};\n"
+                 + "cp.fork = function(modulePath, args, options) {\n"
+                 + "  if (typeof args === 'object' && args !== null && !Array.isArray(args)) { options = args; args = []; }\n"
+                 + "  args = args ? Array.from(args) : [];\n"
+                 + "  options = options ? Object.assign({}, options) : {};\n"
+                 + "  // fork() always runs node; force execPath + linker via spawn path\n"
+                 + "  const execPath = options.execPath || NODE_BIN;\n"
+                 + "  const allArgs = [modulePath].concat(args);\n"
+                 + "  if (needsLinker(execPath)) {\n"
+                 + "    console.error('[LSP-fork] fork via linker:', LINKER, execPath, modulePath);\n"
+                 + "    options.execPath = LINKER;\n"
+                 + "    // Node treats options.execPath as the binary; put real node first in args\n"
+                 + "    // Actually child_process.fork ignores custom args for node binary — use spawn fallback\n"
+                 + "    const silent = options.silent; const stdio = options.stdio || (silent ? ['pipe','pipe','pipe','ipc'] : ['inherit','inherit','inherit','ipc']);\n"
+                 + "    const env = Object.assign({}, process.env, options.env || {});\n"
+                 + "    return _spawn.call(cp, LINKER, [execPath, modulePath].concat(args), Object.assign({}, options, { stdio: stdio, env: env }));\n"
+                 + "  }\n"
+                 + "  options.execPath = execPath;\n"
+                 + "  return _fork.call(cp, modulePath, args, options);\n"
+                 + "};\n"
+                 + "console.error('[LSP-fork] preload active NODE_BIN=' + NODE_BIN + ' LINKER=' + LINKER);\n"
+                 + "MSCODE_FORK_EOF\n"
+                 + "export MSCODE_NODE_BIN=\"$NODE_BIN\"; "
+                 + "export MSCODE_LINKER; "
+                 + "echo \"[LSP] node=$NODE_BIN linker=$MSCODE_LINKER wrap=$WRAP\" >&2; "
                  + "\"$MSCODE_LINKER\" \"$NODE_BIN\" -e \"console.error('[LSP] node ok', process.version)\" >&2 "
-                 + "  || { echo \"[LSP] node exec via linker failed\" >&2; exit 1; }; "
-                 + "exec \"$MSCODE_LINKER\" \"$NODE_BIN\" \"" + wrapper + "\" --stdio;";
+                 + "  || { echo \"[LSP] node via linker failed\" >&2; exit 1; }; "
+                 + "CLI=\"" + jsMjs + "\"; "
+                 + "[ -f \"$CLI\" ] || CLI=\"" + jsJs + "\"; "
+                 + "if [ ! -f \"$CLI\" ]; then CLI=\"$(npm root -g 2>/dev/null)/typescript-language-server/lib/cli.mjs\"; fi; "
+                 + "echo \"[LSP] starting TLS $CLI\" >&2; "
+                 + "exec \"$MSCODE_LINKER\" \"$NODE_BIN\" --require \"$WRAP\" \"$CLI\" --stdio";
         }
 
         // clangd — real ELF under $PREFIX/bin; must run via linker (targetSdk>28)
