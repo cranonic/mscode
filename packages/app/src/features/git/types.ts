@@ -153,6 +153,10 @@ export interface UISlice {
   setStagedSectionExpanded:   (v: boolean) => void;
   setUnstagedSectionExpanded: (v: boolean) => void;
   setChangeFolderExpanded:    (path: string, expanded: boolean) => void;
+  /** Bulk-set folder collapse (merge into existing map). */
+  setCollapsedChangeFolders:  (paths: string[], collapsed: boolean) => void;
+  /** Replace entire collapse map (e.g. collapse-all). */
+  replaceCollapsedChangeFolders: (map: Record<string, true>) => void;
 }
 
 export interface StatusSlice {

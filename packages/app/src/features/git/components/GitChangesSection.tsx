@@ -10,6 +10,7 @@ import { Icon }                 from '@/ui/components/Icon/IconRegistry';
 import { FileIcon }             from '@/ui/components/FileIcon/DefaultIconTheme';
 import { useNotificationStore } from '@/store/notificationStore';
 import { useSettingsStore }     from '@/features/settings/store/settingsStore';
+import { useMenuStore }         from '@/store/menuStore';
 import { useGitStore, GIT_STATUS_META } from '../store/gitStore';
 import { CommitBox }            from './CommitBox';
 import { ChangedFileItem }      from './ChangedFileItem';
@@ -17,9 +18,104 @@ import { GitBackend }           from '../core/GitBackend';
 import { getCwd }               from '../store/_helpers';
 import { useTabStore }          from '@/store/tabStore';
 import type { GitChangedFile }  from '../store/gitStore';
-import { buildChangeTree, collectFilePaths, type ChangeTreeNode } from './changeTree';
+import {
+  buildChangeTree,
+  collectFilePaths,
+  collectFolderPaths,
+  collectAllFolderPaths,
+  type ChangeTreeNode,
+} from './changeTree';
 // Reuse explorer tree row styles so SCM Changes matches the FileTree theme
 import '@/features/explorer/components/FileTree/FileTree.css';
+
+// ─── Collapse / expand context menu (long-press or right-click on headers) ───
+
+type CollapseTarget =
+  | { kind: 'section'; section: 'staged' | 'unstaged' }
+  | { kind: 'folder'; path: string; node: ChangeTreeNode };
+
+function openCollapseContextMenu(e: React.MouseEvent, target: CollapseTarget) {
+  e.preventDefault();
+  e.stopPropagation();
+
+  const store = useGitStore.getState();
+  const stagedTree = buildChangeTree(store.stagedFiles, getCwd() || '');
+  const unstagedTree = buildChangeTree(store.unstagedFiles, getCwd() || '');
+  const allFolderPaths = [
+    ...collectAllFolderPaths(stagedTree),
+    ...collectAllFolderPaths(unstagedTree),
+  ];
+
+  const collapseThis = () => {
+    if (target.kind === 'section') {
+      if (target.section === 'staged') store.setStagedSectionExpanded(false);
+      else store.setUnstagedSectionExpanded(false);
+    } else {
+      store.setChangeFolderExpanded(target.path, false);
+    }
+  };
+  const expandThis = () => {
+    if (target.kind === 'section') {
+      if (target.section === 'staged') store.setStagedSectionExpanded(true);
+      else store.setUnstagedSectionExpanded(true);
+    } else {
+      store.setChangeFolderExpanded(target.path, true);
+    }
+  };
+  const collapseChildren = () => {
+    if (target.kind === 'section') {
+      const roots = target.section === 'staged' ? stagedTree : unstagedTree;
+      store.setCollapsedChangeFolders(collectAllFolderPaths(roots), true);
+    } else {
+      const kids = collectFolderPaths(target.node).filter(p => p !== target.path);
+      store.setCollapsedChangeFolders(kids, true);
+    }
+  };
+  const expandChildren = () => {
+    if (target.kind === 'section') {
+      const roots = target.section === 'staged' ? stagedTree : unstagedTree;
+      store.setCollapsedChangeFolders(collectAllFolderPaths(roots), false);
+    } else {
+      const kids = collectFolderPaths(target.node).filter(p => p !== target.path);
+      store.setCollapsedChangeFolders(kids, false);
+    }
+  };
+  const collapseAll = () => {
+    store.setStagedSectionExpanded(false);
+    store.setUnstagedSectionExpanded(false);
+    const map: Record<string, true> = {};
+    for (const p of allFolderPaths) map[p] = true;
+    store.replaceCollapsedChangeFolders(map);
+  };
+  const expandAll = () => {
+    store.setStagedSectionExpanded(true);
+    store.setUnstagedSectionExpanded(true);
+    store.replaceCollapsedChangeFolders({});
+  };
+
+  useMenuStore.getState().openMenuDirect(e.clientX, e.clientY, [
+    {
+      id: 'collapse',
+      label: 'Collapse',
+      icon: 'chevron-right',
+      children: [
+        { id: 'collapse-this', label: 'Collapse This', onClick: collapseThis },
+        { id: 'collapse-children', label: 'Collapse Children', onClick: collapseChildren },
+        { id: 'collapse-all', label: 'Collapse All', onClick: collapseAll },
+      ],
+    },
+    {
+      id: 'expand',
+      label: 'Expand',
+      icon: 'chevron-down',
+      children: [
+        { id: 'expand-this', label: 'Expand This', onClick: expandThis },
+        { id: 'expand-children', label: 'Expand Children', onClick: expandChildren },
+        { id: 'expand-all', label: 'Expand All', onClick: expandAll },
+      ],
+    },
+  ], 'top-left');
+}
 
 type IconMode = 'sameAsExplorer' | 'show' | 'hide';
 
@@ -110,6 +206,7 @@ const TreeNodeRow: React.FC<{
         onToggle={() => setChangeFolderExpanded(node.path, !expanded)}
         showGuideLine={true}
         titleStyle={{ fontWeight: 'normal' }}
+        onHeaderContextMenu={e => openCollapseContextMenu(e, { kind: 'folder', path: node.path, node })}
         title={
           <div
             style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', width: '100%' }}
@@ -289,6 +386,7 @@ const StagedSection: React.FC = () => {
       expanded={expanded}
       onToggle={() => setExpanded(!expanded)}
       showGuideLine={true}
+      onHeaderContextMenu={e => openCollapseContextMenu(e, { kind: 'section', section: 'staged' })}
       rightActions={
         <span
           onClick={e => { e.stopPropagation(); unstageAll(); }}
@@ -359,6 +457,7 @@ const UnstagedSection: React.FC = () => {
       expanded={expanded}
       onToggle={() => setExpanded(!expanded)}
       showGuideLine={true}
+      onHeaderContextMenu={e => openCollapseContextMenu(e, { kind: 'section', section: 'unstaged' })}
       rightActions={
         <div style={{ display: 'flex', gap: '2px' }}>
           <span
@@ -393,28 +492,44 @@ const UnstagedSection: React.FC = () => {
 };
 
 // ─── Main export ──────────────────────────────────────────────────────────────
-// CommitBox stays sticky at the top of the Changes scroll area (H + V scroll).
+// CommitBox is OUTSIDE the scroll region so it never moves (H or V).
+// File lists scroll in the lower pane only.
 
 export const GitChangesSection: React.FC = () => (
-  <div style={{ position: 'relative', minWidth: '100%' }}>
+  <div
+    style={{
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
+      minHeight: 0,
+      overflow: 'hidden',
+      // Prevent parent section from scrolling this whole block sideways
+      width: '100%',
+      maxWidth: '100%',
+    }}
+  >
     <div
       style={{
-        position: 'sticky',
-        top: 0,
-        left: 0,
-        zIndex: 25,
-        // Match sidebar panel bg so scrolled file rows don't show through
+        flexShrink: 0,
+        zIndex: 2,
         background: 'var(--ms-bg-side, var(--ms-bg-main, #1e1e1e))',
-        // Stick on both axes: stay in view under vertical + horizontal scroll
-        width: '100%',
-        minWidth: '100%',
-        maxWidth: '100%',
         boxShadow: '0 1px 0 var(--ms-border-color, #333)',
+        width: '100%',
       }}
     >
       <CommitBox />
     </div>
-    <StagedSection />
-    <UnstagedSection />
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflow: 'auto',
+        // Tree can grow wider than the pane → horizontal scroll stays here
+        width: '100%',
+      }}
+    >
+      <StagedSection />
+      <UnstagedSection />
+    </div>
   </div>
 );

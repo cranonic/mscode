@@ -109,3 +109,20 @@ export function collectFilePaths(node: ChangeTreeNode): string[] {
   }
   return out;
 }
+
+/** Collect this folder + all nested folder paths. */
+export function collectFolderPaths(node: ChangeTreeNode): string[] {
+  if (!node.isDirectory) return [];
+  const out = [node.path];
+  for (const c of node.children || []) {
+    out.push(...collectFolderPaths(c));
+  }
+  return out;
+}
+
+/** Collect every folder path in a forest of roots. */
+export function collectAllFolderPaths(roots: ChangeTreeNode[]): string[] {
+  const out: string[] = [];
+  for (const n of roots) out.push(...collectFolderPaths(n));
+  return out;
+}

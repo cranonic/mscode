@@ -31,5 +31,14 @@ export const createUISlice: StateCreator<GitState, [], [], UISlice> = (set) => {
       else next[path] = true;
       return { collapsedChangeFolders: next };
     }),
+    setCollapsedChangeFolders: (paths, collapsed) => set(s => {
+      const next = { ...s.collapsedChangeFolders };
+      for (const p of paths) {
+        if (collapsed) next[p] = true;
+        else delete next[p];
+      }
+      return { collapsedChangeFolders: next };
+    }),
+    replaceCollapsedChangeFolders: (map) => set({ collapsedChangeFolders: map }),
   };
 };

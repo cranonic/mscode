@@ -594,7 +594,7 @@ export const displayProperties: IConfigurationSection['properties'] = {
   'editor.scrollbar.vertical': {
     title: 'Vertical Scrollbar',
     type: 'select',
-    defaultValue: 'hidden',
+    defaultValue: 'Auto',
     order: 120,
     subCategory: 'Scrollbar',
     tags: ['scroll'],
@@ -606,7 +606,7 @@ export const displayProperties: IConfigurationSection['properties'] = {
   'editor.scrollbar.horizontal': {
     title: 'Horizontal Scrollbar',
     type: 'select',
-    defaultValue: 'hidden',
+    defaultValue: 'Auto',
     order: 121,
     subCategory: 'Scrollbar',
     tags: ['scroll'],
