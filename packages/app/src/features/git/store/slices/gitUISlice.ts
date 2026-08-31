@@ -14,9 +14,22 @@ export const createUISlice: StateCreator<GitState, [], [], UISlice> = (set) => {
     showChanges:      true,
     sortMode:         initialSort,
 
+    stagedSectionExpanded:   true,
+    unstagedSectionExpanded: true,
+    collapsedChangeFolders:  {},
+
     setCommitMessage:   (msg)  => set({ commitMessage: msg }),
     toggleRepositories: ()     => set(s => ({ showRepositories: !s.showRepositories })),
     toggleChanges:      ()     => set(s => ({ showChanges: !s.showChanges })),
     setSortMode:        (mode: GitSortMode) => set({ sortMode: mode }),
+
+    setStagedSectionExpanded:   (v) => set({ stagedSectionExpanded: v }),
+    setUnstagedSectionExpanded: (v) => set({ unstagedSectionExpanded: v }),
+    setChangeFolderExpanded: (path, expanded) => set(s => {
+      const next = { ...s.collapsedChangeFolders };
+      if (expanded) delete next[path];
+      else next[path] = true;
+      return { collapsedChangeFolders: next };
+    }),
   };
 };

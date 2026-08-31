@@ -136,10 +136,23 @@ export interface UISlice {
   showChanges:      boolean;
   sortMode:         GitSortMode;
 
+  /** Persist Staged Changes collapsible across activity-tab switches. */
+  stagedSectionExpanded:   boolean;
+  /** Persist Changes (unstaged) collapsible across activity-tab switches. */
+  unstagedSectionExpanded: boolean;
+  /**
+   * Folder paths under Changes that are collapsed.
+   * Default = expanded; only collapsed paths are stored (sparse).
+   */
+  collapsedChangeFolders: Record<string, true>;
+
   setCommitMessage:   (msg: string) => void;
   toggleRepositories: () => void;
   toggleChanges:      () => void;
   setSortMode:        (mode: GitSortMode) => void;
+  setStagedSectionExpanded:   (v: boolean) => void;
+  setUnstagedSectionExpanded: (v: boolean) => void;
+  setChangeFolderExpanded:    (path: string, expanded: boolean) => void;
 }
 
 export interface StatusSlice {

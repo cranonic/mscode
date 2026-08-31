@@ -94,8 +94,11 @@ const TreeNodeRow: React.FC<{
   actionIcon, actionTitle, onAction,
   action2Icon, action2Title, onAction2,
 }) => {
-  const [expanded, setExpanded] = useState(true);
   const [hovered, setHovered] = useState(false);
+  // Persist folder expand/collapse in git store (survives activity-tab switches)
+  const collapsedChangeFolders = useGitStore(s => s.collapsedChangeFolders);
+  const setChangeFolderExpanded = useGitStore(s => s.setChangeFolderExpanded);
+  const expanded = !collapsedChangeFolders[node.path];
 
   if (node.isDirectory) {
     const childFiles = collectFilePaths(node);
@@ -104,7 +107,7 @@ const TreeNodeRow: React.FC<{
     return (
       <Collapsible
         expanded={expanded}
-        onToggle={() => setExpanded(v => !v)}
+        onToggle={() => setChangeFolderExpanded(node.path, !expanded)}
         showGuideLine={true}
         titleStyle={{ fontWeight: 'normal' }}
         title={
@@ -263,7 +266,11 @@ const ChangeTreeList: React.FC<{
 // ─── Staged subsection ────────────────────────────────────────────────────────
 
 const StagedSection: React.FC = () => {
-  const { stagedFiles, unstageFile, unstageAll } = useGitStore();
+  const stagedFiles = useGitStore(s => s.stagedFiles);
+  const unstageFile = useGitStore(s => s.unstageFile);
+  const unstageAll = useGitStore(s => s.unstageAll);
+  const expanded = useGitStore(s => s.stagedSectionExpanded);
+  const setExpanded = useGitStore(s => s.setStagedSectionExpanded);
   if (stagedFiles.length === 0) return null;
 
   return (
@@ -279,7 +286,8 @@ const StagedSection: React.FC = () => {
           </span>
         </span>
       }
-      defaultExpanded={true}
+      expanded={expanded}
+      onToggle={() => setExpanded(!expanded)}
       showGuideLine={true}
       rightActions={
         <span
@@ -305,7 +313,12 @@ const StagedSection: React.FC = () => {
 // ─── Unstaged subsection ──────────────────────────────────────────────────────
 
 const UnstagedSection: React.FC = () => {
-  const { unstagedFiles, stageFile, stageAll, discardFile } = useGitStore();
+  const unstagedFiles = useGitStore(s => s.unstagedFiles);
+  const stageFile = useGitStore(s => s.stageFile);
+  const stageAll = useGitStore(s => s.stageAll);
+  const discardFile = useGitStore(s => s.discardFile);
+  const expanded = useGitStore(s => s.unstagedSectionExpanded);
+  const setExpanded = useGitStore(s => s.setUnstagedSectionExpanded);
   if (unstagedFiles.length === 0) return null;
 
   const handleDiscardAll = () => {
@@ -343,7 +356,8 @@ const UnstagedSection: React.FC = () => {
           </span>
         </span>
       }
-      defaultExpanded={true}
+      expanded={expanded}
+      onToggle={() => setExpanded(!expanded)}
       showGuideLine={true}
       rightActions={
         <div style={{ display: 'flex', gap: '2px' }}>
@@ -379,11 +393,28 @@ const UnstagedSection: React.FC = () => {
 };
 
 // ─── Main export ──────────────────────────────────────────────────────────────
+// CommitBox stays sticky at the top of the Changes scroll area (H + V scroll).
 
 export const GitChangesSection: React.FC = () => (
-  <>
-    <CommitBox />
+  <div style={{ position: 'relative', minWidth: '100%' }}>
+    <div
+      style={{
+        position: 'sticky',
+        top: 0,
+        left: 0,
+        zIndex: 25,
+        // Match sidebar panel bg so scrolled file rows don't show through
+        background: 'var(--ms-bg-side, var(--ms-bg-main, #1e1e1e))',
+        // Stick on both axes: stay in view under vertical + horizontal scroll
+        width: '100%',
+        minWidth: '100%',
+        maxWidth: '100%',
+        boxShadow: '0 1px 0 var(--ms-border-color, #333)',
+      }}
+    >
+      <CommitBox />
+    </div>
     <StagedSection />
     <UnstagedSection />
-  </>
+  </div>
 );
