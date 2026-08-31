@@ -38,22 +38,15 @@ export function useFileLoader({ tabId, filePath }: UseFileLoaderOptions) {
       let content = currentViewState?.content;
 
       if (content === undefined) {
-        const isUntitled =
-          !filePath ||
-          filePath.startsWith('untitled');
-
         try {
           // Virtual File Interception
           if (filePath === 'mscode://internal/keybindings.json') {
             content = userKeybindingStore.getRawText();
-          } else if (isUntitled) {
-            // Brand-new buffer — no disk path yet
-            content = '';
           } else {
             content = await fs.readFile(filePath);
           }
         } catch {
-          content = isUntitled ? '' : '// File not found.';
+          content = '// File not found.';
         }
         if (mounted) updateViewState(tabId, { content, isDirty: false });
       }

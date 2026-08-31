@@ -22,8 +22,6 @@ interface EditorViewStateStore {
   initViewStates: (workspacePath: string | null) => Promise<void>;
   updateViewState: (id: string, state: Partial<EditorViewState>) => void;
   setTabDirty: (id: string, isDirty: boolean) => void;
-  /** Move view-state cache from one tab id to another (e.g. untitled → real path). */
-  migrateViewState: (oldId: string, newId: string, extra?: Partial<EditorViewState>) => void;
   saveToStorage: () => Promise<void>;
   clearViewStates: () => void;
 }
@@ -52,17 +50,6 @@ export const useEditorViewStateStore = create<EditorViewStateStore>((set, get) =
 
   setTabDirty: (id, isDirty) => {
     get().updateViewState(id, { isDirty });
-  },
-
-  migrateViewState: (oldId, newId, extra) => {
-    if (!oldId || !newId || oldId === newId) return;
-    set((prev) => {
-      const next = { ...prev.viewStates };
-      const prevState = next[oldId] || {};
-      next[newId] = { ...prevState, ...extra };
-      delete next[oldId];
-      return { viewStates: next };
-    });
   },
 
   saveToStorage: async () => {

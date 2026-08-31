@@ -51,45 +51,11 @@ export function registerFileActions(): void {
 
           await fs.writeFile(newPath, content);
 
-          const oldId = activeTabId;
-          const finalFileName = newPath.split('/').pop() || defaultFileName;
-
-          // Promote untitled → real path: tab id MUST become the absolute path
-          // so Explorer clicks reuse this tab (addTab matches by id === file.path).
-          const { updateTabPaths } = useTabStore.getState();
-          if (updateTabPaths) {
-            updateTabPaths(oldId, newPath);
-          } else if (updateTab) {
-            updateTab(oldId, {
-              id: newPath,
-              filePath: newPath,
-              title: finalFileName,
-              icon: undefined,
-            } as any);
+          if (updateTab) {
+            const finalFileName = newPath.split('/').pop() || defaultFileName;
+            updateTab(activeTabId, { filePath: newPath, title: finalFileName });
           }
-
-          // Ensure title/icon after path migrate (updateTabPaths sets title from basename)
-          useTabStore.getState().updateTab(newPath, {
-            title: finalFileName,
-            icon: undefined, // let tab UI derive from file name
-            filePath: newPath,
-          });
-
-          // Move editor buffer cache untitled-N → real path
-          useEditorViewStateStore.getState().migrateViewState(oldId, newPath, {
-            content,
-            isDirty: false,
-          });
-          setTabDirty(newPath, false);
-
-          // Show new file in Explorer immediately
-          try {
-            await commands.executeCommand('workbench.files.action.refreshFilesExplorer');
-          } catch {
-            useExplorerStore.getState().triggerRefresh();
-          }
-
-          console.log('[System] Saved:', newPath);
+          setTabDirty(activeTabId, false);
         }
         return;
       }
