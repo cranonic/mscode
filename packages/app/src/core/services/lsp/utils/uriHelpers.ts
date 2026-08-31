@@ -1,41 +1,63 @@
 // src/core/services/lsp/utils/uriHelpers.ts
+//
+// Normalize file URIs between Monaco model URIs, on-disk Android paths,
+// and the form expected by language servers (file:///sdcard/...).
 
-import * as monaco from 'monaco-editor';
+import type * as monaco from 'monaco-editor';
 import type { LspState } from '../types';
 
 /**
- * Normalizes absolute Android file paths into LSP-compliant URI addresses.
- * Cleans up double-slash path segments and converts storage boundaries:
- * `/storage/emulated/0/...` translates back into standard `file:///sdcard/...` blocks.
- * 
- * @param uri Raw destination address string received from the file system hooks.
+ * Canonicalize a path or URI into a stable file:// URI that language servers
+ * on Android understand. Maps /storage/emulated/0 → /sdcard.
  */
-export function toLspUri(uri: string): string {
-  let clean = uri.replace(/([^:/])\/{2,}/g, '$1/');
-  clean = clean.replace('file:///storage/emulated/0', 'file:///sdcard');
-  return clean;
+export function toLspUri(input: string): string {
+  if (!input) return 'file:///sdcard';
+
+  let u = input.trim();
+
+  // Already a file URI
+  if (u.startsWith('file://')) {
+    u = u.replace(/^file:\/\/\/storage\/emulated\/0/i, 'file:///sdcard');
+    return u;
+  }
+
+  // Absolute path
+  if (u.startsWith('/')) {
+    u = u.replace(/^\/storage\/emulated\/0/i, '/sdcard');
+    return `file://${u}`;
+  }
+
+  // Relative / bare path
+  return `file:///sdcard/${u.replace(/^\.\//, '')}`;
 }
 
 /**
- * Translates incoming language server paths back into canonical host file system formats.
- * Map conversion layers shift: `file:///sdcard/...` back to native `/storage/emulated/0/...`.
- * 
- * @param uri Standard standardized language server address resource sequence.
+ * Convert an LSP file:// URI back to a form Monaco / the rest of the app uses.
+ * Prefer the original storage path when present; otherwise keep /sdcard.
  */
-export function fromLspUri(uri: string): string {
-  return uri.replace('file:///sdcard', 'file:///storage/emulated/0');
+export function fromLspUri(lspUri: string): string {
+  if (!lspUri) return '';
+  // Keep as file:// so monaco.Uri.parse works; only normalize the path segment
+  return lspUri.replace(/^file:\/\/\/sdcard/i, 'file:///storage/emulated/0');
 }
 
 /**
- * Extracts the authorized workspace-safe target URI tracking a specific document layout model.
- * Checks virtual tracking maps for in-memory virtual scripts, falling back gracefully to 
- * native model structures when mapping definitions are absent.
- * 
- * @param model Active Monaco model definition slice tracking text modifications.
- * @param state Central Language Server state cache tracking transient document mappings.
+ * Resolve the document URI that should be sent to the language server for a
+ * given Monaco model. Prefer the explicit mapping registered via
+ * registerModelUri(); fall back to the model's own URI.
  */
-export function getDocUri(model: monaco.editor.ITextModel, state: LspState): string {
+export function getDocUri(
+  model: monaco.editor.ITextModel,
+  state: LspState,
+): string {
   const mapped = state.modelUriMap.get(model.id);
   if (mapped) return mapped;
-  return toLspUri(model.uri.toString());
+
+  const mu = model.uri.toString();
+  if (mu && !mu.startsWith('inmemory:')) {
+    return toLspUri(mu);
+  }
+
+  // Last resort: synthetic path from model id
+  return toLspUri(`/sdcard/untitled-${model.id}`);
 }

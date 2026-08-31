@@ -1,69 +1,75 @@
 // src/core/services/lsp/providers/index.ts
 //
-// Registers / tears down all Monaco ↔ LSP feature providers for one language session.
+// Registers Monaco language providers against the active LSP connection.
+// For the TypeScript family (ts / tsx / js / jsx) one typescript-language-server
+// process serves all four language IDs, so we register providers for every
+// member of the family.
 
-import * as monaco from 'monaco-editor';
-import type { LspState, LspOptions } from '../types';
+import type { LspState } from '../types';
+import type { LspOptions } from '../types';
 
-import { registerCompletion } from './completion';
-import { registerHover } from './hover';
-import { registerSignatureHelp } from './signatureHelp';
-import { registerDefinition } from './definition';
-import { registerDocumentFormatting } from './formatting';
-import { registerRename } from './rename';
-import { registerReferences } from './references';
+import { registerCompletion }        from './completion';
+import { registerDefinition }        from './definition';
+import { registerDocumentSymbol }    from './documentSymbol';
 import { registerDocumentHighlight } from './documentHighlight';
-import { registerDocumentSymbol } from './documentSymbol';
-import { registerCodeAction } from './codeAction';
-import { registerFoldingRange } from './foldingRange';
-import { registerCodeLens } from './codeLens';
-import { registerDocumentLink } from './documentLink';
-import { registerSelectionRange } from './selectionRange';
-import { registerColorProvider } from './color';
-import { registerOnTypeFormatting } from './onTypeFormatting';
-import { registerSemanticTokens } from './semanticTokens';
-import { registerInlayHints } from './inlayHints';
-import { bindModelTracking } from './modelTracking';
+import { registerDocumentLink }      from './documentLink';
+import { registerCodeAction }        from './codeAction';
+import { registerCodeLens }          from './codeLens';
+import { registerFoldingRange }      from './foldingRange';
+import { registerDocumentFormatting } from './formatting';
+import { registerColorProvider }     from './color';
 
-/**
- * Register Monaco language providers based on `options` flags.
- * Always registers definition, formatting, rename when connected.
- */
-export function registerProviders(state: LspState, options: LspOptions): void {
-  if (options.completion    !== false) registerCompletion(state);
-  if (options.hover         !== false) registerHover(state);
-  if (options.signatureHelp !== false) registerSignatureHelp(state);
+/** Languages that share a single typescript-language-server process. */
+export const TS_JS_FAMILY = [
+  'typescript',
+  'typescriptreact',
+  'javascript',
+  'javascriptreact',
+] as const;
 
-  registerDefinition(state);
-  registerDocumentFormatting(state);
-  registerRename(state);
-
-  if (options.references        !== false) registerReferences(state);
-  if (options.documentHighlight !== false) registerDocumentHighlight(state);
-  if (options.documentSymbol    !== false) registerDocumentSymbol(state);
-  if (options.codeActions       !== false) registerCodeAction(state);
-  if (options.foldingRange      !== false) registerFoldingRange(state);
-  if (options.codeLens          !== false) registerCodeLens(state);
-  if (options.documentLink      !== false) registerDocumentLink(state);
-  if (options.selectionRange    !== false) registerSelectionRange(state);
-  if (options.colorProvider     !== false) registerColorProvider(state);
-  if (options.onTypeFormatting  !== false) registerOnTypeFormatting(state);
-  if (options.semanticTokens    !== false) registerSemanticTokens(state);
-  if (options.inlayHints        !== false) registerInlayHints(state);
-
-  bindModelTracking(state);
+export function isTsJsFamily(langId: string): boolean {
+  return (TS_JS_FAMILY as readonly string[]).includes(langId);
 }
 
 /**
- * Dispose every provider registered for this session and clear markers.
+ * Register all Monaco providers.
+ * When the connected language is any member of the TS/JS family, providers are
+ * registered for every family member so switching tabs (js ↔ ts ↔ tsx) keeps
+ * completions, symbols, hover, etc. working without a reconnect.
  */
+export function registerProviders(state: LspState, options: LspOptions = {}): void {
+  const primary = state.languageId;
+  const langs = isTsJsFamily(primary)
+    ? [...TS_JS_FAMILY]
+    : [primary];
+
+  // Each registerXxx reads state.languageId at call-time for the Monaco API
+  // language argument. Temporarily switch it so every family member gets a
+  // provider; restore the primary id afterwards (used by diagnostics routing).
+  for (const lang of langs) {
+    state.languageId = lang;
+
+    if (options.completion !== false)        registerCompletion(state);
+    if (options.references !== false || options.definition !== false) {
+      registerDefinition(state);
+    }
+    if (options.documentSymbol !== false)    registerDocumentSymbol(state);
+    if (options.documentHighlight !== false) registerDocumentHighlight(state);
+    registerDocumentLink(state);
+    if (options.codeActions !== false)       registerCodeAction(state);
+    if (options.codeLens)                    registerCodeLens(state);
+    if (options.foldingRange !== false)      registerFoldingRange(state);
+    registerDocumentFormatting(state);
+    if (options.colorProvider !== false)     registerColorProvider(state);
+  }
+
+  state.languageId = primary;
+}
+
+/** Dispose every Monaco provider registered for this connection. */
 export function teardownProviders(state: LspState): void {
   for (const d of state.disposables) {
     try { d.dispose(); } catch { /* ignore */ }
   }
   state.disposables = [];
-
-  for (const model of monaco.editor.getModels()) {
-    monaco.editor.setModelMarkers(model, 'lsp', []);
-  }
 }

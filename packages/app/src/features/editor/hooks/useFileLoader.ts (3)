@@ -22,9 +22,6 @@ export function useFileLoader({ tabId, filePath }: UseFileLoaderOptions) {
 
   useEffect(() => {
     let mounted = true;
-    const isUntitled =
-      !filePath ||
-      filePath.startsWith('untitled');
 
     // If we already have cached content, do NOT flip isLoading → true (that used to
     // unmount Monaco and race with setModel → InstantiationService disposed).
@@ -41,6 +38,10 @@ export function useFileLoader({ tabId, filePath }: UseFileLoaderOptions) {
       let content = currentViewState?.content;
 
       if (content === undefined) {
+        const isUntitled =
+          !filePath ||
+          filePath.startsWith('untitled');
+
         try {
           // Virtual File Interception
           if (filePath === 'mscode://internal/keybindings.json') {

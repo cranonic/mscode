@@ -125,19 +125,9 @@ export function registerFileActions(): void {
     'workbench.action.files.newUntitledFile',
     () => {
       const { tabs, addTab } = useTabStore.getState();
-      // Human-facing number: next free Untitled-N among open tabs
       let counter = 1;
-      while (tabs.some(t => t.title === `Untitled-${counter}`)) counter++;
-      // Unique id every time so we never reuse a stale viewState / Monaco model
-      // from a previously closed untitled buffer.
-      const tabId = `untitled-${counter}-${Date.now()}`;
-
-      // Seed an empty buffer BEFORE the editor mounts (prevents "old code" flash)
-      useEditorViewStateStore.getState().updateViewState(tabId, {
-        content: '',
-        isDirty: false,
-      });
-
+      while (tabs.some(t => t.id === `untitled-${counter}`)) counter++;
+      const tabId = `untitled-${counter}`;
       addTab({
         id: tabId,
         type: 'code',

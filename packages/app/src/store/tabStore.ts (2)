@@ -3,7 +3,6 @@ import { create } from 'zustand';
 import { saveWorkspaceState, loadWorkspaceState } from '@/core/services/storageService';
 import { accessLRUItem, removeLRUItem } from '@/utils/lruUtils';
 import { msEvents } from '@/core/extensionAPI/events/EventManager';
-import { useEditorViewStateStore } from '@/features/editor/store/editorViewStateStore';
 
 /**
  * Defines the schema for a workspace tab.
@@ -102,15 +101,6 @@ export const useTabStore = create<TabState>((set, get) => ({
     set({ tabs: newTabs, activeTabId: newActive, recentTabIds: newRecentIds });
     msEvents.emit('onDidCloseTab', id);
     saveTabsToStorage();
-
-    // Drop editor buffer cache so a later Untitled-N does not resurrect
-    // the closed buffer's text (viewStates are keyed by tab id).
-    const vs = useEditorViewStateStore.getState().viewStates;
-    if (vs[id] !== undefined) {
-      const next = { ...vs };
-      delete next[id];
-      useEditorViewStateStore.setState({ viewStates: next });
-    }
   },
 
   setActiveTab: (id) => {

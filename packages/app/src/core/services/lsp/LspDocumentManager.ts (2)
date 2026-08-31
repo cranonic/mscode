@@ -4,7 +4,6 @@ import * as monaco from 'monaco-editor';
 import type { LspState } from './types';
 import { sendNotify } from './LspTransport';
 import { toLspUri, getDocUri } from './utils/uriHelpers';
-import { isTsJsFamily } from './providers';
 
 /**
  * Associates an in-memory Monaco TextModel instance with a concrete filesystem URI address.
@@ -48,16 +47,6 @@ export function unregisterModelUri(
 }
 
 /**
- * True when the model language is compatible with the connected server language.
- * TS/JS family members all share one typescript-language-server process.
- */
-function isCompatibleLanguage(state: LspState, modelLang: string): boolean {
-  if (modelLang === state.languageId) return true;
-  if (isTsJsFamily(state.languageId) && isTsJsFamily(modelLang)) return true;
-  return false;
-}
-
-/**
  * Signals language server ports when switching between document tabs or pulling up fresh source paths.
  * Automatically switches execution tracks between synchronization vectors (`textDocument/didOpen` 
  * vs. full text frame buffers via `textDocument/didChange`).
@@ -70,9 +59,7 @@ export function notifyDocumentOpen(
   model: monaco.editor.ITextModel,
 ): void {
   if (!state.initialized) return;
-
-  const modelLang = model.getLanguageId();
-  if (!isCompatibleLanguage(state, modelLang)) return;
+  if (model.getLanguageId() !== state.languageId) return;
 
   const uri = getDocUri(model, state);
 
@@ -88,20 +75,18 @@ export function notifyDocumentOpen(
   }
 
   // ── INITIAL ACCESS TIER ──
-  // Always send the model's real languageId (javascript vs typescript) so the
-  // server can apply the correct language service. state.languageId may be the
-  // primary key the process was started under (often "typescript").
+  // Dispatch structural allocation signatures for fresh tracking sequences
   sendNotify(state, 'textDocument/didOpen', {
     textDocument: {
       uri,
-      languageId: modelLang,
+      languageId: state.languageId,
       version: model.getVersionId(),
       text: model.getValue(),
     },
   });
   
   state.openedUris.add(uri);
-  console.log(`[LSP] Document stream tracking initialized via didOpen: ${uri} (${modelLang})`);
+  console.log(`[LSP] Document stream tracking initialized via didOpen: ${uri}`);
 }
 
 /**
@@ -115,7 +100,7 @@ export function syncOpenEditors(state: LspState): void {
   console.log(`[LSP] Initializing compilation sync across ${models.length} active models...`);
   
   for (const model of models) {
-    if (!isCompatibleLanguage(state, model.getLanguageId())) continue;
+    if (model.getLanguageId() !== state.languageId) continue;
     notifyDocumentOpen(state, model);
   }
 }

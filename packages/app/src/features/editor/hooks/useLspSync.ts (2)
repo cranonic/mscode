@@ -112,12 +112,11 @@ export function useLspSync(editorInstance: any, tabId: string) {
   const tabs        = useTabStore(s => s.tabs);
   const bootingRef  = useRef(false);  // prevents double-boot during async startup
 
-  // Register status-bar slot once — only visible on code editor tabs
+  // Register status-bar slot once
   useEffect(() => {
     useStatusBarStore.getState().registerItem({
       id: 'lsp-status', alignment: 'right', priority: 55,
       label: 'LSP: Off', icon: 'check',
-      when: "activeTabType == 'code'",
     });
   }, []);
 
@@ -322,16 +321,6 @@ export function useLspSync(editorInstance: any, tabId: string) {
       activeLspService.isConnected
     ) {
       activeLspService.registerModelUri(model, fileUri);
-
-      // Always refresh status bar to the *current* tab language (js ↔ ts etc.)
-      // Previously this early-return left the previous label (e.g. {Html} or {Js}) stuck.
-      if (isEnabled) {
-        useStatusBarStore.getState().updateItem('lsp-status', {
-          label: `{${refractorLangId(langId)}}`,
-          icon: 'check', spin: false,
-          color: 'var(--vscode-testing-iconPassed, #73c991)',
-        });
-      }
 
       if (activeLspService.initialized) {
         activeLspService.notifyDocumentOpen(model);
