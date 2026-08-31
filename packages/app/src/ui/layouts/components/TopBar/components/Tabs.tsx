@@ -160,7 +160,7 @@ export const Tabs: React.FC = () => {
     autoScrollRaf.current = requestAnimationFrame(step);
   }, []);
 
-  const startDragging = useCallback((tabId: string, clientX: number, clientY?: number) => {
+  const startDragging = useCallback((tabId: string, clientX: number, _clientY?: number) => {
     const el = tabRefs.current.get(tabId);
     if (!el) return;
     const rect = el.getBoundingClientRect();
