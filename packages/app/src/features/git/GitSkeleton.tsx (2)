@@ -134,11 +134,6 @@ export function bootstrapGitPanel() {
                 defaultExpanded: true,
                 maxOverflow: 2,
                 defaultHeight: 330,
-                // Match Explorer FileTree: allow horizontal scroll for deep paths
-                scrollX: true,
-                sticky: true,
-                stickyTop: 0,
-                stickyZIndex: 40,
                 actions: changesActions,
             },
             

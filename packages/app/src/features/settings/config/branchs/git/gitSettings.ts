@@ -369,6 +369,42 @@ export const gitSection: IConfigurationSection = {
       ],
     },
 
+    'git.changes.showFileIcons': {
+      title:            'Changes: File Icons',
+      subCategory:      'Decorations',
+      type:             'select',
+      defaultValue:     'sameAsExplorer',
+      order:            61.5,
+      tags:             ['git', 'decorations', 'icons'],
+      markdownDescription:
+        'Controls file icons in the Source Control **Changes** tree.\n\nDefaults to the same behaviour as the Explorer (`#workbench.explorer.showFileIcons#`).',
+      enum:             ['sameAsExplorer', 'show', 'hide'],
+      enumItemLabels:   ['Same as Explorer', 'Show icons', "Don't show"],
+      enumDescriptions: [
+        'Follow `#workbench.explorer.showFileIcons#`.',
+        'Always show file icons in the Changes list.',
+        'Never show file icons in the Changes list.',
+      ],
+    },
+
+    'git.changes.showFolderIcons': {
+      title:            'Changes: Folder Icons',
+      subCategory:      'Decorations',
+      type:             'select',
+      defaultValue:     'sameAsExplorer',
+      order:            61.6,
+      tags:             ['git', 'decorations', 'icons'],
+      markdownDescription:
+        'Controls folder icons in the Source Control **Changes** tree.\n\nDefaults to the same behaviour as the Explorer (`#workbench.explorer.showFolderIcons#`).',
+      enum:             ['sameAsExplorer', 'show', 'hide'],
+      enumItemLabels:   ['Same as Explorer', 'Show icons', "Don't show"],
+      enumDescriptions: [
+        'Follow `#workbench.explorer.showFolderIcons#`.',
+        'Always show folder icons in the Changes list.',
+        'Never show folder icons in the Changes list.',
+      ],
+    },
+
     'git.countBadge': {
       title:            'Activity Bar Badge',
       subCategory:      'Decorations',

@@ -9,7 +9,6 @@ import { Collapsible }          from '@/ui/components/Collapsible/Collapsible';
 import { Icon }                 from '@/ui/components/Icon/IconRegistry';
 import { FileIcon }             from '@/ui/components/FileIcon/DefaultIconTheme';
 import { useNotificationStore } from '@/store/notificationStore';
-import { useSettingsStore }     from '@/features/settings/store/settingsStore';
 import { useGitStore, GIT_STATUS_META } from '../store/gitStore';
 import { CommitBox }            from './CommitBox';
 import { ChangedFileItem }      from './ChangedFileItem';
@@ -18,19 +17,6 @@ import { getCwd }               from '../store/_helpers';
 import { useTabStore }          from '@/store/tabStore';
 import type { GitChangedFile }  from '../store/gitStore';
 import { buildChangeTree, collectFilePaths, type ChangeTreeNode } from './changeTree';
-// Reuse explorer tree row styles so SCM Changes matches the FileTree theme
-import '@/features/explorer/components/FileTree/FileTree.css';
-
-type IconMode = 'sameAsExplorer' | 'show' | 'hide';
-
-function resolveIconVisibility(
-  mode: IconMode | undefined,
-  explorerDefault: boolean,
-): boolean {
-  if (mode === 'show') return true;
-  if (mode === 'hide') return false;
-  return explorerDefault; // sameAsExplorer / undefined
-}
 
 // ─── VS Code–style diff open (files only) ─────────────────────────────────────
 
@@ -74,14 +60,12 @@ export const openGitDiff = async (file: GitChangedFile, isStaged: boolean) => {
   }
 };
 
-// ─── Tree row — mirrors explorer FileTree TreeNode (Collapsible + ms-file-item) ─
+// ─── Tree row (folder or file) ────────────────────────────────────────────────
 
 const TreeNodeRow: React.FC<{
   node: ChangeTreeNode;
   depth: number;
   isStaged: boolean;
-  showFileIcon: boolean;
-  showFolderIcon: boolean;
   actionIcon: string;
   actionTitle: string;
   onAction: (path: string) => void;
@@ -90,94 +74,99 @@ const TreeNodeRow: React.FC<{
   onAction2?: (path: string) => void;
 }> = ({
   node, depth, isStaged,
-  showFileIcon, showFolderIcon,
   actionIcon, actionTitle, onAction,
   action2Icon, action2Title, onAction2,
 }) => {
   const [expanded, setExpanded] = useState(true);
   const [hovered, setHovered] = useState(false);
+  const pad = 12 + depth * 12;
 
   if (node.isDirectory) {
     const childFiles = collectFilePaths(node);
     const meta = node.status ? GIT_STATUS_META[node.status] : null;
 
     return (
-      <Collapsible
-        expanded={expanded}
-        onToggle={() => setExpanded(v => !v)}
-        showGuideLine={true}
-        titleStyle={{ fontWeight: 'normal' }}
-        title={
-          <div
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', width: '100%' }}
-            onMouseEnter={() => setHovered(true)}
-            onMouseLeave={() => setHovered(false)}
-          >
-            {showFolderIcon && (
-              <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
-                <FileIcon name={node.name} isDir={true} isOpen={expanded} />
-              </div>
-            )}
-            <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {node.name}
-            </span>
-            <span style={{ fontSize: 10, color: 'var(--ms-text-faded)', flexShrink: 0 }}>
-              {childFiles.length}
-            </span>
-            <div
-              style={{
-                display: 'flex',
-                gap: 2,
-                opacity: hovered ? 1 : 0,
-                transition: 'opacity 0.1s',
-                flexShrink: 0,
-              }}
-              onClick={e => e.stopPropagation()}
-            >
-              {action2Icon && onAction2 && (
-                <span
-                  title={`${action2Title} folder`}
-                  onClick={() => childFiles.forEach(p => onAction2(p))}
-                  style={{ display: 'flex', padding: 2, color: 'var(--ms-text-faded)' }}
-                >
-                  <Icon name={action2Icon as any} size={14} />
-                </span>
-              )}
+      <div>
+        <div
+          onClick={() => setExpanded(v => !v)}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: `3px 8px 3px ${pad}px`,
+            cursor: 'pointer',
+            backgroundColor: hovered ? 'var(--ms-menu-hover-bg)' : 'transparent',
+            userSelect: 'none',
+            minHeight: 26,
+          }}
+        >
+          <Icon
+            name={expanded ? 'chevron-down' : 'chevron-right'}
+            size={14}
+            style={{ flexShrink: 0, opacity: 0.7 }}
+          />
+          <FileIcon name={node.name} isDir={true} isOpen={expanded} />
+          <span style={{
+            flex: 1,
+            fontSize: 13,
+            color: 'var(--ms-text-main)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
+            {node.name}
+          </span>
+          <span style={{
+            fontSize: 10,
+            color: 'var(--ms-text-faded)',
+            marginRight: 4,
+          }}>
+            {childFiles.length}
+          </span>
+          {/* Stage/unstage whole folder */}
+          <div style={{
+            display: 'flex',
+            opacity: hovered ? 1 : 0,
+            transition: 'opacity 0.1s',
+            gap: 2,
+          }}>
+            {action2Icon && onAction2 && (
               <span
-                title={`${actionTitle} folder`}
-                onClick={() => childFiles.forEach(p => onAction(p))}
+                title={`${action2Title} folder`}
+                onClick={e => {
+                  e.stopPropagation();
+                  childFiles.forEach(p => onAction2(p));
+                }}
                 style={{ display: 'flex', padding: 2, color: 'var(--ms-text-faded)' }}
               >
-                <Icon name={actionIcon as any} size={14} />
-              </span>
-            </div>
-            {meta && (
-              <span
-                title={meta.label}
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: meta.color,
-                  minWidth: 12,
-                  textAlign: 'right',
-                  flexShrink: 0,
-                  paddingRight: 4,
-                }}
-              >
-                {meta.badge}
+                <Icon name={action2Icon as any} size={14} />
               </span>
             )}
+            <span
+              title={`${actionTitle} folder`}
+              onClick={e => {
+                e.stopPropagation();
+                childFiles.forEach(p => onAction(p));
+              }}
+              style={{ display: 'flex', padding: 2, color: 'var(--ms-text-faded)' }}
+            >
+              <Icon name={actionIcon as any} size={14} />
+            </span>
           </div>
-        }
-      >
-        {(node.children || []).map(child => (
+          {meta && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: meta.color, minWidth: 12, textAlign: 'right' }}>
+              {meta.badge}
+            </span>
+          )}
+        </div>
+        {expanded && (node.children || []).map(child => (
           <TreeNodeRow
             key={child.path}
             node={child}
             depth={depth + 1}
             isStaged={isStaged}
-            showFileIcon={showFileIcon}
-            showFolderIcon={showFolderIcon}
             actionIcon={actionIcon}
             actionTitle={actionTitle}
             onAction={onAction}
@@ -186,16 +175,16 @@ const TreeNodeRow: React.FC<{
             onAction2={onAction2}
           />
         ))}
-      </Collapsible>
+      </div>
     );
   }
 
+  // File leaf
   if (!node.file) return null;
   return (
     <ChangedFileItem
       file={node.file}
       depth={depth}
-      showFileIcon={showFileIcon}
       actionIcon={actionIcon}
       actionTitle={actionTitle}
       onAction={onAction}
@@ -219,35 +208,15 @@ const ChangeTreeList: React.FC<{
 }> = ({ files, isStaged, actionIcon, actionTitle, onAction, action2Icon, action2Title, onAction2 }) => {
   const cwd = getCwd() || '';
   const tree = useMemo(() => buildChangeTree(files, cwd), [files, cwd]);
-  const settings = useSettingsStore(s => s.settings);
-
-  const showFileIcon = resolveIconVisibility(
-    settings['git.changes.showFileIcons'] as IconMode | undefined,
-    settings['workbench.explorer.showFileIcons'] ?? true,
-  );
-  const showFolderIcon = resolveIconVisibility(
-    settings['git.changes.showFolderIcons'] as IconMode | undefined,
-    settings['workbench.explorer.showFolderIcons'] ?? false,
-  );
 
   return (
-    <div
-      className="ms-file-tree-container"
-      style={{
-        position: 'relative',
-        width: 'max-content',
-        minWidth: '100%',
-        padding: 0,
-      }}
-    >
+    <>
       {tree.map(node => (
         <TreeNodeRow
           key={node.path}
           node={node}
           depth={0}
           isStaged={isStaged}
-          showFileIcon={showFileIcon}
-          showFolderIcon={showFolderIcon}
           actionIcon={actionIcon}
           actionTitle={actionTitle}
           onAction={onAction}
@@ -256,7 +225,7 @@ const ChangeTreeList: React.FC<{
           onAction2={onAction2}
         />
       ))}
-    </div>
+    </>
   );
 };
 
