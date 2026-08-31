@@ -10,7 +10,6 @@ export const ContextMenuHost: React.FC = () => {
   const isClosing = useMenuStore((s) => s.isClosing);
   const items = useMenuStore((s) => s.items);
   const position = useMenuStore((s) => s.position);
-  const origin = useMenuStore((s) => s.origin);
 
   if (!isOpen && !isClosing) return null;
   if (!items?.length) return null;
@@ -19,7 +18,6 @@ export const ContextMenuHost: React.FC = () => {
     <ContextMenu
       items={items}
       isClosing={isClosing}
-      origin={origin}
       style={{
         position: 'fixed',
         left: position.x,

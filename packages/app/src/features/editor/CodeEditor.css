@@ -129,11 +129,11 @@
   max-height: min(240px, 40vh);
   overflow: auto;
   padding: 10px 14px;
-  border-radius: 6px;
-  background: var(--ms-editor-widget-bg, #252526);
-  border: 1px solid var(--ms-border, #454545);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
-  color: var(--ms-fg, #cccccc);
+  border-radius: 2px;
+  background: var(--ms-bg-main, #252526);
+  border: 1px solid var(--ms-border-light, #454545);
+  box-shadow: 0 6px 20px var(--ms-shadow, #7e7e7e2d);
+  color: var(--ms-text-main, #cccccc);
   font-size: 13px;
   line-height: 1.45;
   z-index: 50;
@@ -162,4 +162,45 @@
 /* Monaco content-widget host can shrink children — force overflow visible */
 .monaco-editor .contentWidgets .ms-diagnostic-popup {
   position: relative;
+}
+
+
+:root {
+  /* Backgrounds */
+  --ms-bg-main:         #1e1e1e;
+  --ms-bg-side:         #252526;
+  --ms-bg-activity:     #333333;
+  --ms-activity-hover:  #444444;
+  --ms-tab-inactive-bg: #2d2d2d;
+  --ms-tab-active-bg:   #1e1e1e;
+
+  /* Text */
+  --ms-text-main:   #cccccc;
+  --ms-text-faded:  #858585;
+  --ms-text-bright: #ffffff;
+
+  /* Borders */
+  --ms-border-light: #393a42;
+  --ms-border-dark:  #595c64;
+  --ms-menu-border:  #454545;
+  --ms-separator:    #454545;
+
+  /* Interactive */
+  --ms-accent:        #007acc;
+  --ms-icon-hover-bg: #333333;
+  --ms-menu-hover-bg: #04395e;
+  --ms-shadow:        rgba(0, 0, 0, 0.36);
+
+  /* Settings & Forms */
+  --ms-settings-bg:             #1e1e1e;
+  --ms-settings-category-color: #888888;
+  --ms-settings-title-color:    #cccccc;
+  --ms-settings-desc-color:     #999999;
+  --ms-settings-link-color:     #3794ff;
+  --ms-input-bg:                #3c3c3c;
+  --ms-input-fg:                #cccccc;
+  --ms-input-border:            #3c3c3c;
+  --ms-input-focus-border:      #007fd4;
+  --ms-code-bg:                 rgba(255, 255, 255, 0.1);
+  --ms-code-fg:                 #ce9178;
 }

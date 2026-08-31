@@ -1,5 +1,5 @@
 // src/ui/components/Notification/NotificationUI.tsx
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect } from 'react';
 import { useNotificationStore, type AppNotification } from '@/store/notificationStore';
 import { useStatusBarStore } from '@/features/statusbar/store/statusBarStore';
 import { Icon } from '@/ui/components/Icon/IconRegistry';
@@ -18,158 +18,12 @@ const getIconForType = (type: string) => {
   }
 };
 
-/** Min distance (px) to commit a swipe-dismiss. */
-const SWIPE_DISMISS_THRESHOLD = 96;
-/** Velocity (px/ms) above which a flick dismisses even below distance threshold. */
-const SWIPE_FLICK_VELOCITY = 0.55;
-
-type NotificationCardProps = {
-  notif: AppNotification;
-  /** true = floating toast; false = notification center list */
-  isToast?: boolean;
-};
-
-/**
- * Swipeable notification card.
- * - Toast (outside): swipe L/R → only dismissToast (stays in center)
- * - Center (inside): swipe L/R → removeNotification (gone for good)
- * Distance-based fade + release momentum (YouTube-popup style). Below threshold → spring back.
- */
-const NotificationCard: React.FC<NotificationCardProps> = ({ notif, isToast }) => {
+const NotificationCard: React.FC<{ notif: AppNotification, isToast?: boolean }> = ({ notif, isToast }) => {
   const { toggleCollapse, dismissToast, removeNotification } = useNotificationStore();
   const hasDetails = !!notif.fullMessage || !!notif.actions?.length;
 
-  const cardRef = useRef<HTMLDivElement>(null);
-  const startX = useRef(0);
-  const startY = useRef(0);
-  const lastX = useRef(0);
-  const lastT = useRef(0);
-  const velocity = useRef(0);
-  const dragging = useRef(false);
-  const axisLocked = useRef<'x' | 'y' | null>(null);
-  const offsetX = useRef(0);
-
-  const applyTransform = useCallback((x: number, withTransition: boolean) => {
-    const el = cardRef.current;
-    if (!el) return;
-    const abs = Math.abs(x);
-    // Fade more as it travels (YouTube-like)
-    const opacity = Math.max(0.15, 1 - abs / 220);
-    el.style.transition = withTransition
-      ? 'transform 0.28s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.28s ease'
-      : 'none';
-    el.style.transform = `translateX(${x}px)`;
-    el.style.opacity = String(opacity);
-  }, []);
-
-  const finishDismiss = useCallback((dir: number) => {
-    const el = cardRef.current;
-    if (!el) return;
-    const fly = dir * (window.innerWidth || 400);
-    el.style.transition = 'transform 0.22s cubic-bezier(0.4, 0, 1, 1), opacity 0.22s ease';
-    el.style.transform = `translateX(${fly}px)`;
-    el.style.opacity = '0';
-    const id = notif.id;
-    window.setTimeout(() => {
-      if (isToast) dismissToast(id);
-      else removeNotification(id);
-      // Reset style in case the same card node is reused (toast → still in center)
-      if (el) {
-        el.style.transition = 'none';
-        el.style.transform = '';
-        el.style.opacity = '';
-      }
-    }, 220);
-  }, [notif.id, isToast, dismissToast, removeNotification]);
-
-  const snapBack = useCallback(() => {
-    applyTransform(0, true);
-    offsetX.current = 0;
-  }, [applyTransform]);
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    // Don't steal clicks from buttons / close
-    if ((e.target as HTMLElement).closest('button, .ms-notif-close, .ms-notif-actions')) return;
-    dragging.current = true;
-    axisLocked.current = null;
-    startX.current = e.clientX;
-    startY.current = e.clientY;
-    lastX.current = e.clientX;
-    lastT.current = e.timeStamp;
-    velocity.current = 0;
-    offsetX.current = 0;
-    try {
-      cardRef.current?.setPointerCapture(e.pointerId);
-    } catch { /* ignore */ }
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!dragging.current) return;
-    const dx = e.clientX - startX.current;
-    const dy = e.clientY - startY.current;
-
-    if (!axisLocked.current) {
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-      axisLocked.current = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'x' : 'y';
-      if (axisLocked.current === 'y') {
-        // Let vertical scroll in center body work
-        dragging.current = false;
-        return;
-      }
-    }
-
-    if (axisLocked.current !== 'x') return;
-    e.preventDefault();
-
-    const dt = Math.max(1, e.timeStamp - lastT.current);
-    velocity.current = (e.clientX - lastX.current) / dt;
-    lastX.current = e.clientX;
-    lastT.current = e.timeStamp;
-
-    offsetX.current = dx;
-    applyTransform(dx, false);
-  };
-
-  const onPointerUp = () => {
-    if (!dragging.current) return;
-    dragging.current = false;
-
-    if (axisLocked.current !== 'x') {
-      axisLocked.current = null;
-      return;
-    }
-    axisLocked.current = null;
-
-    const x = offsetX.current;
-    const v = velocity.current;
-    const absX = Math.abs(x);
-    const absV = Math.abs(v);
-    const dir = x === 0 ? (v >= 0 ? 1 : -1) : x > 0 ? 1 : -1;
-
-    // Momentum nudge: project a bit further in the flick direction
-    const projected = absX + absV * 120;
-    const shouldDismiss =
-      absX >= SWIPE_DISMISS_THRESHOLD ||
-      absV >= SWIPE_FLICK_VELOCITY ||
-      projected >= SWIPE_DISMISS_THRESHOLD * 1.15;
-
-    if (shouldDismiss) {
-      finishDismiss(dir);
-    } else {
-      snapBack();
-    }
-  };
-
   return (
-    <div
-      ref={cardRef}
-      className={`ms-notif-card ${isToast ? 'is-toast' : ''}${notif.progress !== undefined ? ' has-progress' : ''}`}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      style={{ touchAction: 'pan-y' }}
-    >
+    <div className={`ms-notif-card ${isToast ? 'is-toast' : ''}`}>
       <div className="ms-notif-header" onClick={() => hasDetails && toggleCollapse(notif.id)}>
         <div className="ms-notif-icon">
           {notif.iconUrl ? (
@@ -181,6 +35,7 @@ const NotificationCard: React.FC<NotificationCardProps> = ({ notif, isToast }) =
         <div className="ms-notif-title-area">
           <div className="ms-notif-title-wrapper">
             <span className="ms-notif-title">{notif.title}</span>
+            {/* GROUPING BADGE*/}
             {notif.count && notif.count > 1 && (
               <span className="ms-notif-badge">{notif.count}</span>
             )}
@@ -206,10 +61,7 @@ const NotificationCard: React.FC<NotificationCardProps> = ({ notif, isToast }) =
 
       {notif.progress !== undefined && (
         <div className="ms-notif-progress-bar">
-          <div
-            className="ms-notif-progress-fill"
-            style={{ width: `${Math.max(0, Math.min(100, notif.progress))}%` }}
-          />
+          <div className="ms-notif-progress-fill" style={{ width: `${notif.progress}%` }}></div>
         </div>
       )}
 
@@ -255,6 +107,7 @@ export const NotificationUI: React.FC = () => {
     });
   }, [notifications, toggleCenter]);
 
+  // Notification Panel : Back button
   useEffect(() => {
     if (isCenterOpen) {
       const handlerId = 'notif-center-close-handler';

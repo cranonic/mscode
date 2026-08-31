@@ -65,7 +65,6 @@ function _handleAccountClick(e?: MouseEvent) {
 
   const { isAuthenticated, user, signInWithGitHub } = useGithubAuthStore.getState();
     
-  // Activity-bar bottom items → grow upward from bottom-left
   if (isAuthenticated && user) {
     useMenuStore.getState().openMenu('activitybar/account', x, y, [
       { id: 'acc-user', label: `${user.login} (GitHub)`, icon: 'github', disabled: true },
@@ -73,11 +72,11 @@ function _handleAccountClick(e?: MouseEvent) {
       { id: 'acc-manage', label: 'Manage Trusted Extensions', icon: 'shield', onClick: () => _manageTrustedExtensions() },
       { type: 'separator', id: 'sep2' },
       { id: 'acc-logout', label: 'Sign Out', icon: 'sign-out', onClick: () => commands.executeCommand('github.signOut') }
-    ], 'bottom-left');
+    ]);
   } else {
     useMenuStore.getState().openMenu('activitybar/account', x, y, [
       { id: 'acc-login', label: 'Sign in with GitHub to use MSCode Sync', icon: 'account', onClick: () => signInWithGitHub() }
-    ], 'bottom-left');
+    ]);
   }
   
   
@@ -127,8 +126,7 @@ function _handleSettingsClick(e?: MouseEvent) {
   const x = e?.clientX ?? 60;
   const y = e?.clientY ?? window.innerHeight - 150;
   
-  // Settings sits at bottom of activity bar → open with bottom-left scale origin
-  useMenuStore.getState().openMenu('activitybar/settings', x, y, undefined, 'bottom-left');
+  useMenuStore.getState().openMenu('activitybar/settings', x, y);
 }
 
 // ─── Usage examples ───────────────────────────────────────────────────────────

@@ -29,7 +29,7 @@ export const MainLayout: React.FC<{ children?: React.ReactNode }> = ({ children 
   const { tabs, activeTabId, addTab, recentTabIds } = useTabStore();
   const { state: sidebarState, setState: setSidebarState, width: panelWidth } = useSidebarStore();
   
-  const { isOpen, isClosing, position, origin, items, closeMenu } = useMenuStore();
+  const { isOpen, position, items, closeMenu } = useMenuStore();
   const { openPalette, openQuickPick } = usePaletteStore();
   const { workspacePath } = useExplorerStore();
   const { settings } = useSettingsStore();
@@ -212,14 +212,7 @@ export const MainLayout: React.FC<{ children?: React.ReactNode }> = ({ children 
       <NotificationUI />
 
       <StatusBar />
-      {(isOpen || isClosing) && items.length > 0 && (
-        <ContextMenu
-          items={items}
-          isClosing={isClosing}
-          origin={origin}
-          style={{ position: 'fixed', top: position.y, left: position.x, zIndex: 999999 }}
-        />
-      )}
+      {isOpen && <ContextMenu items={items} style={{ position: 'fixed', top: position.y, left: position.x, zIndex: 999999 }} />}
       <CommandPalette />
     </div>
   );

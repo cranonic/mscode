@@ -130,8 +130,7 @@ export const FilePickerList: React.FC<FileListProps> = ({
         let isDisabled = false;
         if (mode === 'folder' && !item.isDirectory) isDisabled = true;
 
-        // multiFile always shows checkboxes (mark files & folders); other modes need markMode
-        const showCheck = (markMode || mode === 'multiFile') && currentPath !== 'ROOT';
+        const showCheck = markMode && currentPath !== 'ROOT';
 
         return (
           <div

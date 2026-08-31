@@ -11,7 +11,9 @@ export async function getStatus(
   cwd: string
 ): Promise<{ staged: GitChangedFile[]; unstaged: GitChangedFile[] }> {
   try {
-    const output = await run('status --porcelain=v1', cwd, true); // silent polling
+    // -uall: list every untracked file instead of collapsing to `?? dir/`
+    // so directories don't appear as fake "files" that break diff/readFile.
+    const output = await run('status --porcelain=v1 -uall', cwd, true);
 
     const staged:   GitChangedFile[] = [];
     const unstaged: GitChangedFile[] = [];
@@ -40,12 +42,18 @@ export async function getStatus(
         relativePath = parts[1].trim();
       }
 
+      // Trailing slash → directory entry (empty untracked dir, etc.)
+      const isDirectory = relativePath.endsWith('/');
+      if (isDirectory) {
+        relativePath = relativePath.replace(/\/+$/, '');
+      }
+
       const absolutePath = `${cwd}/${relativePath}`;
       const name         = relativePath.split('/').pop() || relativePath;
 
-      // 1. Untracked file (??)
+      // 1. Untracked (??)
       if (x === '?' && y === '?') {
-        unstaged.push({ path: absolutePath, name, status: 'untracked' });
+        unstaged.push({ path: absolutePath, name, status: 'untracked', isDirectory });
         continue;
       }
 
@@ -56,7 +64,7 @@ export async function getStatus(
         if (x === 'D') status = 'deleted';
         if (x === 'R') status = 'renamed';
         if (x === 'U') status = 'conflicted';
-        staged.push({ path: absolutePath, name, status, oldPath });
+        staged.push({ path: absolutePath, name, status, oldPath, isDirectory });
       }
 
       // 3. Unstaged change (Y column)
@@ -66,7 +74,7 @@ export async function getStatus(
         if (y === 'D') status = 'deleted';
         if (y === 'R') status = 'renamed';
         if (y === 'U') status = 'conflicted';
-        unstaged.push({ path: absolutePath, name, status, oldPath });
+        unstaged.push({ path: absolutePath, name, status, oldPath, isDirectory });
       }
     }
 

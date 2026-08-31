@@ -31,41 +31,16 @@ export interface MenuGroup {
   options: MenuItem[];
 }
 
-/**
- * Scale-animation anchor for the context menu panel.
- * - `top-left` / `top-right` — was formerly called `right` / `left` openSide
- * - `bottom-left` / `bottom-right` — activity-bar / bottom UI menus
- * - `top` / `bottom` / `left` / `right` / `center` — edge & center origins
- */
-export type MenuOrigin =
-  | 'top-left'
-  | 'top-right'
-  | 'bottom-left'
-  | 'bottom-right'
-  | 'top'
-  | 'bottom'
-  | 'left'
-  | 'right'
-  | 'center';
-
 export interface MenuState {
   isOpen: boolean;
   /** True while exit animation plays — host should keep menu mounted. */
   isClosing: boolean;
   position: { x: number; y: number };
-  /** Transform-origin for open/close scale animation. */
-  origin: MenuOrigin;
   items: MenuItem[];
   dynamicHistory: Record<string, MenuItem[]>;
 
-  openMenu: (
-    menuId: string,
-    x: number,
-    y: number,
-    defaultItems?: MenuGroup[] | MenuItem[],
-    origin?: MenuOrigin,
-  ) => void;
-  openMenuDirect: (x: number, y: number, items: MenuItem[], origin?: MenuOrigin) => void;
+  openMenu: (menuId: string, x: number, y: number, defaultItems?: MenuGroup[] | MenuItem[]) => void;
+  openMenuDirect: (x: number, y: number, items: MenuItem[]) => void;
   closeMenu: () => void;
   /**
    * Actually tears the menu down (isOpen:false, items cleared). Called by
@@ -172,13 +147,12 @@ export const useMenuStore = create<MenuState>((set, _get) => ({
   isOpen: false,
   isClosing: false,
   position: { x: 0, y: 0 },
-  origin: 'top-left' as MenuOrigin,
   items: [],
   registeredMenus: {},
   
   dynamicHistory: {}, // for only developer tools like menu page
 
-  openMenu: (menuId, x, y, defaultItems = [], origin = 'top-left') => set((state) => {
+  openMenu: (menuId, x, y, defaultItems = []) => set((state) => {
     if (closeSafetyTimer) { clearTimeout(closeSafetyTimer); closeSafetyTimer = null; }
 
     
@@ -212,17 +186,16 @@ export const useMenuStore = create<MenuState>((set, _get) => ({
     return { 
       isOpen: true,
       isClosing: false,
-      position: { x, y },
-      origin,
+      position: { x, y }, 
       items: resolvedItems,
       dynamicHistory: updatedHistory 
     };
   }),
 
-  openMenuDirect: (x, y, items, origin = 'top-left') => {
+  openMenuDirect: (x, y, items) => {
     if (closeSafetyTimer) { clearTimeout(closeSafetyTimer); closeSafetyTimer = null; }
     if (items.length > 0) {
-      set({ isOpen: true, isClosing: false, position: { x, y }, origin, items });
+      set({ isOpen: true, isClosing: false, position: { x, y }, items });
     }
   },
 

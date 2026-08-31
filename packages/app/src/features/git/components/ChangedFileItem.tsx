@@ -10,6 +10,8 @@ import type { GitChangedFile } from '../store/gitStore';
 
 interface ChangedFileItemProps {
   file:        GitChangedFile;
+  /** Nesting depth when rendered inside a folder tree (0 = root). */
+  depth?:      number;
   /** Primary action button icon + tooltip (e.g. stage / unstage) */
   actionIcon:  string;
   actionTitle: string;
@@ -25,16 +27,19 @@ interface ChangedFileItemProps {
 
 export const ChangedFileItem: React.FC<ChangedFileItemProps> = ({
   file,
+  depth = 0,
   actionIcon, actionTitle, onAction,
   action2Icon, action2Title, onAction2,
   onClick,
 }) => {
   const [hovered, setHovered] = useState(false);
   const meta = GIT_STATUS_META[file.status];
+  const isDir = !!file.isDirectory;
 
-  // Derive the folder portion for the dim path label
-  const parts     = file.path.split('/');
-  const folderPath = parts.slice(1, -1).join('/'); // strips leading '/'
+  // When nested in a tree, path is implied by parents — hide dim path label
+  const showPathLabel = depth === 0;
+  const parts      = file.path.split('/');
+  const folderPath = parts.slice(1, -1).join('/');
 
   return (
     <div
@@ -45,19 +50,19 @@ export const ChangedFileItem: React.FC<ChangedFileItemProps> = ({
         display:         'flex',
         alignItems:      'center',
         gap:             '6px',
-        padding:         '3px 8px 3px 16px',
+        padding:         `3px 8px 3px ${12 + depth * 12 + (depth > 0 ? 14 : 4)}px`,
         cursor:          'pointer',
         backgroundColor: hovered ? 'var(--ms-menu-hover-bg)' : 'transparent',
         userSelect:      'none',
         minHeight:       '26px',
       }}
     >
-      {/* File Icon */}
+      {/* File / folder icon */}
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
-        <FileIcon name={file.name} isDir={false} />
+        <FileIcon name={file.name} isDir={isDir} />
       </div>
 
-      {/* Filename + dim folder path */}
+      {/* Filename + optional dim folder path (flat mode only) */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'baseline', gap: '0px', overflow: 'hidden', minWidth: 0 }}>
         <span style={{
           display: 'flex',
@@ -77,7 +82,7 @@ export const ChangedFileItem: React.FC<ChangedFileItemProps> = ({
           fontStyle : meta.style 
         }}>{file.name}</span>
         )}
-          {folderPath && (
+          {showPathLabel && folderPath && (
           <span style={{
             fontSize:     '9px',
             color:        'var(--ms-text-faded)',

@@ -17,7 +17,7 @@ export type GitFileStatus =
  * Interface contract tracking metadata for individual changed files in a repository.
  */
 export interface GitChangedFile {
-  /** Absolute or workspace path to the file/directory. */
+  /** Workspace relative canonical path to the file. */
   path:     string;
   /** Individual baseline filename including its file extension. */
   name:     string;
@@ -25,11 +25,6 @@ export interface GitChangedFile {
   status:   GitFileStatus;
   /** Populated only during rename states to track historical layout targets. */
   oldPath?: string;
-  /**
-   * True when this entry is a directory (e.g. untracked folder from
-   * `git status` without `-uall`). Must not open a file diff.
-   */
-  isDirectory?: boolean;
 }
 
 /**

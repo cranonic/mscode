@@ -94,6 +94,8 @@ export interface CollapsibleProps {
   actionMenuId?: string;
   /** Max inline actions before grouping into a dropdown */
   maxOverflow?: number;
+  /** Context-menu scale origin for overflow / submenu (e.g. `'top-right'`). */
+  menuOrigin?: import('@/store/menuStore').MenuOrigin;
   /** Legacy support for arbitrary ReactNode actions */
   rightActions?: React.ReactNode;
   
@@ -121,7 +123,8 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
   children, 
   actions, 
   actionMenuId, 
-  maxOverflow, 
+  maxOverflow,
+  menuOrigin,
   rightActions, 
   onHeaderClick, 
   onHeaderContextMenu, 
@@ -201,6 +204,7 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
                 actions={actions}
                 menuId={actionMenuId || `collapsible-${title?.toString().replace(/\s+/g, '-').toLowerCase() || 'actions'}`}
                 maxOverflow={maxOverflow}
+                menuOrigin={menuOrigin}
               />
             ) : null}
             {rightActions}

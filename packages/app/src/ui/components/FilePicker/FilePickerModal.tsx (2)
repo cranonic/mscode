@@ -61,9 +61,7 @@ export const FilePickerModal: React.FC = () => {
       setInlineEdit(null);
       setRootView('storage');
       setSearchQuery('');
-      // multiFile: start in mark mode so user can multi-select files & folders;
-      // confirm stays disabled until at least one item is marked.
-      setMarkMode(options.mode === 'multiFile');
+      setMarkMode(false);
     }
   }, [isOpen, options]);
 
@@ -359,23 +357,15 @@ export const FilePickerModal: React.FC = () => {
 
   const handleItemClick = (item: FileStat) => {
     if (options!.mode === 'multiFile') {
-      // Folders: navigate in (keep existing marks). Files: toggle mark.
-      if (item.isDirectory) {
-        navigateTo(item.path.startsWith('content://') ? item.path : resolveContentUri(item.path));
-        // keep selectedPaths so marks persist across folders
-        return;
-      }
-      setMarkMode(true);
       const newSet = new Set(selectedPaths);
       if (newSet.has(item.path)) newSet.delete(item.path);
       else newSet.add(item.path);
       setSelectedPaths(newSet);
-      return;
-    }
-
-    setSelectedPaths(new Set([item.path]));
-    if (options!.mode === 'saveAs' && !item.isDirectory) {
-      setFileNameInput(item.name);
+    } else {
+      setSelectedPaths(new Set([item.path]));
+      if (options!.mode === 'saveAs' && !item.isDirectory) {
+        setFileNameInput(item.name);
+      }
     }
 
     if (openMode === 'singleClick') {

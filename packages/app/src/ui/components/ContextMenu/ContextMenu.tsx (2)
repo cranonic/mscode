@@ -3,24 +3,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import './ContextMenu.css';
 import { Icon } from '../Icon/IconRegistry';
-import { useMenuStore, type MenuItem, type MenuOrigin } from '@/store/menuStore'; 
+import { useMenuStore, type MenuItem } from '@/store/menuStore'; 
 import { useBackButtonStore } from '@/store/backButtonStore';
-
-/** Maps MenuOrigin → CSS transform-origin value. */
-export const menuOriginToCss = (origin: MenuOrigin): string => {
-  switch (origin) {
-    case 'top-left':     return 'top left';
-    case 'top-right':    return 'top right';
-    case 'bottom-left':  return 'bottom left';
-    case 'bottom-right': return 'bottom right';
-    case 'top':          return 'top center';
-    case 'bottom':       return 'bottom center';
-    case 'left':         return 'center left';
-    case 'right':        return 'center right';
-    case 'center':       return 'center center';
-    default:             return 'top left';
-  }
-};
 
 /**
  * Interface definition holding requirements for the ContextMenu context layer.
@@ -39,17 +23,9 @@ export interface ContextMenuProps {
   isClosing?: boolean;
 
   /**
-   * Scale-animation anchor for this panel.
-   * Prefer `origin` over legacy `openSide`.
-   * - `top-left` / `top-right` — standard context menus
-   * - `bottom-left` / `bottom-right` — activity-bar / bottom chrome
-   * - `top` / `bottom` / `left` / `right` / `center` — edge & center
-   */
-  origin?: MenuOrigin;
-
-  /**
-   * @deprecated Use `origin` instead.
-   * Legacy submenu side: `'right'` → origin `top-left`, `'left'` → origin `top-right`.
+   * The side from which this menu was spawned by its parent item.
+   * Used to anchor the CSS scale animation to the correct origin point.
+   * Defaults to `'right'` → `transformOrigin: 'top left'`.
    */
   openSide?: 'right' | 'left';
 }
@@ -89,14 +65,7 @@ const trimSeparators = (items: MenuItem[]): MenuItem[] =>
       item.type !== 'separator' || arr.slice(idx + 1).some(r => r.type !== 'separator')
     );
 
-export const ContextMenu: React.FC<ContextMenuProps> = ({
-  items,
-  style,
-  isNested,
-  isClosing,
-  origin,
-  openSide,
-}) => {
+export const ContextMenu: React.FC<ContextMenuProps> = ({ items, style, isNested, isClosing, openSide = 'left' }) => {
   // Selector (not the whole store) so this component only re-renders when
   // closeMenu itself changes identity — not on every unrelated store mutation
   // (e.g. registerMenuItem calls happening anywhere else in the app).
@@ -104,6 +73,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   
   const menuRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  // const exitFallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Root menu MUST be position:fixed for `top`/`left` to work and for its z-index to
   // actually apply (z-index is ignored on position:static elements). Without this,
   // the full-screen overlay (which IS positioned) paints above the menu and eats the
@@ -123,12 +93,11 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   // and "disable while menu open" never works.
   const [overlayArmed, setOverlayArmed] = useState(false);
 
-  // Resolve animation origin:
-  // 1) explicit `origin` prop  2) legacy openSide  3) default top-left
-  const resolvedOrigin: MenuOrigin =
-    origin ??
-    (openSide === 'left' ? 'top-right' : openSide === 'right' ? 'top-left' : 'top-left');
-  const transformOrigin = menuOriginToCss(resolvedOrigin);
+  // Derives the CSS transform-origin anchor so the scale animation grows from
+  // the edge that is visually connected to its parent item/cursor.
+  // • Main menu (openSide default 'right') → scales from top-left
+  // • Sub-menu spawned to the left         → scales from top-right
+  const transformOrigin = openSide === 'left' ? 'top right' : 'top left';
 
   // ─── 0. INSTANT-CLOSE SAFEGUARD (root menu only) ────────────────────────
   // If the exit animation is effectively zero-length (duration 0, or no
@@ -450,8 +419,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
                     isNested={true}
                     isClosing={isClosing}
                     style={{ position: 'relative', left: 'auto', top: 'auto' }}
-                    // Sub-menu to the right grows from top-left; to the left from top-right
-                    origin={subPosition === 'right' ? 'top-left' : 'top-right'}
+                    openSide={subPosition}
                   />
                 </div>
               )}

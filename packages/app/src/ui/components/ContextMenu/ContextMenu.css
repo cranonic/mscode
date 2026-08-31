@@ -32,7 +32,9 @@
  *    transform), so the boundary correction actually stays visible.
  */
 .ms-context-menu-shell {
+  position: relative;
   z-index: 100010;
+  pointer-events: auto;
 }
 
 .ms-context-menu {

@@ -33,7 +33,7 @@ export const ExtensionSearch: React.FC<ExtensionSearchProps> = ({ filter, setFil
     }));
 
     // Launch the core menu subsystem
-    openMenu('sidebar/extensions/filter', x, y, menuItems);
+    openMenu('sidebar/extensions/filter', x, y, menuItems, "top");
   };
 
   return (

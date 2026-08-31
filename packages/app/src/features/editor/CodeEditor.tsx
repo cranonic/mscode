@@ -207,28 +207,31 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tabId, filePath }) => {
       onClick={handleWrapperClick}
       onTouchStart={() => refs.closeMenuRef.current()}
     >
-      {isLoading ? (
+      {/* Keep Monaco mounted once shown — toggling isLoading must NOT unmount <Editor>,
+          or InstantiationService is disposed while setModel still runs (tab-switch crash). */}
+      {isLoading && !editorInstance && (
         <div style={{ padding: 20, color: 'var(--ms-text-faded)', fontStyle: 'italic' }}>Loading…</div>
-      ) : (
+      )}
+      {(!isLoading || editorInstance) && (
         <Editor
-          height="100%" 
-          width="100%" 
-          path={filePath} 
+          height="100%"
+          width="100%"
+          path={filePath}
           defaultLanguage="plaintext"
           theme={activeThemeId}
           value={initialContent}
-          options={monacoOptions} 
-          onMount={handleEditorDidMount} 
+          options={monacoOptions}
+          onMount={handleEditorDidMount}
           onChange={handleEditorChange}
-          keepCurrentModel={true} 
+          keepCurrentModel={true}
         />
       )}
 
-      {editorInstance && !isLoading && (
+      {editorInstance && (
         <EditorScrollbar editor={editorInstance} config={scrollbarConfig} />
       )}
 
-      {teardropsOn && !isLoading && (
+      {teardropsOn && editorInstance && (
         <TeardropsOverlay
           cursorDOMRef={refs.cursorDOMRef} 
           selectionStartDOMRef={refs.selectionStartDOMRef} 

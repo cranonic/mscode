@@ -144,7 +144,7 @@ export const FilePickerToolbar: React.FC<ToolbarProps> = ({
     e?.stopPropagation?.();
     const { x, y } = anchorFromEvent(e);
     // Pass children as top-level items — each is a leaf with onClick
-    openMenu(x, y, sortChildren);
+    openMenu(x, y, sortChildren );
   };
 
   const actions: ActionDef[] = useMemo(() => {
@@ -276,7 +276,7 @@ export const FilePickerToolbar: React.FC<ToolbarProps> = ({
         onClick: () => a.onClick(e),
       };
     });
-    openMenu(x, y, items);
+    openMenu(x, y, items , "top-right");
   };
 
   return (

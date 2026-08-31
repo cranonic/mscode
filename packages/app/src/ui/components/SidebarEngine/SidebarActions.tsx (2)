@@ -10,7 +10,7 @@
 
 import React, { useRef }    from 'react';
 import { Icon }             from '@/ui/components/Icon/IconRegistry';
-import { useMenuStore, getResolvedMenu, type MenuItem, type MenuOrigin } from '@/store/menuStore';
+import { useMenuStore, getResolvedMenu, type MenuItem } from '@/store/menuStore';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -28,12 +28,6 @@ interface SidebarActionsProps {
   menuId:       string;
   /** Max non-separator icons before collapsing into ⋮. Default 3. */
   maxOverflow?: number;
-  /**
-   * Scale-animation origin for overflow / submenu context menus.
-   * TopTitle (top-right chrome) should pass `'top-right'`.
-   * Default: `'top-left'`.
-   */
-  menuOrigin?: MenuOrigin;
 }
 
 // ─── Inline separator ─────────────────────────────────────────────────────────
@@ -57,15 +51,8 @@ const InlineSeparator: React.FC = () => (
 const ActionButton: React.FC<{
   item:    MenuItem;
   menuId:  string;
-  menuOrigin?: MenuOrigin;
-  openMenu: (
-    menuId: string,
-    x: number,
-    y: number,
-    defaultItems?: any[],
-    origin?: MenuOrigin,
-  ) => void;
-}> = ({ item, menuId, menuOrigin = 'top-left', openMenu }) => {
+  openMenu: (menuId: string, x: number, y: number, defaultItems?: any[]) => void;
+}> = ({ item, menuId, openMenu }) => {
   const btnRef = useRef<HTMLSpanElement>(null);
 
   const handleClick = (e: React.MouseEvent) => {
@@ -75,14 +62,9 @@ const ActionButton: React.FC<{
     if (item.children?.length) {
       // Submenu: open as a context menu anchored to this button
       const rect = btnRef.current?.getBoundingClientRect();
-      // top-right origin: align menu's top-right corner with the button's right edge
-      const MENU_MIN_W = 220;
-      const x =
-        menuOrigin === 'top-right' || menuOrigin === 'bottom-right'
-          ? (rect?.right ?? e.clientX) - MENU_MIN_W
-          : (rect?.left ?? e.clientX);
+      const x = rect?.left  ?? e.clientX;
       const y = rect?.bottom ?? e.clientY + 4;
-      openMenu(`${menuId}/sub-${item.id}`, x, y, item.children, menuOrigin);
+      openMenu(`${menuId}/sub-${item.id}`, x, y, item.children);
     } else {
       item.onClick?.(item.data);
     }
@@ -123,9 +105,8 @@ export const SidebarActions: React.FC<SidebarActionsProps> = ({
   actions,
   menuId,
   maxOverflow = 3,
-  menuOrigin = 'top-left',
 }) => {
-  const { openMenu, openMenuDirect } = useMenuStore();
+  const { openMenu , openMenuDirect} = useMenuStore();
   const anchorRef    = useRef<HTMLDivElement>(null);
   const actionIconGap : string = "6px" ;
 
@@ -169,14 +150,11 @@ export const SidebarActions: React.FC<SidebarActionsProps> = ({
   const handleOverflow = (e: React.MouseEvent) => {
     e.stopPropagation();
     const rect = anchorRef.current?.getBoundingClientRect();
-    // top-right: place so menu's top-right sits under the ⋮ button (grows left+down)
-    const MENU_MIN_W = 220;
-    const x =
-      menuOrigin === 'top-right' || menuOrigin === 'bottom-right'
-        ? (rect?.right ?? e.clientX) - MENU_MIN_W
-        : (rect?.left ?? e.clientX);
+    const x = rect?.left   ?? e.clientX;
     const y = rect?.bottom ?? e.clientY + 4;
-    openMenuDirect(x, y, overflowItems, menuOrigin);
+    // openMenu resolves the menuId again — so registerMenuItem contributions appear here too
+    // openMenu(menuId, x, y, overflowItems);
+    openMenuDirect(x, y, overflowItems);
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -194,7 +172,6 @@ export const SidebarActions: React.FC<SidebarActionsProps> = ({
             key={item.id}
             item={item}
             menuId={menuId}
-            menuOrigin={menuOrigin}
             openMenu={openMenu}
           />
         )

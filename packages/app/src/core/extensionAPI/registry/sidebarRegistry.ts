@@ -1,10 +1,10 @@
 // src/core/extensionAPI/registry/sidebarRegistry.ts
 
 import React from 'react';
-import type { MenuItem } from '@/store/menuStore';
+import type { MenuItem, MenuOrigin } from '@/store/menuStore';
 
 // ─── Re-export MenuItem so callers don't need two imports ─────────────────────
-export type { MenuItem };
+export type { MenuItem, MenuOrigin };
 
 // ─── Section content types ────────────────────────────────────────────────────
 
@@ -52,6 +52,11 @@ export interface SidebarSectionDef {
   // Supports: icon buttons, separators (→ inline `|`), submenus, disabled state.
   actions?:      MenuItem[];
   maxOverflow?:  number;       // @default 3
+  /**
+   * Context-menu scale origin for overflow / submenu.
+   * Sidebar section actions sit on the right → default `'top-right'` in SidebarEngine.
+   */
+  menuOrigin?:   MenuOrigin;
   when?:   string | boolean;
 }
 
@@ -65,6 +70,8 @@ export interface SidebarPanelHeader {
   //
   actions?:     MenuItem[];
   maxOverflow?: number;        // @default 3
+  /** Overflow menu animation origin. Default in engine: `'top-right'`. */
+  menuOrigin?:  MenuOrigin;
 }
 
 // ─── Panel definition ─────────────────────────────────────────────────────────

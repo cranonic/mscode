@@ -10,6 +10,7 @@ import { commands } from '@/core/extensionAPI/registry/commandRegistry';
 import { contextKeyService } from '@/core/keybindings/contextKeyService';
 import { useNotificationStore } from '@/store/notificationStore';
 import { customPreviewerRegistry } from '@/core/extensionAPI/registry/previewerRegistry';
+import { useFilePickerStore } from '@/store/filePickerStore';
 
 export function useExplorerActions() {
   const { addTab } = useTabStore();
@@ -129,6 +130,132 @@ export function useExplorerActions() {
     } catch (e) { console.error('Paste failed:', e); }
   };
 
+  /** Unique dest path if name already exists: name → name (1) → name (2) … */
+  const uniqueDestPath = async (parentPath: string, name: string): Promise<string> => {
+    const join = (n: string) =>
+      parentPath === '/' ? `/${n}` : `${parentPath.replace(/\/$/, '')}/${n}`;
+
+    let existing = new Set<string>();
+    try {
+      const entries = await fs.readDir(parentPath);
+      existing = new Set(entries.map(e => e.name));
+    } catch { /* parent may not list; still try original name */ }
+
+    if (!existing.has(name)) return join(name);
+
+    const dot = name.lastIndexOf('.');
+    const hasExt = dot > 0 && !name.startsWith('.');
+    const base = hasExt ? name.slice(0, dot) : name;
+    const ext = hasExt ? name.slice(dot) : '';
+
+    for (let i = 1; i < 500; i++) {
+      const n = `${base} (${i})${ext}`;
+      if (!existing.has(n)) return join(n);
+    }
+    return join(`${base}-${Date.now()}${ext}`);
+  };
+
+  /**
+   * Insert (copy) one or more external files/folders into targetParentPath.
+   * Uses multi-select File Picker; confirm is disabled until something is marked.
+   * Large batches show a cancellable progress toast with shine animation.
+   */
+  const handleInsert = async (targetParentPath: string) => {
+    const picked = await useFilePickerStore.getState().showMultiPicker({
+      title: 'Insert Files & Folders',
+      icon: 'add',
+      buttonText: 'Insert',
+      allowCreate: false,
+    });
+    if (!picked || picked.length === 0) return;
+
+    const notif = useNotificationStore.getState();
+    const notifId = `insert_${Date.now()}`;
+    let cancelled = false;
+
+    notif.addNotification({
+      id: notifId,
+      type: 'loading',
+      title: 'Inserting…',
+      message: `0 / ${picked.length}`,
+      source: 'Explorer',
+      progress: 0,
+      collapsed: false,
+      actions: [
+        {
+          label: 'Cancel',
+          variant: 'type2',
+          onClick: () => {
+            cancelled = true;
+            notif.updateNotification(notifId, {
+              type: 'warning',
+              title: 'Insert cancelled',
+              message: 'Stopping after current item…',
+              progress: undefined,
+              actions: [],
+            });
+          },
+        },
+      ],
+    });
+
+    let done = 0;
+    let failed = 0;
+
+    for (const src of picked) {
+      if (cancelled) break;
+      const name = src.split('/').filter(Boolean).pop() || 'item';
+      try {
+        const destPath = await uniqueDestPath(targetParentPath, name);
+        if (typeof (fs as any).copy === 'function') {
+          await (fs as any).copy(src, destPath);
+        } else {
+          // File-only fallback when copy() is unavailable
+          const content = await fs.readFile(src);
+          await fs.writeFile(destPath, content);
+        }
+      } catch (err) {
+        console.error('Insert item failed:', src, err);
+        failed++;
+      }
+      done++;
+      const pct = Math.round((done / picked.length) * 100);
+      if (!cancelled) {
+        notif.updateNotification(notifId, {
+          message: `${done} / ${picked.length}${failed ? ` (${failed} failed)` : ''}`,
+          progress: pct,
+        });
+      }
+    }
+
+    triggerRefresh();
+
+    if (cancelled) {
+      notif.updateNotification(notifId, {
+        type: 'warning',
+        title: 'Insert cancelled',
+        message: `${done} of ${picked.length} completed${failed ? `, ${failed} failed` : ''}.`,
+        progress: undefined,
+        actions: [],
+      });
+      // Drop toast after a moment; keep in center history
+      setTimeout(() => notif.dismissToast(notifId), 2500);
+      return;
+    }
+
+    notif.updateNotification(notifId, {
+      type: failed === picked.length ? 'error' : failed > 0 ? 'warning' : 'success',
+      title: failed === picked.length ? 'Insert failed' : failed > 0 ? 'Insert finished with errors' : 'Insert complete',
+      message:
+        failed === 0
+          ? `${done} item${done === 1 ? '' : 's'} inserted.`
+          : `${done - failed} inserted, ${failed} failed.`,
+      progress: undefined,
+      actions: [],
+    });
+    setTimeout(() => notif.dismissToast(notifId), 4000);
+  };
+
   // ─── 3. THE ADVANCED CONTEXT MENU HANDLER ───
 
   const handleContextMenu = (e: React.MouseEvent, clickedFile?: FileStat, clickedParentPath: string = workspacePath || '/') => {
@@ -186,7 +313,16 @@ export function useExplorerActions() {
             children: [ 
               { id: 'nfile-new', label: 'New File...', onClick: () => { isRoot ? commands.executeCommand('explorer.newFile') : setInlineAction({ type: 'newFile', parentPath: targetParentPath, initialValue: '' }); ensureOpen(); } }
             ]
-          }
+          },
+          {
+            id: 'insert',
+            label: 'Insert…',
+            icon: 'add',
+            onClick: () => {
+              ensureOpen();
+              void handleInsert(targetParentPath);
+            },
+          },
         ]
       },
       {

@@ -163,6 +163,7 @@ export const SidebarEngine: React.FC<{ panelDef: SidebarPanelDef }> = ({ panelDe
                 actions={enhanceActionsWithViews(panelDef.header.actions)}
                 menuId={headerMenuId}
                 maxOverflow={panelDef.header.maxOverflow}
+                menuOrigin={panelDef.header.menuOrigin ?? 'top-right'}
               />
             ) : undefined
           }
@@ -233,6 +234,7 @@ export const SidebarEngine: React.FC<{ panelDef: SidebarPanelDef }> = ({ panelDe
                     actions={section.actions?.length ? enhanceActionsWithViews(section.actions) : undefined}
                     actionMenuId={sectionMenuId}
                     maxOverflow={section.maxOverflow}
+                    menuOrigin={section.menuOrigin ?? 'top-right'}
                   >
                     {contentArea}
                   </Collapsible>

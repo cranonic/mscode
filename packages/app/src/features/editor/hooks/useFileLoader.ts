@@ -22,7 +22,16 @@ export function useFileLoader({ tabId, filePath }: UseFileLoaderOptions) {
 
   useEffect(() => {
     let mounted = true;
-    setIsLoading(true);
+
+    // If we already have cached content, do NOT flip isLoading → true (that used to
+    // unmount Monaco and race with setModel → InstantiationService disposed).
+    const cached = useEditorViewStateStore.getState().viewStates[tabId]?.content;
+    if (cached === undefined) {
+      setIsLoading(true);
+    } else {
+      setInitialContent(cached);
+      setIsLoading(false);
+    }
 
     (async () => {
       const currentViewState = useEditorViewStateStore.getState().viewStates[tabId];

@@ -1,29 +1,39 @@
 // src/features/git/components/GitChangesSection.tsx
 //
 // Content-only component — sidebarRegistry owns the "CHANGES" header + actions.
-// This file renders: CommitBox → Staged subsection → Unstaged subsection → History
+// This file renders: CommitBox → Staged subsection → Unstaged subsection
+// Changed paths are shown as a collapsible folder tree (VS Code SCM style).
 
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Collapsible }          from '@/ui/components/Collapsible/Collapsible';
 import { Icon }                 from '@/ui/components/Icon/IconRegistry';
+import { FileIcon }             from '@/ui/components/FileIcon/DefaultIconTheme';
 import { useNotificationStore } from '@/store/notificationStore';
-import { useGitStore }          from '../store/gitStore';
+import { useGitStore, GIT_STATUS_META } from '../store/gitStore';
 import { CommitBox }            from './CommitBox';
 import { ChangedFileItem }      from './ChangedFileItem';
 import { GitBackend }           from '../core/GitBackend';
 import { getCwd }               from '../store/_helpers';
 import { useTabStore }          from '@/store/tabStore';
 import type { GitChangedFile }  from '../store/gitStore';
+import { buildChangeTree, collectFilePaths, type ChangeTreeNode } from './changeTree';
 
-// ─── VS Code–style diff open ──────────────────────────────────────────────────
+// ─── VS Code–style diff open (files only) ─────────────────────────────────────
 
 export const openGitDiff = async (file: GitChangedFile, isStaged: boolean) => {
   const cwd = getCwd();
   if (!cwd) return;
 
+  // Directories must never open a file diff — readFile fails on dirs
+  if (file.isDirectory || file.path.endsWith('/')) {
+    useNotificationStore.getState().addNotification({
+      type: 'info', title: 'Git', source: 'Git',
+      message: 'Expand the folder to open individual file diffs.',
+    });
+    return;
+  }
+
   try {
-    // Staged: HEAD (committed) vs INDEX (staged). Empty repo → HEAD missing → ''
-    // Unstaged: INDEX (staged/last) vs working tree (null → read disk)
     const originalContent = await GitBackend.getFileContent(
       cwd,
       isStaged ? 'HEAD' : 'INDEX',
@@ -48,6 +58,175 @@ export const openGitDiff = async (file: GitChangedFile, isStaged: boolean) => {
       message: e?.message ?? 'Could not open diff',
     });
   }
+};
+
+// ─── Tree row (folder or file) ────────────────────────────────────────────────
+
+const TreeNodeRow: React.FC<{
+  node: ChangeTreeNode;
+  depth: number;
+  isStaged: boolean;
+  actionIcon: string;
+  actionTitle: string;
+  onAction: (path: string) => void;
+  action2Icon?: string;
+  action2Title?: string;
+  onAction2?: (path: string) => void;
+}> = ({
+  node, depth, isStaged,
+  actionIcon, actionTitle, onAction,
+  action2Icon, action2Title, onAction2,
+}) => {
+  const [expanded, setExpanded] = useState(true);
+  const [hovered, setHovered] = useState(false);
+  const pad = 12 + depth * 12;
+
+  if (node.isDirectory) {
+    const childFiles = collectFilePaths(node);
+    const meta = node.status ? GIT_STATUS_META[node.status] : null;
+
+    return (
+      <div>
+        <div
+          onClick={() => setExpanded(v => !v)}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: `3px 8px 3px ${pad}px`,
+            cursor: 'pointer',
+            backgroundColor: hovered ? 'var(--ms-menu-hover-bg)' : 'transparent',
+            userSelect: 'none',
+            minHeight: 26,
+          }}
+        >
+          <Icon
+            name={expanded ? 'chevron-down' : 'chevron-right'}
+            size={14}
+            style={{ flexShrink: 0, opacity: 0.7 }}
+          />
+          <FileIcon name={node.name} isDir={true} isOpen={expanded} />
+          <span style={{
+            flex: 1,
+            fontSize: 13,
+            color: 'var(--ms-text-main)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
+            {node.name}
+          </span>
+          <span style={{
+            fontSize: 10,
+            color: 'var(--ms-text-faded)',
+            marginRight: 4,
+          }}>
+            {childFiles.length}
+          </span>
+          {/* Stage/unstage whole folder */}
+          <div style={{
+            display: 'flex',
+            opacity: hovered ? 1 : 0,
+            transition: 'opacity 0.1s',
+            gap: 2,
+          }}>
+            {action2Icon && onAction2 && (
+              <span
+                title={`${action2Title} folder`}
+                onClick={e => {
+                  e.stopPropagation();
+                  childFiles.forEach(p => onAction2(p));
+                }}
+                style={{ display: 'flex', padding: 2, color: 'var(--ms-text-faded)' }}
+              >
+                <Icon name={action2Icon as any} size={14} />
+              </span>
+            )}
+            <span
+              title={`${actionTitle} folder`}
+              onClick={e => {
+                e.stopPropagation();
+                childFiles.forEach(p => onAction(p));
+              }}
+              style={{ display: 'flex', padding: 2, color: 'var(--ms-text-faded)' }}
+            >
+              <Icon name={actionIcon as any} size={14} />
+            </span>
+          </div>
+          {meta && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: meta.color, minWidth: 12, textAlign: 'right' }}>
+              {meta.badge}
+            </span>
+          )}
+        </div>
+        {expanded && (node.children || []).map(child => (
+          <TreeNodeRow
+            key={child.path}
+            node={child}
+            depth={depth + 1}
+            isStaged={isStaged}
+            actionIcon={actionIcon}
+            actionTitle={actionTitle}
+            onAction={onAction}
+            action2Icon={action2Icon}
+            action2Title={action2Title}
+            onAction2={onAction2}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  // File leaf
+  if (!node.file) return null;
+  return (
+    <ChangedFileItem
+      file={node.file}
+      depth={depth}
+      actionIcon={actionIcon}
+      actionTitle={actionTitle}
+      onAction={onAction}
+      action2Icon={action2Icon}
+      action2Title={action2Title}
+      onAction2={onAction2}
+      onClick={() => openGitDiff(node.file!, isStaged)}
+    />
+  );
+};
+
+const ChangeTreeList: React.FC<{
+  files: GitChangedFile[];
+  isStaged: boolean;
+  actionIcon: string;
+  actionTitle: string;
+  onAction: (path: string) => void;
+  action2Icon?: string;
+  action2Title?: string;
+  onAction2?: (path: string) => void;
+}> = ({ files, isStaged, actionIcon, actionTitle, onAction, action2Icon, action2Title, onAction2 }) => {
+  const cwd = getCwd() || '';
+  const tree = useMemo(() => buildChangeTree(files, cwd), [files, cwd]);
+
+  return (
+    <>
+      {tree.map(node => (
+        <TreeNodeRow
+          key={node.path}
+          node={node}
+          depth={0}
+          isStaged={isStaged}
+          actionIcon={actionIcon}
+          actionTitle={actionTitle}
+          onAction={onAction}
+          action2Icon={action2Icon}
+          action2Title={action2Title}
+          onAction2={onAction2}
+        />
+      ))}
+    </>
+  );
 };
 
 // ─── Staged subsection ────────────────────────────────────────────────────────
@@ -81,16 +260,13 @@ const StagedSection: React.FC = () => {
         </span>
       }
     >
-      {stagedFiles.map(f => (
-        <ChangedFileItem
-          key={f.path}
-          file={f}
-          actionIcon="remove"
-          actionTitle="Unstage"
-          onAction={unstageFile}
-          onClick={() => openGitDiff(f, true)}
-        />
-      ))}
+      <ChangeTreeList
+        files={stagedFiles}
+        isStaged={true}
+        actionIcon="remove"
+        actionTitle="Unstage"
+        onAction={unstageFile}
+      />
     </Collapsible>
   );
 };
@@ -113,7 +289,9 @@ const UnstagedSection: React.FC = () => {
           customStyle: { backgroundColor: '#d32f2f', color: '#fff', borderColor: '#d32f2f' },
           onClick: async () => {
             notif.removeNotification(nid);
-            unstagedFiles.forEach(f => discardFile(f.path));
+            unstagedFiles.forEach(f => {
+              if (!f.isDirectory) discardFile(f.path);
+            });
           },
         },
         { label: 'Cancel', onClick: () => notif.removeNotification(nid) },
@@ -155,25 +333,21 @@ const UnstagedSection: React.FC = () => {
         </div>
       }
     >
-      {unstagedFiles.map(f => (
-        <ChangedFileItem
-          key={f.path}
-          file={f}
-          actionIcon="add"
-          actionTitle="Stage"
-          onAction={stageFile}
-          action2Icon="discard"
-          action2Title="Discard Changes"
-          onAction2={discardFile}
-          onClick={() => openGitDiff(f, false)}
-        />
-      ))}
+      <ChangeTreeList
+        files={unstagedFiles}
+        isStaged={false}
+        actionIcon="add"
+        actionTitle="Stage"
+        onAction={stageFile}
+        action2Icon="discard"
+        action2Title="Discard Changes"
+        onAction2={discardFile}
+      />
     </Collapsible>
   );
 };
 
 // ─── Main export ──────────────────────────────────────────────────────────────
-// No outer Collapsible — sidebarRegistry wraps this in the "CHANGES" section header.
 
 export const GitChangesSection: React.FC = () => (
   <>

@@ -295,6 +295,7 @@ export const TopTitle: React.FC = () => {
           actions={resolvedActions}
           menuId={MENU_ID}
           maxOverflow={maxOverflow}
+          menuOrigin="top-right"
         />
       </div>
 

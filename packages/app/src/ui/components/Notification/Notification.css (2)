@@ -154,50 +154,14 @@
 }
 
 .ms-notif-progress-bar {
-  height: 3px;
+  height: 2px;
   background: var(--ms-border-color, #333);
   width: 100%;
-  position: relative;
-  overflow: hidden;
 }
 .ms-notif-progress-fill {
   height: 100%;
   background: var(--ms-accent, #007acc);
-  transition: width 0.25s ease;
-  position: relative;
-  overflow: hidden;
-}
-/* Desktop-like shine sweeping left → right across the filled progress */
-.ms-notif-progress-fill::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 40%;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.15) 35%,
-    rgba(255, 255, 255, 0.55) 50%,
-    rgba(255, 255, 255, 0.15) 65%,
-    transparent 100%
-  );
-  animation: ms-notif-progress-shine 1.4s ease-in-out infinite;
-  pointer-events: none;
-}
-@keyframes ms-notif-progress-shine {
-  0%   { transform: translateX(-120%); }
-  100% { transform: translateX(280%); }
-}
-
-.ms-notif-card.has-progress {
-  /* keep a bit of room so swipe doesn't feel cramped on progress toasts */
-}
-
-.ms-notif-card {
-  will-change: transform, opacity;
-  touch-action: pan-y;
+  transition: width 0.2s ease;
 }
 
 

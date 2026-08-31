@@ -87,7 +87,9 @@ export function bootstrapExplorer() {
         stickyTop: 0,
         stickyZIndex: 40,
         defaultExpanded: true,
-        maxOverflow: 4, 
+        maxOverflow: 4,
+        // ⋮ sits on the right of the section header → open from top-right
+        menuOrigin: 'top-right',
         actions: [
           {
             id:      'explorer-new-file',

@@ -1,5 +1,5 @@
 // src/ui/layouts/MainLayout/MainLayout.tsx
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { fs } from '@/core/fileSystem';
 import { motion, AnimatePresence, useDragControls } from 'framer-motion';
 import { useTabStore } from '@/store/tabStore';
@@ -29,7 +29,7 @@ export const MainLayout: React.FC<{ children?: React.ReactNode }> = ({ children 
   const { tabs, activeTabId, addTab, recentTabIds } = useTabStore();
   const { state: sidebarState, setState: setSidebarState, width: panelWidth } = useSidebarStore();
   
-  const { isOpen, isClosing, position, origin, items, closeMenu } = useMenuStore();
+  const { isOpen, position, items, closeMenu } = useMenuStore();
   const { openPalette, openQuickPick } = usePaletteStore();
   const { workspacePath } = useExplorerStore();
   const { settings } = useSettingsStore();
@@ -38,22 +38,6 @@ export const MainLayout: React.FC<{ children?: React.ReactNode }> = ({ children 
   const maxCachedTabs = settings['workbench.editor.maxCachedTabs'] ?? 10;
   const clickOutsideAction = settings['workbench.sidebar.clickOutsideAction'] || 'collapse';
   const mountedTabIds = new Set(recentTabIds.slice(0, maxCachedTabs));
-
-  // Stable editor mount order: only append new tabs / remove closed ones.
-  // NEVER reorder this list — moving Monaco DOM nodes disposes InstantiationService
-  // and crashes the IDE on tab switch / tab-bar reorder.
-  const editorMountOrderRef = useRef<string[]>([]);
-  {
-    const openIds = new Set(tabs.map(t => t.id));
-    // Drop closed tabs (keep relative order of survivors)
-    editorMountOrderRef.current = editorMountOrderRef.current.filter(id => openIds.has(id));
-    // Append newly opened tabs at the end only
-    for (const t of tabs) {
-      if (!editorMountOrderRef.current.includes(t.id)) {
-        editorMountOrderRef.current.push(t.id);
-      }
-    }
-  }
 
   const [isLargeScreen, setIsLargeScreen] = useState(window.innerWidth > 1024 || window.innerHeight < window.innerWidth);
   
@@ -138,68 +122,57 @@ export const MainLayout: React.FC<{ children?: React.ReactNode }> = ({ children 
           <Breadcrumbs />
           <article className="editor-view">
             {tabs.length > 0 ? (
-              // Iterate in FIXED mount order (append-only). Tab-bar order / LRU
-              // must never reshuffle these children — Monaco cannot survive DOM moves.
-              (() => {
-                const tabById = new Map(tabs.map(t => [t.id, t]));
-                return editorMountOrderRef.current.map(id => {
-                  const tab = tabById.get(id);
-                  if (!tab) {
-                    // Keep a keyed empty slot so later siblings never shift in the DOM
-                    return <div key={id} style={{ display: 'none' }} />;
-                  }
+              tabs.map(tab => {
+                if (!mountedTabIds.has(tab.id)) return null;
+                return (
+                  <div key={tab.id} style={{ display: activeTabId === tab.id ? 'block' : 'none', height: '100%', width: '100%' }}>
+                    
+                    
+                    {/* Routing logic for tabs */}
+                    {(() => {
+                      // LAYER 1: Direct Content Injection (Legacy support)
+                      if ((tab as any).content) {
+                        return (tab as any).content;
+                      }
 
-                  // LRU: outside cache → empty placeholder (same key, no Monaco).
-                  // This prevents sibling editor DOM nodes from moving when a middle tab is evicted.
-                  if (!mountedTabIds.has(id)) {
-                    return <div key={tab.id} style={{ display: 'none' }} />;
-                  }
-
-                  return (
-                    <div key={tab.id} style={{ display: activeTabId === tab.id ? 'block' : 'none', height: '100%', width: '100%' }}>
-                      {/* Routing logic for tabs */}
-                      {(() => {
-                        // LAYER 1: Direct Content Injection (Legacy support)
-                        if ((tab as any).content) {
-                          return (tab as any).content;
+                      // LAYER 1.5: Custom Previewer Registry (Images, PDFs, etc.)
+                      // if user doesn't select 'Open as Text' (fallback_text) -> find previewer
+                      if (tab.type !== 'fallback_text') {
+                        const CustomPreviewer = customPreviewerRegistry.getPreviewerForExtension(tab.filePath || tab.id);
+                        if (CustomPreviewer) {
+                          const PreviewerComponent = CustomPreviewer.component;
+                          return <PreviewerComponent tabId={tab.id} filePath={tab.filePath || tab.id} />;
                         }
+                      }
 
-                        // LAYER 1.5: Custom Previewer Registry (Images, PDFs, etc.)
-                        if (tab.type !== 'fallback_text') {
-                          const CustomPreviewer = customPreviewerRegistry.getPreviewerForExtension(tab.filePath || tab.id);
-                          if (CustomPreviewer) {
-                            const PreviewerComponent = CustomPreviewer.component;
-                            return <PreviewerComponent tabId={tab.id} filePath={tab.filePath || tab.id} />;
-                          }
-                        }
-
-                        // LAYER 2: Extension API & Core Registry (The Standard Way)
-                        const resolveType = tab.type === 'fallback_text' ? 'code' : tab.type;
-                        const RegisteredCustomView = tabRegistry.getTab(resolveType);
-                        
-                        if (RegisteredCustomView) {
-                          return (
-                             <RegisteredCustomView 
-                               tabId={tab.id} 
-                               filePath={tab.filePath || tab.id} 
-                               tab={tab}
-                               extensionId={tab.filePath} 
-                               mode={resolveType === 'termis' ? 'fullscreen' : undefined} 
-                             />
-                          );
-                        }
-
-                        // LAYER 3: Ultimate Fallback if view isn't registered
+                      // LAYER 2: Extension API & Core Registry (The Standard Way)
+                      const resolveType = tab.type === 'fallback_text' ? 'code' : tab.type;
+                      const RegisteredCustomView = tabRegistry.getTab(resolveType);
+                      
+                      if (RegisteredCustomView) {
+                        // Pass down standard props that any view might need
                         return (
-                          <div style={{ padding: '20px', color: 'var(--ms-text-faded)' }}>
-                            ⚠️ No view registered for tab type: <b>{tab.type}</b>
-                          </div>
+                           <RegisteredCustomView 
+                             tabId={tab.id} 
+                             filePath={tab.filePath || tab.id} 
+                             tab={tab}
+                             extensionId={tab.filePath} 
+                             mode={resolveType === 'termis' ? 'fullscreen' : undefined} 
+                           />
                         );
-                      })()}
-                    </div>
-                  );
-                });
-              })()
+                      }
+
+                      // LAYER 3: Ultimate Fallback if view isn't registered
+                      return (
+                        <div style={{ padding: '20px', color: 'var(--ms-text-faded)' }}>
+                          ⚠️ No view registered for tab type: <b>{tab.type}</b>
+                        </div>
+                      );
+                    })()}
+
+                  </div>
+                );
+              })
             ) : (
               <StartPage />
             )}
@@ -212,14 +185,7 @@ export const MainLayout: React.FC<{ children?: React.ReactNode }> = ({ children 
       <NotificationUI />
 
       <StatusBar />
-      {(isOpen || isClosing) && items.length > 0 && (
-        <ContextMenu
-          items={items}
-          isClosing={isClosing}
-          origin={origin}
-          style={{ position: 'fixed', top: position.y, left: position.x, zIndex: 999999 }}
-        />
-      )}
+      {isOpen && <ContextMenu items={items} style={{ position: 'fixed', top: position.y, left: position.x, zIndex: 999999 }} />}
       <CommandPalette />
     </div>
   );
