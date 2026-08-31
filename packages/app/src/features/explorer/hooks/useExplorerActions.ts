@@ -180,7 +180,6 @@ export function useExplorerActions() {
       message: `0 / ${picked.length}`,
       source: 'Explorer',
       progress: 0,
-      collapsed: false,
       actions: [
         {
           label: 'Cancel',
@@ -198,6 +197,8 @@ export function useExplorerActions() {
         },
       ],
     });
+    // Expand so Cancel is visible (addNotification omits `collapsed` from its input type)
+    notif.updateNotification(notifId, { collapsed: false });
 
     let done = 0;
     let failed = 0;
