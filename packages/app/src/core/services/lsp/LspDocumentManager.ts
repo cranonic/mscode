@@ -6,13 +6,12 @@ import { sendNotify } from './LspTransport';
 import { toLspUri, getDocUri } from './utils/uriHelpers';
 import { isTsJsFamily } from './providers';
 
+/** Delay before pushing a full-text didChange after the user stops typing. */
+const DID_CHANGE_DEBOUNCE_MS = 300;
+
 /**
  * Associates an in-memory Monaco TextModel instance with a concrete filesystem URI address.
  * Typically dispatched from tab lifecycle activations (`useLspSync`) when documents mount.
- * 
- * @param state The central language server operational state cache context.
- * @param model Target Monaco document tracking model instance.
- * @param realFileUri Absolute peripheral file storage route address string.
  */
 export function registerModelUri(
   state: LspState,
@@ -25,16 +24,79 @@ export function registerModelUri(
 }
 
 /**
- * Tears down document context maps upon tab deletion or model disposal loops.
- * Transmits a `textDocument/didClose` tracking notification payload to flush active language server layers.
- * 
- * @param state The central language server operational state cache context.
- * @param model Target Monaco document tracking model instance.
+ * Detach content listener + clear pending debounce for a model.
+ */
+function detachContentListener(state: LspState, modelId: string): void {
+  const timer = state.changeDebounceTimers.get(modelId);
+  if (timer != null) {
+    clearTimeout(timer);
+    state.changeDebounceTimers.delete(modelId);
+  }
+  const sub = state.contentListeners.get(modelId);
+  if (sub) {
+    try { sub.dispose(); } catch { /* ignore */ }
+    state.contentListeners.delete(modelId);
+  }
+}
+
+/**
+ * Push full document text as textDocument/didChange (Full sync).
+ * Used both for live typing updates and tab-switch re-sync.
+ */
+export function sendFullDocumentChange(
+  state: LspState,
+  model: monaco.editor.ITextModel,
+): void {
+  if (!state.initialized) return;
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+
+  const uri = getDocUri(model, state);
+  if (!state.openedUris.has(uri)) return;
+
+  sendNotify(state, 'textDocument/didChange', {
+    textDocument: { uri, version: model.getVersionId() },
+    contentChanges: [{ text: model.getValue() }],
+  });
+}
+
+/**
+ * Attach a debounced onDidChangeContent listener so diagnostics / inlay hints
+ * refresh while typing. Safe to call multiple times — reuses existing subscription.
+ */
+export function attachContentListener(
+  state: LspState,
+  model: monaco.editor.ITextModel,
+): void {
+  if (state.contentListeners.has(model.id)) return;
+  if (!isCompatibleLanguage(state, model.getLanguageId())) return;
+
+  const sub = model.onDidChangeContent(() => {
+    if (!state.initialized) return;
+
+    const prev = state.changeDebounceTimers.get(model.id);
+    if (prev != null) clearTimeout(prev);
+
+    const handle = setTimeout(() => {
+      state.changeDebounceTimers.delete(model.id);
+      sendFullDocumentChange(state, model);
+    }, DID_CHANGE_DEBOUNCE_MS);
+
+    state.changeDebounceTimers.set(model.id, handle);
+  });
+
+  state.contentListeners.set(model.id, sub);
+}
+
+/**
+ * Tears down document context maps upon tab deletion or model disposal.
+ * Sends textDocument/didClose and removes the content listener.
  */
 export function unregisterModelUri(
   state: LspState,
   model: monaco.editor.ITextModel,
 ): void {
+  detachContentListener(state, model.id);
+
   const uri = state.modelUriMap.get(model.id);
   if (!uri) return;
 
@@ -42,7 +104,7 @@ export function unregisterModelUri(
     sendNotify(state, 'textDocument/didClose', { textDocument: { uri } });
     console.log(`[LSP] Dispatched explicit didClose signal for: ${uri}`);
   }
-  
+
   state.openedUris.delete(uri);
   state.modelUriMap.delete(model.id);
 }
@@ -58,12 +120,8 @@ function isCompatibleLanguage(state: LspState, modelLang: string): boolean {
 }
 
 /**
- * Signals language server ports when switching between document tabs or pulling up fresh source paths.
- * Automatically switches execution tracks between synchronization vectors (`textDocument/didOpen` 
- * vs. full text frame buffers via `textDocument/didChange`).
- * 
- * @param state The central language server operational state cache context.
- * @param model Target Monaco document tracking model instance.
+ * Signals language server when switching tabs or opening a fresh file.
+ * Also installs the live typing → didChange bridge.
  */
 export function notifyDocumentOpen(
   state: LspState,
@@ -76,21 +134,17 @@ export function notifyDocumentOpen(
 
   const uri = getDocUri(model, state);
 
+  // Always keep a live content listener while the doc is open on this server
+  attachContentListener(state, model);
+
   // ── RE-SYNCHRONIZATION TIER ──
-  // If the resource is already tracked, pipe full buffer deltas across open channels
   if (state.openedUris.has(uri)) {
-    sendNotify(state, 'textDocument/didChange', {
-      textDocument: { uri, version: model.getVersionId() },
-      contentChanges: [{ text: model.getValue() }],
-    });
+    sendFullDocumentChange(state, model);
     console.log(`[LSP] Document stream sync updated via didChange: ${uri}`);
     return;
   }
 
   // ── INITIAL ACCESS TIER ──
-  // Always send the model's real languageId (javascript vs typescript) so the
-  // server can apply the correct language service. state.languageId may be the
-  // primary key the process was started under (often "typescript").
   sendNotify(state, 'textDocument/didOpen', {
     textDocument: {
       uri,
@@ -99,23 +153,35 @@ export function notifyDocumentOpen(
       text: model.getValue(),
     },
   });
-  
+
   state.openedUris.add(uri);
   console.log(`[LSP] Document stream tracking initialized via didOpen: ${uri} (${modelLang})`);
 }
 
 /**
- * Sequentially sweeps through active Monaco editor instances following a connection 
- * initialization handshake to synchronize environment buffers with language servers.
- * 
- * @param state The central language server operational state cache context.
+ * After handshake: open every compatible model and attach content listeners.
  */
 export function syncOpenEditors(state: LspState): void {
   const models = monaco.editor.getModels();
   console.log(`[LSP] Initializing compilation sync across ${models.length} active models...`);
-  
+
   for (const model of models) {
     if (!isCompatibleLanguage(state, model.getLanguageId())) continue;
     notifyDocumentOpen(state, model);
   }
+}
+
+/**
+ * Dispose all content listeners + debounce timers (called from teardown / disconnect).
+ */
+export function clearAllContentListeners(state: LspState): void {
+  for (const timer of state.changeDebounceTimers.values()) {
+    clearTimeout(timer);
+  }
+  state.changeDebounceTimers.clear();
+
+  for (const sub of state.contentListeners.values()) {
+    try { sub.dispose(); } catch { /* ignore */ }
+  }
+  state.contentListeners.clear();
 }

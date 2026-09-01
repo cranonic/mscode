@@ -18,7 +18,6 @@ import { registerCodeLens }          from './codeLens';
 import { registerFoldingRange }      from './foldingRange';
 import { registerDocumentFormatting } from './formatting';
 import { registerColorProvider }     from './color';
-import { registerInlayHints }        from './inlayHints';
 
 /** Languages that share a single typescript-language-server process. */
 export const TS_JS_FAMILY = [
@@ -62,8 +61,6 @@ export function registerProviders(state: LspState, options: LspOptions = {}): vo
     if (options.foldingRange !== false)      registerFoldingRange(state);
     registerDocumentFormatting(state);
     if (options.colorProvider !== false)     registerColorProvider(state);
-    // Inlay hints (parameter names, types, etc.) — needs live didChange to stay fresh
-    if (options.inlayHints !== false)        registerInlayHints(state);
   }
 
   state.languageId = primary;

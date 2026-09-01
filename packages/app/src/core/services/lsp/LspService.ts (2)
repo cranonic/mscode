@@ -21,8 +21,7 @@ import { toLspUri }                                                 from './util
 import { sendNotify, sendRequest, processBuffer, dispatchMessage }  from './LspTransport';
 import { initializeLsp, handlePublishDiagnostics }                  from './LspProtocol';
 import { registerModelUri, unregisterModelUri,
-         notifyDocumentOpen, syncOpenEditors,
-         clearAllContentListeners }                                 from './LspDocumentManager';
+         notifyDocumentOpen, syncOpenEditors }                      from './LspDocumentManager';
 import { registerProviders, teardownProviders }                     from './LspProviders';
 
 
@@ -204,7 +203,6 @@ export class LspService implements ILspService {
         s._initResolve = s._initReject = null;
       }
       teardownProviders(s);
-      clearAllContentListeners(s);
     };
   }
 
@@ -213,9 +211,8 @@ export class LspService implements ILspService {
   disconnect(): void {
     const s = this.state;
 
-    // 1 & 2 Dispose providers, content listeners, and open-document registry.
+    // 1 & 2 Dispose all Monaco providers and clear diagnostic marker & Clear the open-document URI registry.
     teardownProviders(s);
-    clearAllContentListeners(s);
     s.openedUris.clear();
 
     // 3 — reject pending init promise
