@@ -182,10 +182,10 @@ export const mscodeAmoledTheme: ThemeDefinition = {
     // 'diffEditorGutter.removedLineBackground':'rgba(139,46,46,0.38)',
 
     // Inlay hints
-    'editorInlayHint.foreground':            '#565656',
-    'editorInlayHint.background':            'rgba(80,80,80,0.14)',
-    'editorInlayHint.typeForeground':        '#565656',
-    'editorInlayHint.parameterForeground':   '#565656',
+    // 'editorInlayHint.foreground':            '#565656',
+    // 'editorInlayHint.background':            'rgba(80,80,80,0.14)',
+    // 'editorInlayHint.typeForeground':        '#565656',
+    // 'editorInlayHint.parameterForeground':   '#565656',
 
     // Parameter hints widget
     'editorHint.foreground':                 '#d4d4d4b3',

@@ -780,6 +780,24 @@ public class TerminalForegroundService extends Service {
                  + "fi";
         }
 
+        // Eclipse JDT LS — wrapper at $PREFIX/bin/jdtls-mscode (shell script).
+        // Ensures PREFIX + MSCODE_LINKER are set; wrapper itself runs java via elf/linker.
+        if (s.contains("jdtls-mscode") || s.contains("jdtls")) {
+            String wrap = prefix + "/bin/jdtls-mscode";
+            return "export PREFIX=\"" + prefix + "\"; "
+                 + "if [ -z \"$MSCODE_LINKER\" ]; then "
+                 + "  MSCODE_LINKER=/system/bin/linker64; "
+                 + "  [ -x \"$MSCODE_LINKER\" ] || MSCODE_LINKER=/system/bin/linker; "
+                 + "  export MSCODE_LINKER; "
+                 + "fi; "
+                 + "if [ -f \"" + wrap + "\" ]; then "
+                 + "  sh \"" + wrap + "\"; "
+                 + "else "
+                 + "  echo \"[LSP] jdtls-mscode missing at " + wrap + " — open a .java file to trigger install\" >&2; "
+                 + "  exit 1; "
+                 + "fi";
+        }
+
         return s;
     }
 

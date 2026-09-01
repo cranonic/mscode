@@ -174,10 +174,10 @@ export const mscodeDarkTheme: ThemeDefinition = {
     // 'diffEditorGutter.removedLineBackground':'rgba(139,46,46,0.4)',
 
     // Inlay hints
-    'editorInlayHint.foreground':            '#888888',
-    'editorInlayHint.background':            'rgba(88,88,88,0.18)',
-    'editorInlayHint.typeForeground':        '#888888',
-    'editorInlayHint.parameterForeground':   '#888888',
+    // 'editorInlayHint.foreground':            '#888888',
+    // 'editorInlayHint.background':            'rgba(88,88,88,0.18)',
+    // 'editorInlayHint.typeForeground':        '#888888',
+    // 'editorInlayHint.parameterForeground':   '#888888',
 
     // Parameter hints widget
     'editorHint.foreground':                 '#eeeeeeb3',

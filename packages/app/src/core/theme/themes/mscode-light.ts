@@ -175,10 +175,10 @@ export const mscodeLightTheme: ThemeDefinition = {
     // 'diffEditorGutter.removedLineBackground':'rgba(255,0,0,0.3)',
 
     // Inlay hints
-    'editorInlayHint.foreground':            '#6f6f6f',
-    'editorInlayHint.background':            'rgba(0,0,0,0.07)',
-    'editorInlayHint.typeForeground':        '#6f6f6f',
-    'editorInlayHint.parameterForeground':   '#6f6f6f',
+    // 'editorInlayHint.foreground':            '#6f6f6f',
+    // 'editorInlayHint.background':            'rgba(0,0,0,0.07)',
+    // 'editorInlayHint.typeForeground':        '#6f6f6f',
+    // 'editorInlayHint.parameterForeground':   '#6f6f6f',
 
     // Parameter hints widget
     'editorHint.foreground':                 '#333333b3',
