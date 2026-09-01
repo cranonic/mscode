@@ -16,7 +16,6 @@ import { lspProcessManager as realProcessManager }                  from '@/feat
 import { lspMockProcessManager }                                    from '@/features/lsp/LspMockProcessManager';
 import { LspService }                 from '@/core/services/lsp/LspService';
 import { LspMockService }                                           from '@/core/services/lsp/LspMockService';
-import { toLspUri }                   from '@/core/services/lsp/utils/uriHelpers';
 
 export const realLspService = new LspService();
 export const mockLspService = new LspMockService();
@@ -468,22 +467,11 @@ export function useLspSync(editorInstance: any, tabId: string) {
         outputChannel.appendLine(`[INFO] Server process on port ${port}. Connecting…`);
         outputChannel.appendLine(`[DEBUG] Watch for [LSP-stderr] / process exited lines below`);
 
-        // Compute rootUri from the file's directory (must percent-encode spaces etc.)
-        // JDT LS rejects: file:///sdcard/Ay/Typescript Test
-        // OK:            file:///sdcard/Ay/Typescript%20Test
+        // Compute rootUri from the file's directory
         const rootUri = (() => {
-          const rawPath = fileUri
-            .replace(/^file:\/\//i, '')
-            .replace(/^\/storage\/emulated\/0/i, '/sdcard');
-          let pathOnly: string;
-          try {
-            pathOnly = decodeURIComponent(rawPath);
-          } catch {
-            pathOnly = rawPath;
-          }
-          const lastSlash = pathOnly.lastIndexOf('/');
-          const dirPath = lastSlash > 0 ? pathOnly.substring(0, lastSlash) : '/sdcard';
-          return toLspUri(dirPath);
+          const lspFileUri = fileUri.replace('file:///storage/emulated/0', 'file:///sdcard');
+          const lastSlash  = lspFileUri.lastIndexOf('/');
+          return lastSlash > 0 ? lspFileUri.substring(0, lastSlash) : 'file:///sdcard';
         })();
 
         const settingsLang =
