@@ -19,7 +19,6 @@ import { registerFoldingRange }      from './foldingRange';
 import { registerDocumentFormatting } from './formatting';
 import { registerColorProvider }     from './color';
 import { registerInlayHints }        from './inlayHints';
-import { registerRename }            from './rename';
 
 /** Languages that share a single typescript-language-server process. */
 export const TS_JS_FAMILY = [
@@ -61,10 +60,6 @@ export function registerProviders(state: LspState, options: LspOptions = {}): vo
     if (options.completion !== false)        registerCompletion(state);
     if (options.references !== false || options.definition !== false) {
       registerDefinition(state);
-    }
-    // Rename — always register when server may support it (JDT LS does)
-    if (options.rename !== false) {
-      registerRename(state);
     }
     if (options.documentSymbol !== false)    registerDocumentSymbol(state);
     if (options.documentHighlight !== false) registerDocumentHighlight(state);

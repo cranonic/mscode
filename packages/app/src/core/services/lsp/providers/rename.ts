@@ -1,124 +1,89 @@
-// Auto-split from LspProviders.ts
+// textDocument/rename + textDocument/prepareRename → Monaco RenameProvider
 import * as monaco from 'monaco-editor';
 import type { LspState } from '../types';
-import { sendRequest, sendNotify } from '../LspTransport';
-import { getDocUri, fromLspUri } from '../utils/uriHelpers';
+import { sendRequest } from '../LspTransport';
+import { getDocUri } from '../utils/uriHelpers';
+import { toLspPosition, workspaceEditToMonaco } from './helpers';
+
 export function registerRename(state: LspState): void {
   state.disposables.push(
     monaco.languages.registerRenameProvider(state.languageId, {
-      // Optional: validate the symbol under the cursor before showing the input
-      resolveRenameLocation: async (model, position) => {
+      provideRenameEdits: async (model, position, newName, token) => {
         if (!state.initialized) return null;
+        if (token?.isCancellationRequested) return null;
+
+        try {
+          const result: any = await sendRequest(state, 'textDocument/rename', {
+            textDocument: { uri: getDocUri(model, state) },
+            position: toLspPosition(position),
+            newName,
+          });
+          if (!result) return null;
+          return workspaceEditToMonaco(result);
+        } catch (err: any) {
+          console.warn(`[LSP] rename failed (${state.languageId}):`, err?.message || err);
+          return {
+            edits: [],
+            rejectReason: err?.message || 'Rename failed',
+          };
+        }
+      },
+
+      resolveRenameLocation: async (model, position, token) => {
+        if (!state.initialized) return null;
+        if (token?.isCancellationRequested) return null;
+
         try {
           const result: any = await sendRequest(state, 'textDocument/prepareRename', {
             textDocument: { uri: getDocUri(model, state) },
-            position:     { line: position.lineNumber - 1, character: position.column - 1 },
+            position: toLspPosition(position),
           });
-
           if (!result) return null;
 
-          // Server may return Range or { range, placeholder }
-          const r = result.range ?? result;
-          if (r?.start == null) return null;
+          // prepareRename can return Range | { range, placeholder } | { defaultBehavior }
+          if (result.defaultBehavior) {
+            return {
+              range: model.getWordAtPosition(position)
+                ? new monaco.Range(
+                    position.lineNumber,
+                    model.getWordAtPosition(position)!.startColumn,
+                    position.lineNumber,
+                    model.getWordAtPosition(position)!.endColumn,
+                  )
+                : new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+              text: model.getWordAtPosition(position)?.word ?? '',
+            };
+          }
+
+          const range = result.range ?? result;
+          const text =
+            result.placeholder ??
+            model.getValueInRange({
+              startLineNumber: (range.start?.line ?? 0) + 1,
+              startColumn: (range.start?.character ?? 0) + 1,
+              endLineNumber: (range.end?.line ?? 0) + 1,
+              endColumn: (range.end?.character ?? 0) + 1,
+            });
 
           return {
             range: {
-              startLineNumber: r.start.line + 1,
-              startColumn:     r.start.character + 1,
-              endLineNumber:   r.end.line + 1,
-              endColumn:       r.end.character + 1,
+              startLineNumber: (range.start?.line ?? 0) + 1,
+              startColumn: (range.start?.character ?? 0) + 1,
+              endLineNumber: (range.end?.line ?? 0) + 1,
+              endColumn: (range.end?.character ?? 0) + 1,
             },
-            text: result.placeholder
-              ?? model.getValueInRange({
-                   startLineNumber: r.start.line + 1,
-                   startColumn:     r.start.character + 1,
-                   endLineNumber:   r.end.line + 1,
-                   endColumn:       r.end.character + 1,
-                 }),
+            text: String(text ?? ''),
           };
-        } catch {
-          // prepareRename not supported — Monaco falls back to word-at-position
+        } catch (err: any) {
+          // prepareRename not supported → Monaco falls back to word range
+          const code = err?.lspError?.code ?? err?.code;
+          if (code === -32601) return null;
+          console.warn(`[LSP] prepareRename failed (${state.languageId}):`, err?.message || err);
           return null;
         }
       },
-
-      provideRenameEdits: async (model, position, newName) => {
-        if (!state.initialized) {
-          return { edits: [], rejectReason: 'LSP not ready' };
-        }
-
-        try {
-          sendNotify(state, 'textDocument/didChange', {
-            textDocument:   { uri: getDocUri(model, state), version: model.getVersionId() },
-            contentChanges: [{ text: model.getValue() }],
-          });
-
-          const result: any = await sendRequest(state, 'textDocument/rename', {
-            textDocument: { uri: getDocUri(model, state) },
-            position:     { line: position.lineNumber - 1, character: position.column - 1 },
-            newName,
-          });
-
-          if (!result) {
-            return { edits: [], rejectReason: 'No rename edits returned' };
-          }
-
-          // WorkspaceEdit → Monaco WorkspaceEdit
-          const edits: monaco.languages.IWorkspaceTextEdit[] = [];
-
-          // documentChanges form (preferred)
-          if (Array.isArray(result.documentChanges)) {
-            for (const change of result.documentChanges) {
-              if (!change?.edits || !change?.textDocument?.uri) continue;
-              const resource = monaco.Uri.parse(fromLspUri(change.textDocument.uri));
-              for (const e of change.edits) {
-                edits.push({
-                  resource,
-                  versionId: undefined,
-                  textEdit: {
-                    range: {
-                      startLineNumber: (e.range?.start?.line      ?? 0) + 1,
-                      startColumn:     (e.range?.start?.character ?? 0) + 1,
-                      endLineNumber:   (e.range?.end?.line        ?? 0) + 1,
-                      endColumn:       (e.range?.end?.character   ?? 0) + 1,
-                    },
-                    text: e.newText ?? '',
-                  },
-                });
-              }
-            }
-          }
-          // changes form: { [uri]: TextEdit[] }
-          else if (result.changes && typeof result.changes === 'object') {
-            for (const [uri, textEdits] of Object.entries(result.changes as Record<string, any[]>)) {
-              const resource = monaco.Uri.parse(fromLspUri(uri));
-              for (const e of textEdits) {
-                edits.push({
-                  resource,
-                  versionId: undefined,
-                  textEdit: {
-                    range: {
-                      startLineNumber: (e.range?.start?.line      ?? 0) + 1,
-                      startColumn:     (e.range?.start?.character ?? 0) + 1,
-                      endLineNumber:   (e.range?.end?.line        ?? 0) + 1,
-                      endColumn:       (e.range?.end?.character   ?? 0) + 1,
-                    },
-                    text: e.newText ?? '',
-                  },
-                });
-              }
-            }
-          }
-
-          if (edits.length === 0) {
-            return { edits: [], rejectReason: 'Nothing to rename' };
-          }
-
-          return { edits };
-        } catch (e: any) {
-          return { edits: [], rejectReason: e?.message ?? 'Rename failed' };
-        }
-      },
-    })
+    }),
   );
+
+  console.log(`[LSP] RenameProvider registered for "${state.languageId}"`);
 }

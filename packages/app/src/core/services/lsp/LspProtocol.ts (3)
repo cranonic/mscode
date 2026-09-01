@@ -246,58 +246,28 @@ export async function initializeLsp(state: LspState): Promise<void> {
  * @param state The central language server operational state cache context.
  * @param params Structural diagnostic notification parameters sent from the server.
  */
-/** Decode path for loose comparison (ignore encoding + /sdcard vs storage). */
-function uriPathKey(uri: string): string {
-  if (!uri) return '';
-  let p = uri.replace(/^file:\/\//i, '');
-  try {
-    p = decodeURIComponent(p);
-  } catch { /* keep */ }
-  p = p.replace(/^\/storage\/emulated\/0/i, '/sdcard');
-  // strip trailing slash
-  if (p.length > 1 && p.endsWith('/')) p = p.slice(0, -1);
-  return p.toLowerCase();
-}
-
 export function handlePublishDiagnostics(state: LspState, params: any): void {
-  const lspUri = (params?.uri as string) || '';
+  const lspUri = params?.uri as string;
   const localUri = fromLspUri(lspUri);
-  const diagKey = uriPathKey(lspUri);
-  const localKey = uriPathKey(localUri);
-  const diags = params?.diagnostics ?? [];
 
-  // Match model by: mapped getDocUri, monaco uri, or normalized path key
-  const model = monaco.editor.getModels().find((m) => {
-    const docUri = getDocUri(m, state);
-    const mUri = m.uri.toString();
-    if (docUri === lspUri || mUri === localUri || mUri === lspUri) return true;
-    const mk = uriPathKey(docUri);
-    const mu = uriPathKey(mUri);
-    return (diagKey && (mk === diagKey || mu === diagKey || mu === localKey));
-  });
+  // Identify matching editor instances by matching native schemes or translated storage keys
+  const model = monaco.editor.getModels().find(m =>
+    m.uri.toString() === localUri || getDocUri(m, state) === lspUri
+  );
+  if (!model) return;
 
-  if (!model) {
-    console.warn(
-      `[LSP] publishDiagnostics: no model for uri=${lspUri} ` +
-        `(models=${monaco.editor.getModels().map((m) => m.uri.toString()).join(' | ')})`,
-    );
-    return;
-  }
-
-  const markers: monaco.editor.IMarkerData[] = diags.map((d: any) => ({
+  // Convert zero-indexed LSP ranges to Monaco's one-indexed position layout configurations
+  const markers: monaco.editor.IMarkerData[] = (params?.diagnostics ?? []).map((d: any) => ({
     severity: diagSeverity(d.severity),
     startLineNumber: (d.range?.start?.line ?? 0) + 1,
     startColumn: (d.range?.start?.character ?? 0) + 1,
     endLineNumber: (d.range?.end?.line ?? 0) + 1,
     endColumn: (d.range?.end?.character ?? 0) + 1,
-    message: d.message ?? '',
-    source: d.source ?? state.languageId,
+    message: d.message,
+    source: d.source,
   }));
 
   monaco.editor.setModelMarkers(model, 'lsp', markers);
-  console.log(
-    `[LSP] diagnostics applied: ${markers.length} marker(s) on ${model.uri.toString()}`,
-  );
 }
 
 /**
