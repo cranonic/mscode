@@ -122,20 +122,8 @@ export class LspService implements ILspService {
     s.languageId     = languageId;
     s.rootUri        = toLspUri(options.rootUri ?? 'file:///sdcard');
     // Extension resolveOptions may set initializationOptions (tsserver.path, etc.)
-    const initOpts: Record<string, unknown> = {
-      ...((options.initializationOptions as Record<string, unknown> | undefined) ?? {}),
-    };
-    // resolveTsOptions also puts preferences at the top level of options —
-    // fold them into initializationOptions so tsserver actually sees inlay prefs.
-    if (options.preferences && typeof options.preferences === 'object') {
-      initOpts.preferences = {
-        ...((initOpts.preferences as Record<string, unknown>) || {}),
-        ...(options.preferences as Record<string, unknown>),
-      };
-    }
-    s.initializationOptions = initOpts;
-    // Snapshot for workspace/configuration replies (TLS re-queries these)
-    s.configuration = { ...(options as Record<string, unknown>) };
+    s.initializationOptions =
+      (options.initializationOptions as Record<string, unknown> | undefined) ?? {};
     s.initialized    = false;
     s.isInitializing = true;
     s.openedUris.clear();

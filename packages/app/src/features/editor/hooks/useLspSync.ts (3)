@@ -482,22 +482,6 @@ export function useLspSync(editorInstance: any, tabId: string) {
           lspOptions = { ...lspOptions, ...dynamicConfig.resolveOptions(settings) };
         }
 
-        // Forward flat workspace settings so workspace/configuration replies
-        // (used heavily by typescript-language-server for inlay hints) are not empty.
-        for (const key of Object.keys(settings || {})) {
-          if (
-            key.startsWith('typescript.') ||
-            key.startsWith('javascript.') ||
-            key.startsWith('lsp.typescript') ||
-            key.startsWith('lsp.javascript') ||
-            key.startsWith('editor.inlayHints')
-          ) {
-            if (lspOptions[key] === undefined) {
-              lspOptions[key] = (settings as any)[key];
-            }
-          }
-        }
-
         // typescript-language-server v4.1+ dropped CLI --tsserver-path.
         // Workspace is under /sdcard while TS lives under $PREFIX — must set
         // initializationOptions.tsserver.path explicitly.

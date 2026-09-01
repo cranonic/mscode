@@ -142,104 +142,6 @@ export function processBuffer(
 }
 
 /**
- * Build answers for workspace/configuration.
- * Items look like { section?: string, scopeUri?: string }.
- * We walk dotted section names against state.configuration and
- * initializationOptions.preferences so TLS keeps inlay hints enabled.
- */
-function resolveWorkspaceConfiguration(state: LspState, params: any): unknown[] {
-  const items: Array<{ section?: string; scopeUri?: string }> =
-    Array.isArray(params?.items) ? params.items : [];
-
-  const cfg = state.configuration || {};
-  const initPrefs =
-    ((state.initializationOptions?.preferences as Record<string, unknown>) || {});
-
-  // Defaults that match VS Code / TLS expectations when settings are missing
-  const tsInlayDefaults: Record<string, unknown> = {
-    enabled: true,
-    parameterNames: {
-      enabled: initPrefs.includeInlayParameterNameHints ?? 'all',
-      suppressWhenArgumentMatchesName:
-        initPrefs.includeInlayParameterNameHintsWhenArgumentMatchesName === false,
-    },
-    parameterTypes: {
-      enabled: initPrefs.includeInlayFunctionParameterTypeHints !== false,
-    },
-    variableTypes: {
-      enabled: initPrefs.includeInlayVariableTypeHints !== false,
-      suppressWhenTypeMatchesName:
-        initPrefs.includeInlayVariableTypeHintsWhenTypeMatchesName === false,
-    },
-    propertyDeclarationTypes: {
-      enabled: initPrefs.includeInlayPropertyDeclarationTypeHints !== false,
-    },
-    functionLikeReturnTypes: {
-      enabled: initPrefs.includeInlayFunctionLikeReturnTypeHints !== false,
-    },
-    enumMemberValues: {
-      enabled: initPrefs.includeInlayEnumMemberValueHints !== false,
-    },
-  };
-
-  function lookup(section: string | undefined): unknown {
-    if (!section) {
-      // Whole settings object
-      return {
-        ...cfg,
-        typescript: {
-          inlayHints: tsInlayDefaults,
-          ...(typeof cfg.typescript === 'object' ? (cfg.typescript as object) : {}),
-        },
-        javascript: {
-          inlayHints: tsInlayDefaults,
-          ...(typeof cfg.javascript === 'object' ? (cfg.javascript as object) : {}),
-        },
-      };
-    }
-
-    // Exact flat key (e.g. "typescript.inlayHints.enabled")
-    if (Object.prototype.hasOwnProperty.call(cfg, section)) {
-      return cfg[section];
-    }
-
-    // Nested walk: "typescript.inlayHints" → { enabled, parameterNames, ... }
-    const parts = section.split('.');
-    let node: any = {
-      typescript: { inlayHints: tsInlayDefaults, preferences: initPrefs },
-      javascript: { inlayHints: tsInlayDefaults, preferences: initPrefs },
-      // Also expose init preferences under common paths TLS may query
-      ...cfg,
-    };
-
-    // Overlay flat dotted keys from cfg into nested shape
-    for (const [k, v] of Object.entries(cfg)) {
-      if (!k.includes('.')) continue;
-      const segs = k.split('.');
-      let cur: any = node;
-      for (let i = 0; i < segs.length - 1; i++) {
-        const s = segs[i];
-        if (cur[s] == null || typeof cur[s] !== 'object') cur[s] = {};
-        cur = cur[s];
-      }
-      cur[segs[segs.length - 1]] = v;
-    }
-
-    for (const p of parts) {
-      if (node == null || typeof node !== 'object') return null;
-      node = node[p];
-    }
-    return node ?? null;
-  }
-
-  const result = items.map((it) => lookup(it.section));
-  console.log(
-    `[LSP] workspace/configuration → ${items.map((i) => i.section ?? '(root)').join(', ')}`,
-  );
-  return result;
-}
-
-/**
  * Route incoming unpacked payloads based on message structural fingerprints.
  * Automatically replies to telemetry signals and lifecycle progress structures.
  * 
@@ -258,10 +160,7 @@ export function dispatchMessage(
     if (msg.method === 'window/workDoneProgress/create') {
       sendResponse(state, msg.id, null);
     } else if (msg.method === 'workspace/configuration') {
-      // typescript-language-server asks for sections like "typescript" /
-      // "typescript.inlayHints" after initialize. Returning [{}] wipes the
-      // inlay preferences that were set via initializationOptions.
-      sendResponse(state, msg.id, resolveWorkspaceConfiguration(state, msg.params));
+      sendResponse(state, msg.id, [{}]);
     } else {
       sendResponse(state, msg.id, null);
     }

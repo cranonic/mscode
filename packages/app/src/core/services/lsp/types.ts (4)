@@ -47,12 +47,6 @@ export interface LspState {
   rootUri: string;
   /** Extra options forwarded as initialize.initializationOptions. */
   initializationOptions: Record<string, unknown>;
-  /**
-   * Flat settings snapshot used to answer workspace/configuration requests.
-   * typescript-language-server re-reads inlay / validate prefs from here after
-   * initialize — empty answers would wipe initializationOptions.preferences.
-   */
-  configuration: Record<string, unknown>;
   /** True after initialize/initialized handshake completed. */
   initialized: boolean;
   /** True while handshake is in flight. */
@@ -91,7 +85,6 @@ export function createInitialState(): LspState {
     languageId: '',
     rootUri: 'file:///sdcard',
     initializationOptions: {},
-    configuration: {},
     initialized: false,
     isInitializing: false,
     disposables: [],

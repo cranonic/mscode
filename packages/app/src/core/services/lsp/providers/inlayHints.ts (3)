@@ -27,15 +27,13 @@ export function registerInlayHints(state: LspState): void {
       provideInlayHints: async (
         model: monaco.editor.ITextModel,
         range: monaco.Range,
-        token: monaco.CancellationToken,
+        _token: monaco.CancellationToken,
       ): Promise<monaco.languages.InlayHintList | null> => {
         if (!state.initialized) return null;
-        if (token?.isCancellationRequested) return null;
 
         try {
-          const uri = getDocUri(model, state);
           const result: any = await sendRequest(state, 'textDocument/inlayHint', {
-            textDocument: { uri },
+            textDocument: { uri: getDocUri(model, state) },
             range: {
               start: {
                 line: range.startLineNumber - 1,
@@ -49,10 +47,7 @@ export function registerInlayHints(state: LspState): void {
           });
 
           const items = Array.isArray(result) ? result : [];
-          if (!items.length) {
-            // Empty is normal when prefs disabled or nothing to show on this range
-            return { hints: [], dispose: () => {} };
-          }
+          if (!items.length) return { hints: [], dispose: () => {} };
 
           const hints: monaco.languages.InlayHint[] = items.map((h: any) => {
             const pos = h.position ?? { line: 0, character: 0 };
@@ -90,24 +85,10 @@ export function registerInlayHints(state: LspState): void {
           });
 
           return { hints, dispose: () => {} };
-        } catch (err: any) {
-          // Method-not-found (-32601) means server has no inlayHint capability
-          const code = err?.lspError?.code ?? err?.code;
-          if (code === -32601) {
-            console.warn(
-              `[LSP] textDocument/inlayHint not supported by ${state.languageId} server`,
-            );
-          } else {
-            console.warn(
-              `[LSP] inlayHint failed (${state.languageId}):`,
-              err?.message || err,
-            );
-          }
+        } catch {
           return null;
         }
       },
     }),
   );
-
-  console.log(`[LSP] InlayHintsProvider registered for "${state.languageId}"`);
 }
