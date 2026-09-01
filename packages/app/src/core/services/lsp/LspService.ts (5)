@@ -164,21 +164,6 @@ export class LspService implements ILspService {
         registerProviders(s, options); // Monaco completion / hover / etc.
         syncOpenEditors(s);            // didOpen for already-open models
 
-        // Ensure inlayHints are on and force Monaco to re-query.
-        // Log showed server caps + prefs OK but Monaco never called provideInlayHints.
-        try {
-          const { refreshInlayHints } = await import('./providers/inlayHints');
-          for (const ed of monaco.editor.getEditors()) {
-            try {
-              ed.updateOptions({ inlayHints: { enabled: 'on' } } as any);
-            } catch { /* ignore */ }
-          }
-          setTimeout(() => refreshInlayHints(languageId), 250);
-          setTimeout(() => refreshInlayHints(languageId), 1000);
-        } catch (e) {
-          console.warn('[LSP] inlay refresh after ready failed:', e);
-        }
-
         s.isInitializing = false;
         s._initResolve?.();
         s._initResolve = s._initReject = null;

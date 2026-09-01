@@ -82,20 +82,15 @@ export function registerProviders(state: LspState, options: LspOptions = {}): vo
       registerColorProvider(state);
     }
 
-    // Inlay: prefer server capability; never skip just because a setting is missing.
-    // Log showed inlayHintProvider=true but Monaco never called provideInlayHints —
-    // force-register whenever the server advertises support (or client wants it).
-    const serverOffersInlay = serverHas(caps, 'inlayHintProvider');
-    if (options.inlayHints !== false || serverOffersInlay) {
+    // Inlay: register when client wants them AND server didn't explicitly disable.
+    // Some servers omit inlayHintProvider from caps but still answer the request
+    // (clangd); TLS advertises it when preferences enable inlays.
+    if (options.inlayHints !== false) {
       registerInlayHints(state);
     }
   }
 
   state.languageId = primary;
-  console.log(
-    `[LSP] registerProviders done primary=${primary} langs=${langs.join(',')} ` +
-    `inlayHints opt=${options.inlayHints} serverInlay=${serverHas(caps, 'inlayHintProvider')}`,
-  );
 }
 
 /** Dispose every Monaco provider registered for this connection. */
