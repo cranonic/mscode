@@ -334,33 +334,24 @@ export class LspProcessManager {
     }
 
     public stopServer(language?: string): void {
-        const killPort = (port: number) => {
-            // Drop every language key that shared this port (TS family sharePort)
-            for (const [lang, p] of [...this.activePorts.entries()]) {
-                if (p === port) {
-                    this.activePorts.delete(lang);
-                    this.aliveLanguages.delete(lang);
-                }
-            }
+        const kill = (lang: string, port: number) => {
+            this.activePorts.delete(lang);
+            this.aliveLanguages.delete(lang);
             NativeTerminal.killLsp({ port }).catch((err: any) => {
-                console.warn(`[LSP] killLsp(${port}) failed:`, err);
+                console.warn(`[LSP] killLsp(${port}) for ${lang} failed:`, err);
             });
         };
 
         if (language) {
             const port = this.activePorts.get(language);
-            if (port != null) killPort(port);
-            else {
-                this.activePorts.delete(language);
-                this.aliveLanguages.delete(language);
-            }
+            if (port != null) kill(language, port);
+            else this.activePorts.delete(language);
         } else {
-            const ports = new Set(this.activePorts.values());
+            const entries = [...this.activePorts.entries()];
             this.activePorts.clear();
-            this.aliveLanguages.clear();
-            for (const port of ports) {
+            for (const [lang, port] of entries) {
                 NativeTerminal.killLsp({ port }).catch((err: any) => {
-                    console.warn(`[LSP] killLsp(${port}) failed:`, err);
+                    console.warn(`[LSP] killLsp(${port}) for ${lang} failed:`, err);
                 });
             }
             NativeTerminal.killAllLsp?.().catch(() => {});
@@ -368,9 +359,7 @@ export class LspProcessManager {
     }
 
     public getActiveLanguage(): string | null {
-        // Prefer a language that completed handshake; fall back to last port key.
-        const alive = [...this.aliveLanguages];
-        if (alive.length) return alive[alive.length - 1];
+        // Returns the most recently started language (Map preserves insertion order).
         const keys = [...this.activePorts.keys()];
         return keys.at(-1) ?? null;
     }

@@ -140,21 +140,6 @@ export function useLspSync(editorInstance: any, tabId: string) {
       MONACO_ONLY_LANGS.has(langId) ||
       (MONACO_FALLBACK_LANGS.has(langId) && !preferExternal);
 
-    // ── Status bar: always reflect the ACTIVE tab language immediately ──
-    // Prevents {Html} from sticking when switching HTML → Python/TS/C++.
-    // Boot path may overwrite with "Starting…" / ready / error later.
-    if (isEnabled) {
-      useStatusBarStore.getState().updateItem('lsp-status', {
-        label: `{${refractorLangId(langId)}}`,
-        icon: 'check', spin: false,
-        color: 'var(--vscode-testing-iconPassed, #73c991)',
-      });
-    } else {
-      useStatusBarStore.getState().updateItem('lsp-status', {
-        label: 'LSP: Off', icon: 'check', color: 'inherit',
-      });
-    }
-
     // ── Active tab's real file path ────────────────────────────────────────
     const activeTab  = tabs.find(t => t.id === activeTabId);
     const fileUri    = resolveFileUri(activeTab, model);
@@ -392,16 +377,11 @@ export function useLspSync(editorInstance: any, tabId: string) {
       });
     });
 
-    // Allow a new boot to supersede an in-flight one (fast tab switches).
-    // Previously `if (bootingRef.current) return` left status stuck on the
-    // previous language (e.g. {Html}) and skipped Python/TS reconnect.
-    const bootGeneration = (bootingRef as any)._gen = ((bootingRef as any)._gen | 0) + 1;
+    if (bootingRef.current) return;
     bootingRef.current = true;
 
     const boot = async () => {
-      const isStale = () => (bootingRef as any)._gen !== bootGeneration;
       try {
-        if (isStale()) return;
         outputChannel.appendLine(`[INFO] Starting ${langId} language server…`);
         if (preferExternal && MONACO_FALLBACK_LANGS.has(langId)) {
           outputChannel.appendLine(
@@ -554,19 +534,8 @@ export function useLspSync(editorInstance: any, tabId: string) {
         outputChannel.appendLine(
           `[DEBUG] initOptions.tsserver=${JSON.stringify(lspOptions.initializationOptions?.tsserver ?? null)}`,
         );
-        outputChannel.appendLine(
-          `[DEBUG] initOptions.preferences=${JSON.stringify(lspOptions.initializationOptions?.preferences ?? lspOptions.preferences ?? null)}`,
-        );
-        if (isStale()) {
-          outputChannel.appendLine(`[INFO] Boot cancelled (tab switched away from ${langId})`);
-          return;
-        }
 
         // connect() opens WebSocket + does LSP initialize handshake
-        if (isStale()) {
-          outputChannel.appendLine(`[INFO] Boot cancelled before connect (${langId})`);
-          return;
-        }
         activeLspService.connect(langId, `ws://127.0.0.1:${port}`, lspOptions);
 
         // Prefer waitUntilReady so real initialize errors surface (not only timeout)
@@ -652,11 +621,9 @@ export function useLspSync(editorInstance: any, tabId: string) {
           message: `Boot failed: ${msg}`,
         });
       } finally {
-        // Only the latest generation may clear the flag
-        if ((bootingRef as any)._gen === bootGeneration) {
-          if (!(boot as any)._retried || activeLspService.initialized) {
-            bootingRef.current = false;
-          }
+        // Don't clear bootingRef if we scheduled a retry above
+        if (!(boot as any)._retried || activeLspService.initialized) {
+          bootingRef.current = false;
         }
       }
     };
@@ -664,8 +631,7 @@ export function useLspSync(editorInstance: any, tabId: string) {
     boot();
 
     return () => {
-      // Cleanup — bump generation so any in-flight boot becomes stale
-      (bootingRef as any)._gen = ((bootingRef as any)._gen | 0) + 1;
+      // Cleanup
       activeLspService.unregisterModelUri(model);
       bootingRef.current = false;
     };

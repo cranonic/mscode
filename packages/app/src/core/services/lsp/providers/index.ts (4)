@@ -32,19 +32,11 @@ export function isTsJsFamily(langId: string): boolean {
   return (TS_JS_FAMILY as readonly string[]).includes(langId);
 }
 
-function serverHas(caps: Record<string, unknown>, key: string): boolean {
-  // true / {} / { resolveProvider: ... } all mean supported
-  return caps[key] != null && caps[key] !== false;
-}
-
 /**
  * Register all Monaco providers.
  * When the connected language is any member of the TS/JS family, providers are
  * registered for every family member so switching tabs (js ↔ ts ↔ tsx) keeps
  * completions, symbols, hover, etc. working without a reconnect.
- *
- * Providers the server did not advertise (e.g. documentLink on TLS) are skipped
- * to avoid noisy -32601 "Unhandled method" errors in the console.
  */
 export function registerProviders(state: LspState, options: LspOptions = {}): void {
   const primary = state.languageId;
@@ -52,8 +44,9 @@ export function registerProviders(state: LspState, options: LspOptions = {}): vo
     ? [...TS_JS_FAMILY]
     : [primary];
 
-  const caps = state.serverCapabilities || {};
-
+  // Each registerXxx reads state.languageId at call-time for the Monaco API
+  // language argument. Temporarily switch it so every family member gets a
+  // provider; restore the primary id afterwards (used by diagnostics routing).
   for (const lang of langs) {
     state.languageId = lang;
 
@@ -63,31 +56,14 @@ export function registerProviders(state: LspState, options: LspOptions = {}): vo
     }
     if (options.documentSymbol !== false)    registerDocumentSymbol(state);
     if (options.documentHighlight !== false) registerDocumentHighlight(state);
-
-    // TLS does not implement documentLink / documentColor → skip when missing
-    if (serverHas(caps, 'documentLinkProvider')) {
-      registerDocumentLink(state);
-    }
+    registerDocumentLink(state);
     if (options.codeActions !== false)       registerCodeAction(state);
-    if (options.codeLens && serverHas(caps, 'codeLensProvider')) {
-      registerCodeLens(state);
-    }
+    if (options.codeLens)                    registerCodeLens(state);
     if (options.foldingRange !== false)      registerFoldingRange(state);
     registerDocumentFormatting(state);
-
-    if (
-      options.colorProvider !== false &&
-      serverHas(caps, 'colorProvider')
-    ) {
-      registerColorProvider(state);
-    }
-
-    // Inlay: register when client wants them AND server didn't explicitly disable.
-    // Some servers omit inlayHintProvider from caps but still answer the request
-    // (clangd); TLS advertises it when preferences enable inlays.
-    if (options.inlayHints !== false) {
-      registerInlayHints(state);
-    }
+    if (options.colorProvider !== false)     registerColorProvider(state);
+    // Inlay hints (parameter names, types, etc.) — needs live didChange to stay fresh
+    if (options.inlayHints !== false)        registerInlayHints(state);
   }
 
   state.languageId = primary;

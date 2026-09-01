@@ -229,7 +229,6 @@ export class LspService implements ILspService {
     teardownProviders(s);
     clearAllContentListeners(s);
     s.openedUris.clear();
-    s.serverCapabilities = {};
 
     // 3 — reject pending init promise
     if (s.isInitializing) {

@@ -163,71 +163,10 @@ export async function initializeLsp(state: LspState): Promise<void> {
     sendNotify(state, 'initialized', {});
     state.initialized = true;
     const caps = (result as any)?.capabilities ?? {};
-    state.serverCapabilities = caps;
-    const prefs = (initializationOptions as any)?.preferences;
     console.log(
       '[LSP] Handshake OK. Server caps:',
       Object.keys(caps).join(', ') || '(none)',
     );
-    console.log(
-      '[LSP] inlayHintProvider=',
-      caps.inlayHintProvider != null ? JSON.stringify(caps.inlayHintProvider) : 'MISSING',
-      ' init.preferences.inlay=',
-      prefs
-        ? `paramNames=${prefs.includeInlayParameterNameHints} types=${prefs.includeInlayVariableTypeHints}`
-        : 'NO_PREFS',
-    );
-
-    // Push settings so TLS applies inlay prefs even if workspace/configuration
-    // was answered before preferences were ready.
-    if (prefs && typeof prefs === 'object') {
-      try {
-        sendNotify(state, 'workspace/didChangeConfiguration', {
-          settings: {
-            typescript: {
-              preferences: prefs,
-              inlayHints: {
-                parameterNames: {
-                  enabled: prefs.includeInlayParameterNameHints ?? 'all',
-                },
-                parameterTypes: {
-                  enabled: !!prefs.includeInlayFunctionParameterTypeHints,
-                },
-                variableTypes: {
-                  enabled: !!prefs.includeInlayVariableTypeHints,
-                },
-                propertyDeclarationTypes: {
-                  enabled: !!prefs.includeInlayPropertyDeclarationTypeHints,
-                },
-                functionLikeReturnTypes: {
-                  enabled: !!prefs.includeInlayFunctionLikeReturnTypeHints,
-                },
-                enumMemberValues: {
-                  enabled: !!prefs.includeInlayEnumMemberValueHints,
-                },
-              },
-            },
-            javascript: {
-              preferences: prefs,
-              inlayHints: {
-                parameterNames: {
-                  enabled: prefs.includeInlayParameterNameHints ?? 'all',
-                },
-                parameterTypes: {
-                  enabled: !!prefs.includeInlayFunctionParameterTypeHints,
-                },
-                variableTypes: {
-                  enabled: !!prefs.includeInlayVariableTypeHints,
-                },
-              },
-            },
-          },
-        });
-        console.log('[LSP] workspace/didChangeConfiguration sent (inlay prefs)');
-      } catch (e) {
-        console.warn('[LSP] didChangeConfiguration failed:', e);
-      }
-    }
   } catch (e: any) {
     const msg =
       e?.message ||

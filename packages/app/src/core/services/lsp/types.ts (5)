@@ -53,8 +53,6 @@ export interface LspState {
    * initialize — empty answers would wipe initializationOptions.preferences.
    */
   configuration: Record<string, unknown>;
-  /** Server capabilities from the initialize result (skip unsupported providers). */
-  serverCapabilities: Record<string, unknown>;
   /** True after initialize/initialized handshake completed. */
   initialized: boolean;
   /** True while handshake is in flight. */
@@ -94,7 +92,6 @@ export function createInitialState(): LspState {
     rootUri: 'file:///sdcard',
     initializationOptions: {},
     configuration: {},
-    serverCapabilities: {},
     initialized: false,
     isInitializing: false,
     disposables: [],
