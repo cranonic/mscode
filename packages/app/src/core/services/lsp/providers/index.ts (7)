@@ -9,7 +9,6 @@ import type { LspState } from '../types';
 import type { LspOptions } from '../types';
 
 import { registerCompletion }        from './completion';
-import { registerHover }             from './hover';
 import { registerDefinition }        from './definition';
 import { registerDocumentSymbol }    from './documentSymbol';
 import { registerDocumentHighlight } from './documentHighlight';
@@ -60,8 +59,6 @@ export function registerProviders(state: LspState, options: LspOptions = {}): vo
     state.languageId = lang;
 
     if (options.completion !== false)        registerCompletion(state);
-    // Hover — MDN / docs (HTML LS, TS, etc.). Default on unless explicitly disabled.
-    if (options.hover !== false)             registerHover(state);
     if (options.references !== false || options.definition !== false) {
       registerDefinition(state);
     }

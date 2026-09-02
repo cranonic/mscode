@@ -3,7 +3,6 @@
 import { contextKeyService } from '@/core/keybindings/contextKeyService';
 import { useTabStore } from '@/store/tabStore';
 import { useSettingsStore } from '@/features/settings/store/settingsStore';
-import { applyEditorCssVars } from '@/core/theme/editorCssVars';
 
 /**
  * Basic language mapper to derive Monaco Language IDs from file extensions.
@@ -84,19 +83,11 @@ export function registerGlobalContexts() {
     });
   };
 
-  // 3. editor.fontFamily / size / weight → CSS vars (--ms-editor-font-*)
-  //    Diagnostic popup + extension UI: font-family: var(--ms-editor-font-family)
-  const syncEditorCssVars = (state: ReturnType<typeof useSettingsStore.getState>) => {
-    applyEditorCssVars(state.settings);
-  };
-
   // ── Initial Boot Sync ──
   syncTabContexts(useTabStore.getState());
   syncSettingsContexts(useSettingsStore.getState());
-  syncEditorCssVars(useSettingsStore.getState());
 
   // ── Subscribe to Future Changes ──
   useTabStore.subscribe(syncTabContexts);
   useSettingsStore.subscribe(syncSettingsContexts);
-  useSettingsStore.subscribe(syncEditorCssVars);
 }

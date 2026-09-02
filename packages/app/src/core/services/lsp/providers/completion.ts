@@ -141,18 +141,29 @@ export function registerCompletion(state: LspState): void {
               }
             }
 
-            return {
+            // Prefer markdown docs (MDN links) when server sends MarkupContent
+            let documentation: string | monaco.IMarkdownString | undefined;
+            if (item.documentation != null) {
+              if (typeof item.documentation === 'string') {
+                documentation = { value: item.documentation };
+              } else if (typeof item.documentation?.value === 'string') {
+                documentation = { value: item.documentation.value, isTrusted: true };
+              }
+            }
+
+            const suggestion: monaco.languages.CompletionItem & { __lspItem?: any } = {
               label:         String(item.label).trim(),
               kind:          completionKind(item.kind),
               detail:        item.detail ?? '',
-              documentation: typeof item.documentation === 'string'
-                ? item.documentation
-                : item.documentation?.value ?? '',
+              documentation,
               insertText,
               range,
               insertTextRules,
               sortText: '1_' + String(item.label).trim(),
             };
+            // Keep raw LSP item so resolveCompletionItem can fetch MDN docs
+            suggestion.__lspItem = item;
+            return suggestion;
           });
 
           // Bare-tag path: if LSP returned nothing but we have emmet, still show it.
@@ -167,6 +178,39 @@ export function registerCompletion(state: LspState): void {
         } catch {
           return { suggestions: [] };
         }
+      },
+
+      // Lazy MDN / detail when user highlights a completion item
+      resolveCompletionItem: async (item, token) => {
+        if (!state.initialized) return item;
+        if (token?.isCancellationRequested) return item;
+
+        const raw = (item as any).__lspItem;
+        if (!raw) return item;
+
+        try {
+          const resolved: any = await sendRequest(state, 'completionItem/resolve', raw);
+          if (!resolved) return item;
+
+          if (resolved.documentation != null) {
+            if (typeof resolved.documentation === 'string') {
+              item.documentation = { value: resolved.documentation };
+            } else if (typeof resolved.documentation?.value === 'string') {
+              item.documentation = {
+                value: resolved.documentation.value,
+                isTrusted: true,
+              };
+            }
+          }
+          if (resolved.detail != null && resolved.detail !== '') {
+            item.detail = resolved.detail;
+          }
+          // Keep data for further resolves
+          if (resolved.data != null) raw.data = resolved.data;
+        } catch {
+          /* resolve optional */
+        }
+        return item;
       },
     })
   );
