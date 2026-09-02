@@ -75,7 +75,7 @@ export interface ContextMenuProps {
  */
 // ── Separator guard ───────────────────────────────────────────────────────────
 // Removes: leading separators, trailing separators, consecutive separators.
-export const trimSeparators = (items: MenuItem[]): MenuItem[] =>
+const trimSeparators = (items: MenuItem[]): MenuItem[] =>
   items
     .reduce<MenuItem[]>((acc, item) => {
       if (item.type === 'separator') {

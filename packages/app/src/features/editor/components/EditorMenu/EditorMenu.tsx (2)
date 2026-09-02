@@ -3,7 +3,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useEditorMenuStore } from '@/features/editor/components/EditorMenu/store/editorMenuStore';
 import { useSettingsStore } from '@/features/settings/store/settingsStore'; 
 import { Icon } from '@/ui/components/Icon/IconRegistry';
-import { ContextMenu, trimSeparators } from '@/ui/components/ContextMenu/ContextMenu';
+import { ContextMenu } from '@/ui/components/ContextMenu/ContextMenu';
 import type { MenuItem } from '@/store/menuStore';
 import { useBackButtonStore } from '@/store/backButtonStore';
 import './EditorMenu.css'; 
@@ -171,16 +171,9 @@ export const EditorContextMenu: React.FC = () => {
   };
 
   // ─── Horizontal Segmentation Calculations ───
-  // Strip leading/trailing/duplicate separators so bars & "More" menus never
-  // start or end with a divider (matches ContextMenu.trimSeparators).
   const isScrollable = styleType === 'android' && overflowStyle === 'scroll';
-  const cleanedItems = trimSeparators(items);
-  const visibleItems = isScrollable
-    ? cleanedItems
-    : (styleType === 'android' ? cleanedItems.slice(0, maxVisibleAndroid) : cleanedItems);
-  const overflowItems = isScrollable
-    ? []
-    : (styleType === 'android' ? trimSeparators(cleanedItems.slice(maxVisibleAndroid)) : []);
+  const visibleItems = isScrollable ? items : (styleType === 'android' ? items.slice(0, maxVisibleAndroid) : items);
+  const overflowItems = isScrollable ? [] : (styleType === 'android' ? items.slice(maxVisibleAndroid) : []);
 
   /**
    * Recursively constructs sub-menu grid view arrays safely matching specific structural vectors.
@@ -247,7 +240,7 @@ export const EditorContextMenu: React.FC = () => {
       {/* ── Paradigm B: Desktop Vertical Context List Menu / Android Overflow Action Drawer ── */}
       {(styleType === 'vertical' || (styleType === 'android' && showMore && !isScrollable)) && (
         <div className={`ms-vertical-menu ${styleType === 'android' ? 'ms-android-dropdown' : ''} ${dropdownDir === 'up' ? 'dropdown-up' : ''}`}>
-          {(styleType === 'vertical' ? cleanedItems : overflowItems).map((item, idx) => (
+          {(styleType === 'vertical' ? items : overflowItems).map((item, idx) => (
             item.type === 'separator' ? <div key={`sep-${idx}`} className="ms-menu-separator" /> :
             <div
               key={item.id}

@@ -201,16 +201,8 @@ export function buildMonacoOptions(settings: Settings): Monaco.editor.IEditorOpt
     },
     
     hover: {
-      enabled: settings['editor.hover.enabled'] ?? true,
-      // html.hover.delay is seconds (HTML ext); editor.hover.delay is ms — use the larger
-      delay: (() => {
-        const editorMs = settings['editor.hover.delay'] ?? 300;
-        const htmlSec = settings['html.hover.delay'];
-        if (typeof htmlSec === 'number' && htmlSec >= 0) {
-          return Math.max(editorMs, Math.round(htmlSec * 1000));
-        }
-        return editorMs;
-      })(),
+      enabled:     settings['editor.hover.enabled']     ?? true,
+      delay:       settings['editor.hover.delay']       ?? 300,
       sticky:      settings['editor.hover.sticky']      ?? true,
       above:       settings['editor.hover.above']       ?? true,
       hidingDelay: settings['editor.hover.hidingDelay'] ?? 300,

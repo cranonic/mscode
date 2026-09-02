@@ -11,42 +11,6 @@ import { useSettingsStore } from '@/features/settings/store/settingsStore';
 
 const HOVER_DELAY_MS = 1000;
 
-/** Ensure shadow text colors beat Monaco token styles (injected once). */
-function ensureShadowStyles(): void {
-  if (typeof document === 'undefined') return;
-  if (document.getElementById('ms-diagnostic-shadow-style')) return;
-  const el = document.createElement('style');
-  el.id = 'ms-diagnostic-shadow-style';
-  el.textContent = `
-    .monaco-editor .view-line span.ms-diagnostic-shadow--error,
-    .monaco-editor span.ms-diagnostic-shadow--error {
-      color: #f48771 !important;
-      -webkit-text-fill-color: #f48771 !important;
-      font-style: italic !important;
-      margin-left: 1.25em;
-      opacity: 1 !important;
-    }
-    .monaco-editor .view-line span.ms-diagnostic-shadow--warning,
-    .monaco-editor span.ms-diagnostic-shadow--warning {
-      color: #cca700 !important;
-      -webkit-text-fill-color: #cca700 !important;
-      font-style: italic !important;
-      margin-left: 1.25em;
-      opacity: 1 !important;
-    }
-    .monaco-editor .view-line span.ms-diagnostic-shadow--info,
-    .monaco-editor span.ms-diagnostic-shadow--info {
-      color: #75beff !important;
-      -webkit-text-fill-color: #75beff !important;
-      font-style: italic !important;
-      margin-left: 1.25em;
-      opacity: 1 !important;
-    }
-  `;
-  document.head.appendChild(el);
-}
-
-
 export type DiagnosticDisplayStyle = 'popup' | 'shadow' | 'off';
 
 function severityLabel(s: monaco.MarkerSeverity): string {
@@ -152,9 +116,7 @@ function buildShadowDecorations(
       options: {
         after: {
           content: text.length > 120 ? text.slice(0, 117) + '…' : text,
-          // Single class — Monaco token colors override multi-class spans
-          inlineClassName: severityShadowClass(m.severity),
-          inlineClassNameAffectsLetterSpacing: true,
+          inlineClassName: `ms-diagnostic-shadow ${severityShadowClass(m.severity)}`,
           cursorStops: monaco.editor.InjectedTextCursorStops.None,
         },
         showIfCollapsed: true,
@@ -271,7 +233,6 @@ export function useDiagnosticPopup(editor: monaco.editor.IStandaloneCodeEditor |
     };
 
     const refreshShadow = () => {
-      ensureShadowStyles();
       const model = editor.getModel();
       if (!model || styleRef.current !== 'shadow') {
         clearShadow();

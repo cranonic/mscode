@@ -1,5 +1,5 @@
 
-/* src/features/editor/CodeEditor.css
+/* src/features/editor/styles/editorOverrides.css
    ─────────────────────────────────────────────────────────────────────────────
    MONACO ENGINE CORE LOOK AND LAYOUT CUSTOMIZATIONS
    
@@ -134,7 +134,7 @@
   border: 1px solid var(--ms-border-light, #454545);
   box-shadow: 0 6px 20px var(--ms-shadow, #7e7e7e2d);
   color: var(--ms-text-main, #cccccc);
-  /* Same face as Monaco — from editor.fontFamily via --ms-editor-font-family */
+  /* Fallback only — useDiagnosticPopup sets inline font from Monaco EditorOption */
   font-family: var(--ms-editor-font-family, 'Fira Code', 'Cascadia Code', Consolas, monospace);
   font-size: var(--ms-editor-font-size, 13px);
   font-weight: var(--ms-editor-font-weight, normal);
@@ -165,6 +165,42 @@
 /* Monaco content-widget host can shrink children — force overflow visible */
 .monaco-editor .contentWidgets .ms-diagnostic-popup {
   position: relative;
+}
+
+/* ── Diagnostic shadow text (lsp.diagnostics.displayStyle = shadow) ──
+   Monaco injected-text inherits token fg — force fill on severity class. */
+.monaco-editor .view-line span.ms-diagnostic-shadow--error,
+.monaco-editor .view-lines span.ms-diagnostic-shadow--error,
+.monaco-editor span.ms-diagnostic-shadow--error {
+  font-style: italic !important;
+  margin-left: 1.25em;
+  pointer-events: none !important;
+  user-select: none !important;
+  opacity: 1 !important;
+  color: #f48771 !important;
+  -webkit-text-fill-color: #f48771 !important;
+}
+.monaco-editor .view-line span.ms-diagnostic-shadow--warning,
+.monaco-editor .view-lines span.ms-diagnostic-shadow--warning,
+.monaco-editor span.ms-diagnostic-shadow--warning {
+  font-style: italic !important;
+  margin-left: 1.25em;
+  pointer-events: none !important;
+  user-select: none !important;
+  opacity: 1 !important;
+  color: #cca700 !important;
+  -webkit-text-fill-color: #cca700 !important;
+}
+.monaco-editor .view-line span.ms-diagnostic-shadow--info,
+.monaco-editor .view-lines span.ms-diagnostic-shadow--info,
+.monaco-editor span.ms-diagnostic-shadow--info {
+  font-style: italic !important;
+  margin-left: 1.25em;
+  pointer-events: none !important;
+  user-select: none !important;
+  opacity: 1 !important;
+  color: #75beff !important;
+  -webkit-text-fill-color: #75beff !important;
 }
 
 

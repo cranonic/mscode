@@ -7,6 +7,41 @@ const VOID = new Set([
   'param', 'source', 'track', 'wbr',
 ]);
 
+/** Common HTML5 tag names — used for bare-prefix completions (type `i` → img, input, …). */
+export const HTML5_TAGS: readonly string[] = [
+  'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio',
+  'b', 'base', 'bdi', 'bdo', 'blockquote', 'body', 'br', 'button',
+  'canvas', 'caption', 'cite', 'code', 'col', 'colgroup',
+  'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt',
+  'em', 'embed',
+  'fieldset', 'figcaption', 'figure', 'footer', 'form',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html',
+  'i', 'iframe', 'img', 'input', 'ins',
+  'kbd',
+  'label', 'legend', 'li', 'link',
+  'main', 'map', 'mark', 'menu', 'meta', 'meter',
+  'nav', 'noscript',
+  'object', 'ol', 'optgroup', 'option', 'output',
+  'p', 'picture', 'pre', 'progress',
+  'q',
+  'rp', 'rt', 'ruby',
+  's', 'samp', 'script', 'search', 'section', 'select', 'slot', 'small', 'source',
+  'span', 'strong', 'style', 'sub', 'summary', 'sup',
+  'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time',
+  'title', 'tr', 'track',
+  'u', 'ul',
+  'var', 'video',
+  'wbr',
+];
+
+/** Tags whose name starts with prefix (case-insensitive). */
+export function tagsMatchingPrefix(prefix: string): string[] {
+  const p = (prefix || '').toLowerCase();
+  if (!p || !/^[a-z][\w:-]*$/i.test(p)) return [];
+  return HTML5_TAGS.filter((t) => t.startsWith(p));
+}
+
+
 /** Loose check — keep permissive so p>li*6 / #id / .class all qualify */
 export function isEmmetLike(token: string): boolean {
   if (!token || token.length > 100) return false;
