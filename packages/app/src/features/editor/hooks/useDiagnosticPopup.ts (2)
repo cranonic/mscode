@@ -10,6 +10,7 @@ import * as monaco from 'monaco-editor';
 import { useSettingsStore } from '@/features/settings/store/settingsStore';
 
 const HOVER_DELAY_MS = 1000;
+const SHADOW_DECO_KEY = 'mscode.diagnosticShadow';
 
 export type DiagnosticDisplayStyle = 'popup' | 'shadow' | 'off';
 
@@ -114,6 +115,7 @@ function buildShadowDecorations(
     decos.push({
       range: new monaco.Range(line, maxCol, line, maxCol),
       options: {
+        description: SHADOW_DECO_KEY,
         after: {
           content: text.length > 120 ? text.slice(0, 117) + '…' : text,
           inlineClassName: `ms-diagnostic-shadow ${severityShadowClass(m.severity)}`,

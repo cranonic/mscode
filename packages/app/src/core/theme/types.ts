@@ -58,13 +58,10 @@ export interface MSCodeUIColors {
   'ms-input-focus-border':      string;
   'ms-code-bg':                 string;
   'ms-code-fg':                 string;
-
-  // Editor typography (runtime from editor.fontFamily / fontSize / fontWeight)
-  // Prefer CSS: var(--ms-editor-font-family) — see src/core/theme/editorCssVars.ts
-  'ms-editor-font-family'?: string;
-  'ms-editor-font-size'?: string;
-  'ms-editor-font-weight'?: string;
 }
+
+// Editor typography CSS vars live on :root via editorCssVars.ts
+// (--ms-editor-font-family / size / weight) — not part of theme color tokens.
 
 /**
  * Token compilation rule modeling standard syntax categorization parameters 
