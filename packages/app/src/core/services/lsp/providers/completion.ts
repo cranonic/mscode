@@ -32,9 +32,9 @@ export function registerCompletion(state: LspState): void {
 
   state.disposables.push(
     monaco.languages.registerCompletionItemProvider(langId, {
-      // HTML: also fire on letters so bare `p` / emmet tokens open suggest
+      // HTML: re-trigger on Emmet operators + digits (p>li*6 while typing)
       triggerCharacters: html
-        ? ['.', ':', '/', '#', '@', '<', '>', '!', '*', '+']
+        ? ['.', ':', '/', '#', '@', '<', '>', '!', '*', '+', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
         : ['.', ':', '/', '#', '@', '<', '>'],
 
       provideCompletionItems: async (model, position, context) => {
@@ -57,17 +57,21 @@ export function registerCompletion(state: LspState): void {
                   startColumn: tok.startColumn,
                   endColumn: position.column,
                 };
-                // Primary: expand abbreviation (same list user sees for tags)
+                // filterText = full token so Monaco doesn't drop item when word is only "6"
+                const lastSeg = tok.token.split(/[>+*]/).pop() || tok.token;
                 emmetSuggestions.push({
-                  label: tok.token,
+                  label: {
+                    label: tok.token,
+                    description: 'Emmet',
+                  },
                   kind: monaco.languages.CompletionItemKind.Property,
                   detail: 'Emmet Abbreviation',
-                  documentation: expanded.replace(/\$0/g, ''),
+                  documentation: { value: '```html\n' + expanded.replace(/\$\d+/g, '') + '\n```' },
                   insertText: expanded,
                   insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
                   range,
                   sortText: '0_' + tok.token,
-                  filterText: tok.token,
+                  filterText: tok.token + ' ' + lastSeg,
                 });
               }
             }

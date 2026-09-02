@@ -1,21 +1,34 @@
 // Lightweight Emmet expand for HTML completions (no npm dep).
 // Supports: tag, #id, .class, >, +, *N, [] attrs, {} text
+// Implicit div: `#myid` → <div id="myid">, `.x` → <div class="x">
 
 const VOID = new Set([
   'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta',
   'param', 'source', 'track', 'wbr',
 ]);
 
+/** Loose check — keep permissive so p>li*6 / #id / .class all qualify */
 export function isEmmetLike(token: string): boolean {
-  if (!token || token.length > 80) return false;
-  // plain tag or emmet operators
-  return /^[a-zA-Z][\w:-]*(?:[#.[{][\w\-$.]*)*(?:[>+*][\w:#.\[\]{}()\-*$]*)*$/.test(token)
-    || /^[a-zA-Z][\w:-]*$/.test(token);
+  if (!token || token.length > 100) return false;
+  // Must start like an Emmet abbr
+  if (!/^[a-zA-Z.#]/.test(token)) return false;
+  // Only Emmet alphabet (allow trailing operators while typing)
+  if (!/^[a-zA-Z0-9_#.[\]{}()>+\-*$:]+$/.test(token)) return false;
+  // Reject pure punctuation
+  if (/^[.#>+*]+$/.test(token) && token !== '.') return false;
+  return true;
 }
 
 export function expandEmmet(abbr: string): string | null {
-  const s = String(abbr || '').trim().replace(/[\s;]+$/g, '');
-  if (!s) return null;
+  // Strip trailing incomplete operators (user still typing: p>li*6>)
+  let s = String(abbr || '').trim().replace(/[\s;]+$/g, '');
+  s = s.replace(/[>+]+$/g, '');
+  if (!s || s === '.' || s === '#') {
+    // `.` alone → empty class div; `#` alone → empty id div
+    if (abbr.trim() === '.') return '<div class="$1">$0</div>';
+    if (abbr.trim() === '#') return '<div id="$1">$0</div>';
+    if (!s) return null;
+  }
   try {
     return expandNode(parse(s), 0).replace(/\n$/, '');
   } catch {
@@ -69,19 +82,22 @@ function splitTop(s: string, sep: string): string[] {
 
 function parseAtom(s: string): any {
   s = s.trim();
+  if (!s) return { type: 'tag', tag: 'div', id: '', classes: [], attrs: [], text: '', kids: [] };
+
   const gMul = s.match(/^\((.+)\)\*(\d+)$/);
   if (gMul) return { type: 'mul', count: +gMul[2], template: parse(gMul[1]) };
   if (s.startsWith('(') && s.endsWith(')')) return parse(s.slice(1, -1));
 
   const mul = s.match(/^(.*)\*(\d+)$/);
-  if (mul && !mul[1].endsWith(')')) {
+  if (mul && mul[1] !== '' && !mul[1].endsWith(')')) {
     return { type: 'mul', count: +mul[2], template: parseAtom(mul[1]) };
   }
 
   let i = 0;
+  // Implicit div when abbr starts with # or .
   let tag = 'div';
   if (/^[a-zA-Z]/.test(s)) {
-    const m = s.match(/^[a-zA-Z][\w:-]*/)!;
+    const m = s.match(/^[a-zA-Z][\w:-]*/) as RegExpMatchArray;
     tag = m[0];
     i = tag.length;
   }
@@ -95,24 +111,34 @@ function parseAtom(s: string): any {
     const c = s[i];
     if (c === '#') {
       i++;
-      const m = s.slice(i).match(/^[\w-]+/);
-      if (m) { id = m[0]; i += m[0].length; }
+      const m = s.slice(i).match(/^[\w-]*/);
+      if (m) {
+        id = m[0];
+        i += m[0].length;
+      }
     } else if (c === '.') {
       i++;
-      const m = s.slice(i).match(/^[\w-]+/);
-      if (m) { classes.push(m[0]); i += m[0].length; }
+      const m = s.slice(i).match(/^[\w-]*/);
+      if (m) {
+        // empty class still allowed (`.`)
+        if (m[0]) classes.push(m[0]);
+        else classes.push('');
+        i += m[0].length;
+      }
     } else if (c === '[') {
       const end = s.indexOf(']', i);
       if (end < 0) break;
       const inner = s.slice(i + 1, end).trim();
-      if (inner) attrs.push(inner.includes('=') ? inner : `${inner}`);
+      if (inner) attrs.push(inner);
       i = end + 1;
     } else if (c === '{') {
       const end = s.indexOf('}', i);
       if (end < 0) break;
       text = s.slice(i + 1, end);
       i = end + 1;
-    } else break;
+    } else {
+      break;
+    }
   }
 
   return { type: 'tag', tag, id, classes, attrs, text, kids: [] as any[] };
@@ -134,13 +160,20 @@ function expandNode(n: any, indent: number): string {
   const tag = n.tag || 'div';
   const attrParts: string[] = [];
   if (n.id) attrParts.push(`id="${n.id}"`);
-  if (n.classes?.length) attrParts.push(`class="${n.classes.join(' ')}"`);
+  if (n.classes?.length) {
+    const cls = n.classes.filter((c: string) => c !== undefined && c !== null).join(' ').trim();
+    // Always emit class= for intentional `.` / `.x` (even empty class list from lone `.`)
+    if (n.classes.length) attrParts.push(`class="${cls}"`);
+  }
   for (const a of n.attrs || []) {
-    if (a.includes('=')) attrParts.push(a.replace(/^([^=]+)=(.+)$/, (_m: string, k: string, v: string) => {
-      const val = v.replace(/^["']|["']$/g, '');
-      return `${k}="${val}"`;
-    }));
-    else attrParts.push(a);
+    if (a.includes('=')) {
+      attrParts.push(a.replace(/^([^=]+)=(.+)$/, (_m: string, k: string, v: string) => {
+        const val = v.replace(/^["']|["']$/g, '');
+        return `${k}="${val}"`;
+      }));
+    } else {
+      attrParts.push(a);
+    }
   }
   const attrStr = attrParts.length ? ' ' + attrParts.join(' ') : '';
 
@@ -161,15 +194,20 @@ function expandNode(n: any, indent: number): string {
   return `${pad(indent)}<${tag}${attrStr}>\n${body}\n${pad(indent)}</${tag}>`;
 }
 
-/** Token left of cursor that looks like Emmet / tag name */
+/**
+ * Token left of cursor that looks like Emmet / tag / #id / .class
+ * Must allow leading `#` and `.` (implicit div).
+ */
 export function emmetTokenBefore(
   line: string,
   column: number, // 1-based monaco column
 ): { token: string; startColumn: number } | null {
   const left = line.slice(0, column - 1);
-  // Don't treat as emmet inside/after an open tag name already started with <
+  // Inside an HTML open tag name after `<` — leave to HTML LS
   if (/<[\w:-]*$/.test(left)) return null;
-  const m = left.match(/([a-zA-Z][a-zA-Z0-9_#.[\]{}()>+\-*$:]*)$/);
+
+  // Allow start with letter, #, or .
+  const m = left.match(/([a-zA-Z.#][a-zA-Z0-9_#.[\]{}()>+\-*$:]*)$/);
   if (!m) return null;
   return { token: m[1], startColumn: column - m[1].length };
 }
