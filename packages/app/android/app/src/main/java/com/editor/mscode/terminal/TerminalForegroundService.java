@@ -768,6 +768,88 @@ public class TerminalForegroundService extends Service {
                  + "exec \"$MSCODE_LINKER\" \"$NODE_BIN\" --require \"$WRAP\" \"$CLI\" --stdio";
         }
 
+        // vscode-html-language-server (vscode-langservers-extracted)
+        // bin/ is a node shebang script — not executable on Android; run JS entry via node.
+        if (s.startsWith("vscode-html-language-server") || s.contains("vscode-html-language-server")) {
+            String js = prefix + "/lib/node_modules/vscode-langservers-extracted/lib/html-language-server/node/htmlServerMain.js";
+            String nodeBin = prefix + "/bin/node";
+            return "JS=\"" + js + "\"; "
+                 + "if [ ! -f \"$JS\" ]; then "
+                 + "  JS=\"$(npm root -g 2>/dev/null)/vscode-langservers-extracted/lib/html-language-server/node/htmlServerMain.js\"; "
+                 + "fi; "
+                 + "if [ ! -f \"$JS\" ]; then "
+                 + "  echo \"[LSP] installing vscode-langservers-extracted…\" >&2; "
+                 + "  npm install -g --prefix \"$PREFIX\" vscode-langservers-extracted >&2; "
+                 + "  JS=\"" + js + "\"; "
+                 + "fi; "
+                 + "if [ ! -f \"$JS\" ]; then "
+                 + "  echo \"[LSP] htmlServerMain.js missing\" >&2; exit 1; "
+                 + "fi; "
+                 + "NODE_BIN=\"" + nodeBin + "\"; "
+                 + "if [ ! -f \"$NODE_BIN\" ]; then echo \"[LSP] node missing $NODE_BIN\" >&2; exit 1; fi; "
+                 + "if [ -z \"$MSCODE_LINKER\" ]; then "
+                 + "  MSCODE_LINKER=/system/bin/linker64; "
+                 + "  [ -x \"$MSCODE_LINKER\" ] || MSCODE_LINKER=/system/bin/linker; "
+                 + "  export MSCODE_LINKER; "
+                 + "fi; "
+                 + "echo \"[LSP] html JS=$JS node=$NODE_BIN\" >&2; "
+                 + "exec \"$MSCODE_LINKER\" \"$NODE_BIN\" \"$JS\" --stdio";
+        }
+
+        // vscode-css-language-server (same package)
+        if (s.startsWith("vscode-css-language-server") || s.contains("vscode-css-language-server")) {
+            String js = prefix + "/lib/node_modules/vscode-langservers-extracted/lib/css-language-server/node/cssServerMain.js";
+            String nodeBin = prefix + "/bin/node";
+            return "JS=\"" + js + "\"; "
+                 + "if [ ! -f \"$JS\" ]; then "
+                 + "  JS=\"$(npm root -g 2>/dev/null)/vscode-langservers-extracted/lib/css-language-server/node/cssServerMain.js\"; "
+                 + "fi; "
+                 + "if [ ! -f \"$JS\" ]; then "
+                 + "  echo \"[LSP] installing vscode-langservers-extracted…\" >&2; "
+                 + "  npm install -g --prefix \"$PREFIX\" vscode-langservers-extracted >&2; "
+                 + "  JS=\"" + js + "\"; "
+                 + "fi; "
+                 + "if [ ! -f \"$JS\" ]; then "
+                 + "  echo \"[LSP] cssServerMain.js missing\" >&2; exit 1; "
+                 + "fi; "
+                 + "NODE_BIN=\"" + nodeBin + "\"; "
+                 + "if [ ! -f \"$NODE_BIN\" ]; then echo \"[LSP] node missing $NODE_BIN\" >&2; exit 1; fi; "
+                 + "if [ -z \"$MSCODE_LINKER\" ]; then "
+                 + "  MSCODE_LINKER=/system/bin/linker64; "
+                 + "  [ -x \"$MSCODE_LINKER\" ] || MSCODE_LINKER=/system/bin/linker; "
+                 + "  export MSCODE_LINKER; "
+                 + "fi; "
+                 + "echo \"[LSP] css JS=$JS node=$NODE_BIN\" >&2; "
+                 + "exec \"$MSCODE_LINKER\" \"$NODE_BIN\" \"$JS\" --stdio";
+        }
+
+        // vscode-json-language-server (same package)
+        if (s.startsWith("vscode-json-language-server") || s.contains("vscode-json-language-server")) {
+            String js = prefix + "/lib/node_modules/vscode-langservers-extracted/lib/json-language-server/node/jsonServerMain.js";
+            String nodeBin = prefix + "/bin/node";
+            return "JS=\"" + js + "\"; "
+                 + "if [ ! -f \"$JS\" ]; then "
+                 + "  JS=\"$(npm root -g 2>/dev/null)/vscode-langservers-extracted/lib/json-language-server/node/jsonServerMain.js\"; "
+                 + "fi; "
+                 + "if [ ! -f \"$JS\" ]; then "
+                 + "  echo \"[LSP] installing vscode-langservers-extracted…\" >&2; "
+                 + "  npm install -g --prefix \"$PREFIX\" vscode-langservers-extracted >&2; "
+                 + "  JS=\"" + js + "\"; "
+                 + "fi; "
+                 + "if [ ! -f \"$JS\" ]; then "
+                 + "  echo \"[LSP] jsonServerMain.js missing\" >&2; exit 1; "
+                 + "fi; "
+                 + "NODE_BIN=\"" + nodeBin + "\"; "
+                 + "if [ ! -f \"$NODE_BIN\" ]; then echo \"[LSP] node missing $NODE_BIN\" >&2; exit 1; fi; "
+                 + "if [ -z \"$MSCODE_LINKER\" ]; then "
+                 + "  MSCODE_LINKER=/system/bin/linker64; "
+                 + "  [ -x \"$MSCODE_LINKER\" ] || MSCODE_LINKER=/system/bin/linker; "
+                 + "  export MSCODE_LINKER; "
+                 + "fi; "
+                 + "echo \"[LSP] json JS=$JS node=$NODE_BIN\" >&2; "
+                 + "exec \"$MSCODE_LINKER\" \"$NODE_BIN\" \"$JS\" --stdio";
+        }
+
         // clangd — real ELF under $PREFIX/bin; must run via linker (targetSdk>28)
         if (s.startsWith("clangd") || s.matches("(?s).*\\bclangd\\b.*")) {
             String clangd = prefix + "/bin/clangd";
