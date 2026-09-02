@@ -461,7 +461,7 @@ export function useLspSync(editorInstance: any, tabId: string) {
               (ev: { message?: string }) => {
                 const line = ev?.message ?? '';
                 if (!line) return;
-                if (/\[LSP|typescript|tsserver|ProcessServer|node |PATH=|PREFIX=|html|MODULE|Error|exited|stderr|Cannot find/i.test(line)) {
+                if (/\[LSP|typescript|tsserver|ProcessServer|node |PATH=|PREFIX=/i.test(line)) {
                   outputChannel.appendLine(line);
                 }
               },

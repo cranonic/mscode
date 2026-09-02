@@ -769,25 +769,52 @@ public class TerminalForegroundService extends Service {
         }
 
         // vscode-html-language-server (vscode-langservers-extracted)
-        // Same pattern as pyright: use shell `node` (mscode_env wraps linker).
-        // Prefer bin/ wrapper so package-relative requires resolve correctly.
+        // Resolve real node ELF + MSCODE_LINKER (reliable on targetSdk>28).
+        // Heavy stderr diagnostics so Output panel shows why the process dies.
         if (s.startsWith("vscode-html-language-server") || s.contains("vscode-html-language-server")) {
-            String bin = prefix + "/lib/node_modules/vscode-langservers-extracted/bin/vscode-html-language-server";
-            String js  = prefix + "/lib/node_modules/vscode-langservers-extracted/lib/html-language-server/node/htmlServerMain.js";
-            return "BIN=\"" + bin + "\"; JS=\"" + js + "\"; "
-                 + "if [ ! -f \"$BIN\" ] && [ ! -f \"$JS\" ]; then "
+            String js = prefix + "/lib/node_modules/vscode-langservers-extracted/lib/html-language-server/node/htmlServerMain.js";
+            String nodeBin = prefix + "/bin/node";
+            return "echo \"[LSP] html rewrite start\" >&2; "
+                 + "JS=\"" + js + "\"; "
+                 + "if [ ! -f \"$JS\" ]; then "
+                 + "  JS=\"$(find \"$PREFIX/lib/node_modules/vscode-langservers-extracted\" "
+                 + "    -name htmlServerMain.js 2>/dev/null | head -1)\"; "
+                 + "fi; "
+                 + "if [ -z \"$JS\" ] || [ ! -f \"$JS\" ]; then "
                  + "  echo \"[LSP] installing vscode-langservers-extracted…\" >&2; "
                  + "  npm install -g --prefix \"$PREFIX\" vscode-langservers-extracted >&2; "
+                 + "  JS=\"" + js + "\"; "
+                 + "  if [ ! -f \"$JS\" ]; then "
+                 + "    JS=\"$(find \"$PREFIX/lib/node_modules/vscode-langservers-extracted\" "
+                 + "      -name htmlServerMain.js 2>/dev/null | head -1)\"; "
+                 + "  fi; "
                  + "fi; "
-                 + "if [ -f \"$BIN\" ]; then "
-                 + "  echo \"[LSP] html via bin=$BIN\" >&2; "
-                 + "  node \"$BIN\" --stdio; "
-                 + "elif [ -f \"$JS\" ]; then "
-                 + "  echo \"[LSP] html via js=$JS\" >&2; "
-                 + "  node \"$JS\" --stdio; "
-                 + "else "
-                 + "  echo \"[LSP] htmlServerMain.js / bin missing\" >&2; exit 1; "
-                 + "fi";
+                 + "if [ -z \"$JS\" ] || [ ! -f \"$JS\" ]; then "
+                 + "  echo \"[LSP] htmlServerMain.js missing after install\" >&2; "
+                 + "  ls -la \"$PREFIX/lib/node_modules/vscode-langservers-extracted\" 2>&1 | head -20 >&2; "
+                 + "  exit 1; "
+                 + "fi; "
+                 + "NODE_BIN=\"" + nodeBin + "\"; "
+                 + "if [ ! -f \"$NODE_BIN\" ]; then "
+                 + "  NODE_BIN=\"$(command -v node 2>/dev/null || true)\"; "
+                 + "fi; "
+                 + "if [ -z \"$NODE_BIN\" ] || [ ! -f \"$NODE_BIN\" ]; then "
+                 + "  echo \"[LSP] node binary missing\" >&2; exit 1; "
+                 + "fi; "
+                 + "if [ -z \"$MSCODE_LINKER\" ]; then "
+                 + "  MSCODE_LINKER=/system/bin/linker64; "
+                 + "  [ -x \"$MSCODE_LINKER\" ] || MSCODE_LINKER=/system/bin/linker; "
+                 + "  export MSCODE_LINKER; "
+                 + "fi; "
+                 + "echo \"[LSP] html JS=$JS\" >&2; "
+                 + "echo \"[LSP] html NODE=$NODE_BIN LINKER=$MSCODE_LINKER\" >&2; "
+                 + "\"$MSCODE_LINKER\" \"$NODE_BIN\" -e \"console.error('[LSP] node ok', process.version)\" >&2 "
+                 + "  || { echo \"[LSP] node via linker failed\" >&2; exit 1; }; "
+                 + "PKG_ROOT=\"$(dirname \"$(dirname \"$(dirname \"$JS\")\")\")\"; "
+                 + "echo \"[LSP] html PKG_ROOT=$PKG_ROOT\" >&2; "
+                 + "cd \"$PKG_ROOT\" 2>/dev/null || true; "
+                 + "echo \"[LSP] html spawning server…\" >&2; "
+                 + "exec \"$MSCODE_LINKER\" \"$NODE_BIN\" \"$JS\" --stdio";
         }
 
         // vscode-css-language-server (same package; pyright-style node launch)
