@@ -80,8 +80,6 @@ class SnippetRegistry {
     console.log(`   Registering new Monaco CompletionProvider for '${languageId}'...`);
 
     const provider = monaco.languages.registerCompletionItemProvider(languageId, {
-      // `!` / Emmet ops are not word chars — without these, typing `!` never opens suggest
-      triggerCharacters: ['!', ':', '>', '*', '.', '#', '+', '('],
       provideCompletionItems: (model, position) => {
         try {
           const wordUntil = model.getWordUntilPosition(position);
@@ -127,23 +125,9 @@ class SnippetRegistry {
             return { suggestions: [], incomplete: false };
           }
 
-          // Non-word prefixes (e.g. `!`, `!!`) are invisible to getWordUntilPosition —
-          // extend the replace range so filterText `!` actually matches typed input.
-          let startColumn = wordUntil.startColumn;
-          const bang = textBeforeCursor.match(/(!{1,2})$/);
-          if (bang) {
-            startColumn = position.column - bang[1].length;
-          } else {
-            // Emmet-ish token: div.foo>li*3 — take from last whitespace/tag boundary
-            const emmetTok = textBeforeCursor.match(/(?:^|[\s>])([a-zA-Z][a-zA-Z0-9_#.[\]{}()>+\-*$:]*)$/);
-            if (emmetTok) {
-              startColumn = position.column - emmetTok[1].length;
-            }
-          }
-
           const range = {
-            insert: { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn, endColumn: position.column },
-            replace: { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn, endColumn: wordAt ? Math.max(wordAt.endColumn, position.column) : position.column }
+            insert: { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn: wordUntil.startColumn, endColumn: position.column },
+            replace: { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn: wordUntil.startColumn, endColumn: wordAt ? wordAt.endColumn : position.column }
           };
 
           const formattedSnippets: monaco.languages.CompletionItem[] = [];

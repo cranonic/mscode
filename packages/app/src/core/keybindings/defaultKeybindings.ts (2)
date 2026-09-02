@@ -37,10 +37,6 @@ export const defaultKeybindings: Keybinding[] = [
   { key: 'ctrl+d',       command: 'editor.action.addSelectionToNextFindMatch', when: 'editorTextFocus' },
   { key: 'ctrl+space',   command: 'editor.action.triggerSuggest', when: 'editorTextFocus' },
 
-  // Emmet expand (HTML) — type p>li*3 then Ctrl+E
-  { key: 'ctrl+e', command: 'html.expandEmmet', when: 'editorTextFocus' },
-  { key: 'ctrl+e', command: 'editor.emmet.action.expandAbbreviation', when: 'editorTextFocus' },
-
   // ════════════════════════════════════════════════════════════════════════
   // TERMINAL ACTIONS
   // ════════════════════════════════════════════════════════════════════════
