@@ -31,21 +31,16 @@ const activeProcessManager = isWeb ? lspMockProcessManager : realProcessManager;
 
 /**
  * Languages Monaco can handle alone when NO extension registered an external server.
- * If `dynamicConfigs[langId]` exists (e.g. TypeScript extension → typescript-language-server,
- * or HTML5 extension → vscode-html-language-server), external LSP wins and Monaco is skipped.
+ * If `dynamicConfigs[langId]` exists (e.g. TypeScript extension → typescript-language-server),
+ * external LSP wins and Monaco diagnostics for that language are turned off.
  */
 const MONACO_FALLBACK_LANGS = new Set([
   'javascript', 'typescript', 'javascriptreact', 'typescriptreact',
   'json', 'html', 'css', 'scss', 'less',
 ]);
 
-/**
- * True Monaco-only (no real external server expected).
- * HTML is intentionally NOT here — HTML5 extension registers dynamicConfig
- * and must be able to take over (same pattern as TS/JS).
- * css/scss/less/json stay Monaco-only until their own extensions register.
- */
-const MONACO_ONLY_LANGS = new Set(['json', 'css', 'scss', 'less']);
+/** True Monaco-only (no real external server expected). */
+const MONACO_ONLY_LANGS = new Set(['json', 'html', 'css', 'scss', 'less']);
 
 let lastNotifiedLang: string | null = null;
 
@@ -108,21 +103,6 @@ function disableMonacoTsDiagnostics(langId: string) {
     noSyntaxValidation: true,
     diagnosticCodesToIgnore: [],
   });
-}
-
-/** Silence Monaco built-in HTML service when external HTML language server is active. */
-function disableMonacoHtmlService() {
-  const monacoLangs = monaco.languages as any;
-  const defaults = monacoLangs?.html?.htmlDefaults;
-  if (!defaults?.setOptions) return;
-  try {
-    defaults.setOptions({
-      format: { enable: false },
-      suggest: { html5: false },
-    });
-  } catch (_) {
-    /* older monaco builds */
-  }
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -314,15 +294,12 @@ export function useLspSync(editorInstance: any, tabId: string) {
     // 2. EXTERNAL LANGUAGES (Python, C/C++, Rust, TypeScript extension, …)
     // ══════════════════════════════════════════════════════════════════════
 
-    // Avoid double diagnostics: mute Monaco workers when external server owns the language
+    // Avoid double diagnostics: mute Monaco TS worker when external server owns TS/JS
     if (
       langId === 'typescript' || langId === 'javascript'
       || langId === 'typescriptreact' || langId === 'javascriptreact'
     ) {
       disableMonacoTsDiagnostics(langId);
-    }
-    if (langId === 'html') {
-      disableMonacoHtmlService();
     }
 
     const currentLang = activeProcessManager.getActiveLanguage?.() ?? null;
