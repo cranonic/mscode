@@ -195,28 +195,8 @@ function expandNode(n: any, indent: number): string {
 }
 
 /**
- * True when cursor is in element text content, e.g. `<p>hello|</p>`.
- * After a completed tag's `>` and not inside another tag.
- * VS Code does not offer Emmet for plain words here — only if user types
- * a real abbreviation (operators) or an extra `>` starts a new expression.
- */
-export function isInsideHtmlTextContent(line: string, column: number): boolean {
-  const left = line.slice(0, column - 1);
-  const lastLt = left.lastIndexOf('<');
-  const lastGt = left.lastIndexOf('>');
-  // Still inside `<...` (tag / attrs) — not text content
-  if (lastLt > lastGt) return false;
-  // After some `>` → text content region (until next `<` on the right, ignored)
-  if (lastGt >= 0 && lastGt > lastLt) return true;
-  return false;
-}
-
-/**
  * Token left of cursor that looks like Emmet / tag / #id / .class
  * Must allow leading `#` and `.` (implicit div).
- *
- * Inside `<p>hello|</p>` plain `hello` is NOT Emmet (matches VS Code).
- * After an extra `>` e.g. `<p>hello>|` token can start again.
  */
 export function emmetTokenBefore(
   line: string,
@@ -229,18 +209,5 @@ export function emmetTokenBefore(
   // Allow start with letter, #, or .
   const m = left.match(/([a-zA-Z.#][a-zA-Z0-9_#.[\]{}()>+\-*$:]*)$/);
   if (!m) return null;
-  const token = m[1];
-
-  // In element text content (`<p>hello|</p>`): do NOT treat plain words as Emmet.
-  // Allow if (a) token has operators / #. or (b) an extra `>` was typed before the token
-  // e.g. `<p>hello>p|` — same as VS Code behavior.
-  if (isInsideHtmlTextContent(line, column)) {
-    const beforeTok = left.slice(0, left.length - token.length);
-    const afterExtraGt = />$/.test(beforeTok) && !/<\/[\w:-]*$/.test(beforeTok);
-    const intentional =
-      /[.#>+*\[{]/.test(token) || token.startsWith('#') || token.startsWith('.');
-    if (!intentional && !afterExtraGt) return null;
-  }
-
-  return { token, startColumn: column - token.length };
+  return { token: m[1], startColumn: column - m[1].length };
 }

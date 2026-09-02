@@ -23,8 +23,6 @@ export function usePaletteProviders(editor: any) {
     const { registerProvider } = usePaletteStore.getState();
 
     // ── 0. Default Orchestration Mode (Help & Routing Directory) ──
-    // NEVER list editor commands here (Format Document / Rename Symbol / …).
-    // Those belong only under prefix '>' (Show and Run Commands).
     registerProvider({
       prefix: '',
       name: 'Help & Menu',
@@ -251,7 +249,6 @@ export function usePaletteProviders(editor: any) {
     });
 
     // ── 4. Global Registration Action Handlers (>) ──
-    // Only this provider lists Format Document / Rename / etc. (not the empty-prefix help menu).
     registerProvider({
       prefix: '>',
       name: 'Show and Run Commands',
@@ -267,50 +264,20 @@ export function usePaletteProviders(editor: any) {
           onSelect: () => commands.executeCommand(cmd.id, activeEditor)
         }));
 
-        const customIds = new Set(customCommands.map(c => c.id));
-        const customLabels = new Set(
-          customCommands.map(c => (c.label || '').toLowerCase().trim()).filter(Boolean),
-        );
-
-        // Monaco native actions — skip ones already registered as custom commands
-        // (otherwise Format Document / Rename Symbol appear 2–3×)
-        const monacoActions = (activeEditor?.getActions?.() || [])
-          .filter((action: any) => {
-            const id = action?.id || '';
-            const label = (action?.label || '').toLowerCase().trim();
-            if (!id) return false;
-            if (customIds.has(id)) return false;
-            if (label && customLabels.has(label)) return false;
-            return true;
-          })
-          .map((action: any) => {
-            const defaultKb = activeEditor._standaloneKeybindingService?.lookupKeybinding(action.id)?.getLabel() || '';
-            return {
-              id: action.id, 
-              label: action.label || action.id || 'Unknown Command', 
-              shortcut: keybindingManager.getShortcutLabel(action.id) || defaultKb, 
-              leftIcon: 'terminal', 
-              onSelect: () => { action.run(); activeEditor.focus(); }
-            };
-          });
+        const monacoActions = activeEditor.getActions().map((action: any) => {
+          const defaultKb = activeEditor._standaloneKeybindingService?.lookupKeybinding(action.id)?.getLabel() || '';
+          return {
+            id: action.id, 
+            label: action.label || action.id || 'Unknown Command', 
+            shortcut: keybindingManager.getShortcutLabel(action.id) || defaultKb, 
+            leftIcon: 'terminal', 
+            onSelect: () => { action.run(); activeEditor.focus(); }
+          };
+        });
 
         const query = search ? search.toLowerCase() : '';
 
-        // Dedupe by id then by label (keeps first = custom preferred)
-        const seenIds = new Set<string>();
-        const seenLabels = new Set<string>();
-        const merged: typeof customCommands = [];
-        for (const c of [...customCommands, ...monacoActions]) {
-          const id = c.id || '';
-          const lbl = (c.label || '').toLowerCase().trim();
-          if (id && seenIds.has(id)) continue;
-          if (lbl && seenLabels.has(lbl)) continue;
-          if (id) seenIds.add(id);
-          if (lbl) seenLabels.add(lbl);
-          merged.push(c);
-        }
-
-        return merged
+        return [...customCommands, ...monacoActions]
           .filter(c => {
             const lbl = (c.label || '').toLowerCase();
             const desc = (c.description || '').toLowerCase();

@@ -5,7 +5,6 @@ import { Button } from '@/ui/components/Button/Button';
 import type { Extension, ExtensionRecord } from '../types';
 import { formatDownloads } from '../store/selectors';
 import { ExtensionIcon } from './ExtensionIcon';
-import { commands } from '@/core/extensionAPI/registry/commandRegistry';
 
 interface ExtensionCardProps {
   ext:         Extension;
@@ -104,11 +103,7 @@ export const ExtensionCard: React.FC<ExtensionCardProps> = ({
                   size={14}
                   className="ms-ext-action-icon"
                   title="Extension Settings"
-                  onClick={(e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    // Open Settings tab filtered to this extension (e.g. @ext:language-support.html)
-                    commands.executeCommand('workbench.action.openSettings', `@ext:${ext.id}`);
-                  }}
+                  onClick={() => console.log(`Settings: ${ext.id}`)}
                 />
                 {!ext.isBuiltIn && (
                   <>

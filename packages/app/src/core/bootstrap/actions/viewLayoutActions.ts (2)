@@ -30,24 +30,13 @@ export function registerViewLayoutActions(): void {
 
   commands.registerCommand(
     'workbench.action.openSettings',
-    (searchQuery?: string) => {
+    () => {
       useTabStore.getState().addTab({
         id: 'mscode://internal/settings.ui',
         type: 'settings',
         title: 'Settings',
         icon: 'settings',
       });
-      // Optional filter e.g. `@ext:language-support.html` (extension gear icon)
-      if (typeof searchQuery === 'string' && searchQuery.trim()) {
-        const q = searchQuery.trim();
-        // SettingsView listens for this after mount
-        requestAnimationFrame(() => {
-          document.dispatchEvent(new CustomEvent('ms-settings-search', { detail: q }));
-        });
-        setTimeout(() => {
-          document.dispatchEvent(new CustomEvent('ms-settings-search', { detail: q }));
-        }, 120);
-      }
     },
     { title: 'Open Settings', category: 'Preferences', icon: 'settings', shortcut: 'Ctrl+,' },
   );
