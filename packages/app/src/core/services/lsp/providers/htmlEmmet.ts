@@ -136,7 +136,7 @@ function expandNode(n: any, indent: number): string {
   if (n.id) attrParts.push(`id="${n.id}"`);
   if (n.classes?.length) attrParts.push(`class="${n.classes.join(' ')}"`);
   for (const a of n.attrs || []) {
-    if (a.includes('=')) attrParts.push(a.replace(/^([^=]+)=(.+)$/, (_, k, v) => {
+    if (a.includes('=')) attrParts.push(a.replace(/^([^=]+)=(.+)$/, (_m: string, k: string, v: string) => {
       const val = v.replace(/^["']|["']$/g, '');
       return `${k}="${val}"`;
     }));
