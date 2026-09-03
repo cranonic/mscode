@@ -6,7 +6,6 @@ import { useSettingsStore } from '@/features/settings/store/settingsStore';
 import { useThemeStore } from '@/core/theme/store/themeStore';
 import { msEvents } from '@/core/extensionAPI/events/EventManager';
 import type { ThemeDefinition, ThemeRegistryEntry, MSCodeUIColors } from '../types';
-import { notifyThemeChanged } from '@/core/native/statusBarSync';
 
 // Export themes
 import { mscodeDarkTheme } from '../themes/mscode-dark';
@@ -51,8 +50,6 @@ const CSS_VAR_MAP: Record<keyof MSCodeUIColors, string> = {
   'ms-input-focus-border':      '--ms-input-focus-border',
   'ms-code-bg':                 '--ms-code-bg',
   'ms-code-fg':                 '--ms-code-fg',
-  'ms-statusbar-bg':            '--ms-statusbar-bg',
-  'ms-statusbar-text':          '--ms-statusbar-text',
 };
 
 /**
@@ -144,13 +141,6 @@ class ThemeService {
     }
     
     msEvents.emit('onDidChangeColorTheme', id);
-
-    // Push Android status bar immediately (do not wait for settings round-trip)
-    try {
-      notifyThemeChanged();
-    } catch (e) {
-      console.warn('[ThemeService] status bar notify failed', e);
-    }
   }
 
   /**
@@ -168,14 +158,7 @@ class ThemeService {
     root.setAttribute('data-theme', def.id);
 
     // Phase 1: Bind interface background, boundary, and typographical color channels to root DOM styles
-    const uiColors: Partial<MSCodeUIColors> = { ...def.uiColors };
-    // Status bar defaults when theme omits explicit keys
-    if (!uiColors['ms-statusbar-bg'] && uiColors['ms-bg-side']) {
-      uiColors['ms-statusbar-bg'] = uiColors['ms-bg-side'];
-    }
-    if (!uiColors['ms-statusbar-text'] && uiColors['ms-text-main']) {
-      uiColors['ms-statusbar-text'] = uiColors['ms-text-main'];
-    }
+    const { uiColors } = def;
     for (const [key, cssVar] of Object.entries(CSS_VAR_MAP)) {
       const value = uiColors[key as keyof MSCodeUIColors];
       if (value !== undefined) {

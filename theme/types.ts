@@ -58,10 +58,6 @@ export interface MSCodeUIColors {
   'ms-input-focus-border':      string;
   'ms-code-bg':                 string;
   'ms-code-fg':                 string;
-
-  // Android system status bar (optional in theme files — filled from side/text if omitted)
-  'ms-statusbar-bg':            string;
-  'ms-statusbar-text':          string;
 }
 
 // Editor typography CSS vars live on :root via editorCssVars.ts

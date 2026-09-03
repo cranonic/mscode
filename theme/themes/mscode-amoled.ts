@@ -87,10 +87,6 @@ export const mscodeAmoledTheme: ThemeDefinition = {
     'ms-input-focus-border':      '#007fd4',
     'ms-code-bg':                 'rgba(255, 255, 255, 0.07)',
     'ms-code-fg':                 '#ce9178',
-
-    // Android system status bar
-    'ms-statusbar-bg':   '#0a0a0a',
-    'ms-statusbar-text': '#d4d4d4',
   },
 
   // ══════════════════════════════════════════════════════════════════════════

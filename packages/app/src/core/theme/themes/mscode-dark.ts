@@ -79,6 +79,10 @@ export const mscodeDarkTheme: ThemeDefinition = {
     'ms-input-focus-border':      '#007fd4',
     'ms-code-bg':                 'rgba(255, 255, 255, 0.1)',
     'ms-code-fg':                 '#ce9178',
+
+    // Android system status bar
+    'ms-statusbar-bg':   '#252526',
+    'ms-statusbar-text': '#cccccc',
   },
 
   // ══════════════════════════════════════════════════════════════════════════

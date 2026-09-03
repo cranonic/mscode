@@ -122,7 +122,9 @@ const App = () => {
           disposeWatch();
           unsubSettings();
         };
-      } catch { /* web / SSR */ }
+      } catch (e) {
+        console.warn('[App] status bar theme watcher init failed', e);
+      }
 
       // 3. Workspace Contextual Loading: Restores context-specific open tabs and editor view states
       await initTabs(workspacePath); 

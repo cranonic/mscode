@@ -80,6 +80,10 @@ export const mscodeLightTheme: ThemeDefinition = {
     'ms-input-focus-border':      '#007fd4',
     'ms-code-bg':                 'rgba(0, 0, 0, 0.05)',
     'ms-code-fg':                 '#a31515',
+
+    // Android system status bar
+    'ms-statusbar-bg':   '#f3f3f3',
+    'ms-statusbar-text': '#333333',
   },
 
   // ══════════════════════════════════════════════════════════════════════════

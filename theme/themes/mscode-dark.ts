@@ -1,27 +1,19 @@
-// src/core/theme/themes/mscode-amoled.ts
+// src/core/theme/themes/mscode-dark.ts
 //
 // Why a TS file instead of theme.css?
 // ────────────────────────────────────
-// A static [data-theme='amoled'] block in CSS can only set values at load
+// A static [data-theme='vs-dark'] block in CSS can only set values at load
 // time.  This file runs at runtime, which means:
 //   ✓ Extensions can override any token or UI color without touching CSS
 //   ✓ User-saved themes (Supabase / JSON) can be deep-merged at startup
 //   ✓ Monaco syntax colors and IDE shell colors come from the same source
 //   ✓ TypeScript gives compile-time safety on every color key
-//
-// AMOLED note
-// ───────────
-// OLED/AMOLED panels turn individual pixels completely off when they display
-// pure black (#000000), drawing zero current for those pixels.  All surfaces
-// that the user stares at most (editor canvas, sidebar, tab bar) are set to
-// true black.  Secondary surfaces use near-black (#0a0a0a / #111111) for
-// subtle depth without sacrificing battery savings.
 
 import type { ThemeDefinition } from '../types';
 
-export const mscodeAmoledTheme: ThemeDefinition = {
-  id:   'mscode-amoled',
-  name: 'MS Code AMOLED',
+export const mscodeDarkTheme: ThemeDefinition = {
+  id:   'mscode-dark',
+  name: 'MS Code Dark',
   type: 'dark',
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -48,49 +40,45 @@ export const mscodeAmoledTheme: ThemeDefinition = {
   //   A15 Inline Hints & Decorations
   // ══════════════════════════════════════════════════════════════════════════
   uiColors: {
-    // Backgrounds  — true black where eyes rest, near-black for structure
-    'ms-bg-main':         '#000000', // editor canvas  → OLED pixels off
-    'ms-bg-side':         '#0a0a0a', // sidebar        → near-black
-    'ms-bg-activity':     '#111111', // activity bar   → slight depth
-    'ms-activity-hover':  '#626262',
-    'ms-tab-inactive-bg': '#0d0d0d',
-    'ms-tab-active-bg':   '#000000', // active tab = editor background
+    // Backgrounds
+    'ms-bg-main':         '#1e1e1e',
+    'ms-bg-side':         '#252526',
+    'ms-bg-activity':     '#333333',
+    'ms-activity-hover':  '#444444',
+    'ms-tab-inactive-bg': '#2d2d2d',
+    'ms-tab-active-bg':   '#1e1e1e',
 
     // Text
-    'ms-text-main':   '#d4d4d4',
-    'ms-text-side': '#ffffff',
-    'ms-text-activity': '#ffefef',
-    'ms-text-faded':  '#6e6e6e',
+    'ms-text-main':   '#cccccc',
+    'ms-text-side': '#dbdada',
+    'ms-text-activity': '#e9e8e8',
+    'ms-text-faded':  '#858585',
     'ms-text-bright': '#ffffff',
 
-    // Borders  — very subtle on pure black
-    'ms-border-light': '#1e1e1e',
-    'ms-border-dark':  '#2d2d2d',
-    'ms-menu-border':  '#252525',
-    'ms-separator':    '#252525',
+    // Borders
+    'ms-border-light': '#393a42',
+    'ms-border-dark':  '#595c64',
+    'ms-menu-border':  '#454545',
+    'ms-separator':    '#454545',
 
     // Interactive
     'ms-accent':        '#007acc',
-    'ms-icon-hover-bg': '#1a1a1a',
-    'ms-menu-hover-bg': '#0a2840',
-    'ms-shadow':        'rgba(0, 0, 0, 0.7)',
+    'ms-icon-hover-bg': '#333333',
+    'ms-menu-hover-bg': '#04395e',
+    'ms-shadow':        'rgba(0, 0, 0, 0.36)',
 
     // Settings & Forms
-    'ms-settings-bg':             '#000000',
-    'ms-settings-category-color': '#6e6e6e',
-    'ms-settings-title-color':    '#d4d4d4',
-    'ms-settings-desc-color':     '#888888',
+    'ms-settings-bg':             '#1e1e1e',
+    'ms-settings-category-color': '#888888',
+    'ms-settings-title-color':    '#cccccc',
+    'ms-settings-desc-color':     '#999999',
     'ms-settings-link-color':     '#3794ff',
-    'ms-input-bg':                '#141414',
-    'ms-input-fg':                '#d4d4d4',
-    'ms-input-border':            '#2a2a2a',
+    'ms-input-bg':                '#3c3c3c',
+    'ms-input-fg':                '#cccccc',
+    'ms-input-border':            '#3c3c3c',
     'ms-input-focus-border':      '#007fd4',
-    'ms-code-bg':                 'rgba(255, 255, 255, 0.07)',
+    'ms-code-bg':                 'rgba(255, 255, 255, 0.1)',
     'ms-code-fg':                 '#ce9178',
-
-    // Android system status bar
-    'ms-statusbar-bg':   '#0a0a0a',
-    'ms-statusbar-text': '#d4d4d4',
   },
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -101,42 +89,42 @@ export const mscodeAmoledTheme: ThemeDefinition = {
   // Keys are the standard VS Code color token identifiers.
   // ══════════════════════════════════════════════════════════════════════════
   editorColors: {
-    // Core editor canvas  — pure black
-    'editor.background':                     '#000000',
-    'editor.foreground':                     '#d4d4d4',
+    // Core editor canvas
+    'editor.background':                     '#1e1e1e',
+    'editor.foreground':                     '#cccccc',
 
     // Selection
-    'editor.selectionBackground':            '#1a3a5c',
-    'editor.inactiveSelectionBackground':    '#1a2028',
-    'editor.selectionHighlightBackground':   '#add6ff18',
+    'editor.selectionBackground':            '#264f78',
+    'editor.inactiveSelectionBackground':    '#3a3d41',
+    'editor.selectionHighlightBackground':   '#add6ff26',
 
     // Find matches
-    'editor.findMatchBackground':            '#2f3f4f',
-    'editor.findMatchHighlightBackground':   '#ea5c0044',
-    'editor.findRangeHighlightBackground':   '#2a2a2a44',
+    'editor.findMatchBackground':            '#515c6a',
+    'editor.findMatchHighlightBackground':   '#ea5c0055',
+    'editor.findRangeHighlightBackground':   '#3a3a3a50',
 
-    // Line highlight  — barely visible on pure black
-    'editor.lineHighlightBackground':        '#0d0d0d',
-    'editor.lineHighlightBorder':            '#0a0a0a',
+    // Line highlight
+    'editor.lineHighlightBackground':        '#2a2d2e',
+    'editor.lineHighlightBorder':            '#282828',
 
     // Cursor & whitespace
-    'editorCursor.foreground':               '#c8c8c8',
-    'editorWhitespace.foreground':           '#1e1e1e',
+    'editorCursor.foreground':               '#aeafad',
+    'editorWhitespace.foreground':           '#3b3b3b',
 
     // Gutter (line numbers)
-    'editorLineNumber.foreground':           '#4a4a4a',
-    'editorLineNumber.activeForeground':     '#aaaaaa',
+    'editorLineNumber.foreground':           '#858585',
+    'editorLineNumber.activeForeground':     '#c6c6c6',
 
     // Indent guides
-    'editorIndentGuide.background':          '#1a1a1a',
-    'editorIndentGuide.activeBackground':    '#3a3a3a',
+    'editorIndentGuide.background':          '#404040',
+    'editorIndentGuide.activeBackground':    '#707070',
 
     // Ruler
-    'editorRuler.foreground':                '#2a2a2a',
+    'editorRuler.foreground':                '#5a5a5a',
 
     // Bracket matching
     'editorBracketMatch.background':         '#0064001a',
-    'editorBracketMatch.border':             '#555555',
+    'editorBracketMatch.border':             '#888888',
 
     // Diagnostics squiggles
     'editorError.foreground':                '#f48771',
@@ -144,55 +132,55 @@ export const mscodeAmoledTheme: ThemeDefinition = {
     'editorInfo.foreground':                 '#75beff',
 
     // Scrollbar
-    'scrollbarSlider.background':            '#79797944',
-    'scrollbarSlider.hoverBackground':       '#6464649e',
-    'scrollbarSlider.activeBackground':      '#bfbfbf55',
+    'scrollbarSlider.background':            '#79797966',
+    'scrollbarSlider.hoverBackground':       '#646464b3',
+    'scrollbarSlider.activeBackground':      '#bfbfbf66',
 
     // Suggest widget (autocomplete popup)
-    'editorSuggestWidget.background':        '#0a0a0a',
-    'editorSuggestWidget.border':            '#252525',
-    'editorSuggestWidget.foreground':        '#d4d4d4',
-    'editorSuggestWidget.selectedBackground':'#0a2840',
+    'editorSuggestWidget.background':        '#252526',
+    'editorSuggestWidget.border':            '#454545',
+    'editorSuggestWidget.foreground':        '#cccccc',
+    'editorSuggestWidget.selectedBackground':'#04395e',
     'editorSuggestWidget.highlightForeground':'#18a3ff',
 
     // Hover widget (type/doc popup)
-    'editorHoverWidget.background':          '#0a0a0a',
-    'editorHoverWidget.border':              '#252525',
-    'editorHoverWidget.foreground':          '#d4d4d4',
+    'editorHoverWidget.background':          '#252526',
+    'editorHoverWidget.border':              '#454545',
+    'editorHoverWidget.foreground':          '#cccccc',
 
     // Peek view (go-to-definition inline panel)
     'peekView.border':                       '#007acc',
-    'peekViewEditor.background':             '#000d1a',
-    'peekViewResult.background':             '#0a0a0a',
-    'peekViewResult.selectionBackground':    '#0a2840',
-    'peekViewResult.matchHighlightBackground':'#ea5c0044',
-    'peekViewEditor.matchHighlightBackground':'#ff8f0077',
+    'peekViewEditor.background':             '#001f33',
+    'peekViewResult.background':             '#252526',
+    'peekViewResult.selectionBackground':    '#04395e',
+    'peekViewResult.matchHighlightBackground':'#ea5c0055',
+    'peekViewEditor.matchHighlightBackground':'#ff8f0099',
 
     // Minimap
-    'minimap.background':                    '#000000',
-    'minimap.selectionHighlight':            '#1a3a5c',
+    'minimap.background':                    '#1e1e1e',
+    'minimap.selectionHighlight':            '#264f78',
     'minimap.errorHighlight':                '#f48771',
     'minimap.warningHighlight':              '#cca700',
-    'minimapSlider.background':              'rgba(100,100,100,0.15)',
-    'minimapSlider.hoverBackground':         'rgba(100,100,100,0.28)',
-    'minimapSlider.activeBackground':        'rgba(100,100,100,0.45)',
+    'minimapSlider.background':              'rgba(121,121,121,0.2)',
+    'minimapSlider.hoverBackground':         'rgba(121,121,121,0.35)',
+    'minimapSlider.activeBackground':        'rgba(121,121,121,0.5)',
 
     // Diff editor
-    // 'diffEditor.insertedTextBackground':     'rgba(40,93,64,0.28)',
-    // 'diffEditor.removedTextBackground':      'rgba(139,46,46,0.28)',
-    // 'diffEditor.insertedLineBackground':     'rgba(40,93,64,0.18)',
-    // 'diffEditor.removedLineBackground':      'rgba(139,46,46,0.18)',
-    // 'diffEditorGutter.insertedLineBackground':'rgba(40,93,64,0.38)',
-    // 'diffEditorGutter.removedLineBackground':'rgba(139,46,46,0.38)',
+    // 'diffEditor.insertedTextBackground':     'rgba(40,93,64,0.3)',
+    // 'diffEditor.removedTextBackground':      'rgba(139,46,46,0.3)',
+    // 'diffEditor.insertedLineBackground':     'rgba(40,93,64,0.2)',
+    // 'diffEditor.removedLineBackground':      'rgba(139,46,46,0.2)',
+    // 'diffEditorGutter.insertedLineBackground':'rgba(40,93,64,0.4)',
+    // 'diffEditorGutter.removedLineBackground':'rgba(139,46,46,0.4)',
 
     // Inlay hints
-    // 'editorInlayHint.foreground':            '#565656',
-    // 'editorInlayHint.background':            'rgba(80,80,80,0.14)',
-    // 'editorInlayHint.typeForeground':        '#565656',
-    // 'editorInlayHint.parameterForeground':   '#565656',
+    // 'editorInlayHint.foreground':            '#888888',
+    // 'editorInlayHint.background':            'rgba(88,88,88,0.18)',
+    // 'editorInlayHint.typeForeground':        '#888888',
+    // 'editorInlayHint.parameterForeground':   '#888888',
 
     // Parameter hints widget
-    'editorHint.foreground':                 '#d4d4d4b3',
+    'editorHint.foreground':                 '#eeeeeeb3',
 
     // Bracket pair colorization
     'editorBracketHighlight.foreground1':    '#ffd700',
@@ -201,14 +189,14 @@ export const mscodeAmoledTheme: ThemeDefinition = {
     'editorBracketHighlight.unexpectedBracket.foreground': '#e06c75',
 
     // Sticky scroll (header that pins the current scope)
-    'editorStickyScroll.background':         '#000000',
-    'editorStickyScrollHover.background':    '#0d0d0d',
+    'editorStickyScroll.background':         '#1e1e1e',
+    'editorStickyScrollHover.background':    '#2a2d2e',
 
     // Code lens (reference counts, test results)
-    'editorCodeLens.foreground':             '#565656',
+    'editorCodeLens.foreground':             '#858585',
 
     // Ghost text (inline AI / Copilot suggestions)
-    'editorGhostText.foreground':            '#363636',
+    'editorGhostText.foreground':            '#606060',
   },
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -221,24 +209,18 @@ export const mscodeAmoledTheme: ThemeDefinition = {
   //   With only ~10 entries most language grammars fall back to plain text.
   //   The ~50 entries below ensure correct coloring for JS/TS, JSX/TSX,
   //   HTML, CSS/SCSS, JSON, Python, Regex, and any TextMate-based grammar.
-  //
-  // Token palette vs mscode-dark
-  // ─────────────────────────────
-  // Pure black background makes every color appear more saturated.
-  // Brightness has been pulled down slightly on the brightest tokens so
-  // they don't cause eye strain against #000000.
   // ══════════════════════════════════════════════════════════════════════════
   tokenColors: [
 
     // ── Comments ──────────────────────────────────────────────────────────
     {
       scope: ['comment', 'comment.line', 'comment.block'],
-      settings: { foreground: '#5a8a5a', fontStyle: 'italic' },
+      settings: { foreground: '#6A9955', fontStyle: 'italic' },
     },
     {
       // JSDoc block comments  /** ... */
       scope: 'comment.block.documentation',
-      settings: { foreground: '#5a8a5a', fontStyle: 'italic' },
+      settings: { foreground: '#6A9955', fontStyle: 'italic' },
     },
 
     // ── Storage / Declaration keywords ────────────────────────────────────
@@ -463,7 +445,7 @@ export const mscodeAmoledTheme: ThemeDefinition = {
     {
       // Tag angle brackets  < > />
       scope: 'punctuation.definition.tag',
-      settings: { foreground: '#666666' },
+      settings: { foreground: '#808080' },
     },
 
     // ── Regular Expressions ───────────────────────────────────────────────
@@ -536,7 +518,7 @@ export const mscodeAmoledTheme: ThemeDefinition = {
     {
       // Comment-opening punctuation  //  /*  */
       scope: 'punctuation.definition.comment',
-      settings: { foreground: '#5a8a5a' },
+      settings: { foreground: '#6A9955' },
     },
 
     // ── Invalid / Deprecated ──────────────────────────────────────────────
