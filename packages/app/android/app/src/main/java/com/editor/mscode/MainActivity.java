@@ -203,10 +203,10 @@ public class MainActivity extends BridgeActivity {
     }
 
     private String buildVersionLabel() {
-        String appVersion = "1.0.0";
+        String appVersion = "2.0.0";
         try {
             appVersion = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-            if (appVersion == null || appVersion.isEmpty()) appVersion = "1.0.0";
+            if (appVersion == null || appVersion.isEmpty()) appVersion = "2.0.0";
         } catch (Exception ignored) {
         }
         return "v" + appVersion + "  •  Android " + Build.VERSION.RELEASE;
