@@ -16,6 +16,7 @@
     "patch-package": "^8.0.1"
   },
   "dependencies": {
+    "@capacitor/status-bar": "^8.0.3",
     "@monostudio/msce": "^1.0.1",
     "rehype-raw": "^7.0.0"
   }
