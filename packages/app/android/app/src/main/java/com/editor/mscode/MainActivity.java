@@ -98,24 +98,63 @@ public class MainActivity extends BridgeActivity {
         Window window = getWindow();
         if (window == null) return;
 
+        // Capacitor / Android 15 edge-to-edge ignores setStatusBarColor unless we
+        // opt back into "decor fits system windows" for the bar region.
+        WindowCompat.setDecorFitsSystemWindows(window, true);
+
         window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
         window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
-        window.setStatusBarColor(colorArgb);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            window.setNavigationBarColor(colorArgb);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION);
         }
 
+        window.setStatusBarColor(colorArgb);
+        window.setNavigationBarColor(colorArgb);
+
         View decor = window.getDecorView();
+
+        // Legacy flags (API 23+) — some OEM skins only honor these
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            int flags = decor.getSystemUiVisibility();
+            if (lightIcons) {
+                flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            } else {
+                flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (lightIcons) {
+                    flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                } else {
+                    flags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                }
+            }
+            decor.setSystemUiVisibility(flags);
+        }
+
         WindowInsetsControllerCompat insets =
             WindowCompat.getInsetsController(window, decor);
         if (insets != null) {
-            // lightIcons=true means the *bar* is light → need dark status icons
+            // lightIcons=true → dark glyphs on a light bar
             insets.setAppearanceLightStatusBars(lightIcons);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                insets.setAppearanceLightNavigationBars(lightIcons);
-            }
+            insets.setAppearanceLightNavigationBars(lightIcons);
         }
-        android.util.Log.d("MsStatusBar", "apply color=#" + Integer.toHexString(colorArgb) + " lightIcons=" + lightIcons);
+
+        // Re-assert after a frame (WebView / Bridge sometimes overwrites on layout)
+        decor.post(() -> {
+            window.setStatusBarColor(colorArgb);
+            window.setNavigationBarColor(colorArgb);
+            WindowInsetsControllerCompat i2 =
+                WindowCompat.getInsetsController(window, decor);
+            if (i2 != null) {
+                i2.setAppearanceLightStatusBars(lightIcons);
+                i2.setAppearanceLightNavigationBars(lightIcons);
+            }
+        });
+
+        android.util.Log.i("MsStatusBar",
+            "apply color=#" + Integer.toHexString(colorArgb)
+                + " lightIcons=" + lightIcons
+                + " actual=" + Integer.toHexString(window.getStatusBarColor()));
     }
 
     @Override
