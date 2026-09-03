@@ -40,6 +40,11 @@
   --ms-editor-font-family: 'Fira Code', 'Cascadia Code', Consolas, 'Courier New', monospace;
   --ms-editor-font-size: 13px;
   --ms-editor-font-weight: normal;
+
+  /* Android system status bar — override per theme if needed.
+     Unset → falls back to --ms-bg-side / --ms-text-main in statusBarSync.ts */
+  --ms-statusbar-bg: var(--ms-bg-side);
+  --ms-statusbar-text: var(--ms-text-main);
 }
 
 /* 2. One Dark Pro (Atom Theme) */
