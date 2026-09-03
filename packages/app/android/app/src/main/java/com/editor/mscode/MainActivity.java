@@ -111,7 +111,7 @@ public class MainActivity extends BridgeActivity {
             // Critical: Capacitor / Android 15 edge-to-edge makes setStatusBarColor a no-op
             WindowCompat.setDecorFitsSystemWindows(window, true);
 
-            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM__BAR_BACKGROUNDS);
+            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
             window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
                 window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION);
@@ -185,7 +185,6 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    public void onResume()    @Override
     public void onResume() {
         super.onResume();
         // System / WebView may reset bar after pause — re-apply last theme colors
