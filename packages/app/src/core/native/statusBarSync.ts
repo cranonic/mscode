@@ -109,27 +109,35 @@ export async function syncNativeStatusBar(
 
   console.log('[statusBarSync] apply', { color, lightIcons, darkChrome });
 
-  // 1) Our plugin → MainActivity (most reliable)
+  // 1) Our plugin → MainActivity
+  let pluginOk = false;
   try {
     await MsStatusBar.setStatusBar({ color, lightIcons });
-    return;
+    pluginOk = true;
+    console.log('[statusBarSync] MsStatusBar plugin resolved OK');
   } catch (e) {
     console.warn('[statusBarSync] MsStatusBar.setStatusBar failed', e);
   }
 
-  // 2) Optional official plugin
+  // 2) Official plugin — disable overlay so color is visible (Capacitor default often overlays)
   try {
     const mod = await import('@capacitor/status-bar').catch(() => null);
     if (mod?.StatusBar) {
+      try {
+        await mod.StatusBar.setOverlaysWebView({ overlay: false });
+      } catch { /* older plugin */ }
       await mod.StatusBar.setBackgroundColor({ color });
       await mod.StatusBar.setStyle({
         style: darkChrome ? mod.Style.Dark : mod.Style.Light,
       });
+      console.log('[statusBarSync] @capacitor/status-bar applied', color);
       return;
     }
   } catch (e) {
     console.warn('[statusBarSync] @capacitor/status-bar failed', e);
   }
+
+  if (pluginOk) return;
 }
 
 export function syncStatusBarFromCss(): void {
