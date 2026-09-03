@@ -37,7 +37,6 @@ import { userSnippetsService } from '@/core/services/userSnippetsService';
 import { setupAuthDeepLinkListener } from '@/core/server/gitLinker';
 import { ToastContainer } from '@/ui/components/Toast';
 import { useRecentStore } from '@/store/recentStore';
-import { initNativeStatusBar, syncStatusBarFromCss } from '@/core/native/statusBarSync';
 
 /**
  * Startup Lifecycle Phase: Preloads user-defined code snippets across all localized languages.
@@ -104,17 +103,6 @@ const App = () => {
       await themeService.init();
       useThemeStore.getState().sync();
       iconThemeService.init();
-
-      // Android system status bar ↔ IDE chrome (--ms-bg-main)
-      initNativeStatusBar();
-      syncStatusBarFromCss();
-      // Re-sync when CSS theme variables change (data-theme / class flips)
-      try {
-        const root = document.documentElement;
-        const mo = new MutationObserver(() => syncStatusBarFromCss());
-        mo.observe(root, { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] });
-        (window as any).__msStatusBarMo = mo;
-      } catch { /* web / SSR */ }
 
       // 3. Workspace Contextual Loading: Restores context-specific open tabs and editor view states
       await initTabs(workspacePath); 

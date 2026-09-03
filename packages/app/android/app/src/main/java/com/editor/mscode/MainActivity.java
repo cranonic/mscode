@@ -1,26 +1,50 @@
-package com.editor.mscode; 
+package com.editor.mscode;
 
-import android.os.Bundle;
+import android.app.Dialog;
 import android.content.Intent;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
-import com.getcapacitor.BridgeActivity;
+import android.view.View;
+import android.view.Window;
+import android.view.WindowManager;
 import android.webkit.WebSettings;
-import android.webkit.WebStorage; 
-import android.widget.Toast;      
+import android.webkit.WebStorage;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.Toast;
+
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
+
+import com.getcapacitor.BridgeActivity;
+
 import java.io.File;
 
 public class MainActivity extends BridgeActivity {
+
+    private static final int IDE_BG = Color.parseColor("#1E1E1E");
+    private Dialog splashDialog;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private boolean splashDismissed = false;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        // Native Search Plugin Register
+        // Native plugins before super (Capacitor requirement)
         registerPlugin(NativeSearchPlugin.class);
         registerPlugin(NativeTerminalPlugin.class);
         registerPlugin(SafStoragePlugin.class);
+        registerPlugin(MsStatusBarPlugin.class);
 
         super.onCreate(savedInstanceState);
+
+        // Status bar ↔ IDE dark theme (white icons on #1E1E1E)
+        applyStatusBarColor(IDE_BG, /* lightIcons */ false);
 
         // ─── EMERGENCY RESET LOGIC ───
         Intent intent = getIntent();
@@ -34,6 +58,12 @@ public class MainActivity extends BridgeActivity {
             this.bridge.getWebView().getSettings()
                 .setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         }
+
+        // Android Studio–style loading card (not cancelable by touch)
+        showSplashDialog();
+
+        // Dismiss when WebView finishes first load, with a safety timeout
+        attachSplashDismissHooks();
 
         // Android 11+ All Files Access
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -52,40 +82,140 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    // ─── Status bar ──────────────────────────────────────────────────────────
+
     /**
-     * Wipes LocalStorage, IndexedDB, and Capacitor Directory.Data ('storage' folder)
+     * Sync system status bar with IDE theme.
+     * @param colorArgb background color
+     * @param lightIcons true → dark icons (light bar); false → light/white icons (dark bar)
      */
+    public void applyStatusBarColor(int colorArgb, boolean lightIcons) {
+        Window window = getWindow();
+        if (window == null) return;
+
+        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+        window.setStatusBarColor(colorArgb);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            window.setNavigationBarColor(colorArgb);
+        }
+
+        View decor = window.getDecorView();
+        WindowInsetsControllerCompat insets =
+            WindowCompat.getInsetsController(window, decor);
+        if (insets != null) {
+            // lightIcons=true means the *bar* is light → need dark status icons
+            insets.setAppearanceLightStatusBars(lightIcons);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                insets.setAppearanceLightNavigationBars(lightIcons);
+            }
+        }
+    }
+
+    /** Called from Capacitor/JS bridge when the active color theme changes. */
+    public void setStatusBarFromHex(String hex, boolean lightIcons) {
+        try {
+            int color = Color.parseColor(hex.startsWith("#") ? hex : "#" + hex);
+            runOnUiThread(() -> applyStatusBarColor(color, lightIcons));
+        } catch (Exception ignored) {
+            runOnUiThread(() -> applyStatusBarColor(IDE_BG, false));
+        }
+    }
+
+    // ─── Splash dialog ───────────────────────────────────────────────────────
+
+    private void showSplashDialog() {
+        if (isFinishing()) return;
+        try {
+            splashDialog = new Dialog(this, R.style.MsSplashDialog);
+            splashDialog.setContentView(R.layout.dialog_splash);
+            splashDialog.setCancelable(false);
+            splashDialog.setCanceledOnTouchOutside(false);
+            if (splashDialog.getWindow() != null) {
+                splashDialog.getWindow().setLayout(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT
+                );
+                splashDialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            }
+            splashDialog.show();
+        } catch (Exception e) {
+            e.printStackTrace();
+            splashDialog = null;
+        }
+    }
+
+    private void dismissSplashDialog() {
+        if (splashDismissed) return;
+        splashDismissed = true;
+        mainHandler.post(() -> {
+            try {
+                if (splashDialog != null && splashDialog.isShowing()) {
+                    splashDialog.dismiss();
+                }
+            } catch (Exception ignored) {
+            }
+            splashDialog = null;
+        });
+    }
+
+    private void attachSplashDismissHooks() {
+        // Safety: never leave splash stuck
+        mainHandler.postDelayed(this::dismissSplashDialog, 12_000);
+
+        if (this.bridge == null || this.bridge.getWebView() == null) {
+            mainHandler.postDelayed(this::dismissSplashDialog, 2500);
+            return;
+        }
+
+        WebView webView = this.bridge.getWebView();
+        final WebViewClient existing = null; // Bridge owns client; wrap via post-load check
+
+        // Poll readiness: when page has progress ~100 or title set
+        mainHandler.postDelayed(new Runnable() {
+            int tries = 0;
+            @Override
+            public void run() {
+                if (splashDismissed || isFinishing()) return;
+                tries++;
+                try {
+                    if (webView.getProgress() >= 100 && webView.getUrl() != null) {
+                        // Small grace so first paint of React root can land
+                        mainHandler.postDelayed(() -> dismissSplashDialog(), 350);
+                        return;
+                    }
+                } catch (Exception ignored) {
+                }
+                if (tries < 40) {
+                    mainHandler.postDelayed(this, 200);
+                } else {
+                    dismissSplashDialog();
+                }
+            }
+        }, 400);
+    }
+
+    // ─── Reset helpers ───────────────────────────────────────────────────────
+
     private void clearIDEState() {
         try {
-            // 1. Clear Web Data (IndexedDB, LocalStorage, WebSQL)
             WebStorage.getInstance().deleteAllData();
-            
-            // 2. Clear Capacitor SharedPreferences
             getSharedPreferences("CapacitorStorage", MODE_PRIVATE).edit().clear().apply();
-            
-            // 3. Clear WebView Cache and History
+
             if (this.bridge != null && this.bridge.getWebView() != null) {
                 this.bridge.getWebView().clearCache(true);
                 this.bridge.getWebView().clearHistory();
             }
 
-            // 4. Clear Capacitor Filesystem (Directory.Data -> 'storage' folder)
-            // This matches the paths in your storageService.ts (e.g. 'storage/globalState.json')
-            File filesDir = getFilesDir(); // Android's equivalent to Capacitor's Directory.Data
+            File filesDir = getFilesDir();
             File storageDir = new File(filesDir, "storage");
-            
             if (storageDir.exists()) {
                 deleteRecursive(storageDir);
             }
-            
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    /**
-     * Helper method to recursively delete a directory and all its contents
-     */
     private void deleteRecursive(File fileOrDirectory) {
         if (fileOrDirectory.isDirectory()) {
             File[] children = fileOrDirectory.listFiles();

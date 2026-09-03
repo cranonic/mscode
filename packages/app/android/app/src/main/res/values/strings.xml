@@ -7,4 +7,7 @@
     
     <string name="shortcut_reset_short">Reset IDE</string>
     <string name="shortcut_reset_long">Clear IDE State &amp; Cache</string>
+
+    <string name="splash_title">MScode Studio</string>
+    <string name="splash_subtitle">Loading IDE components…</string>
 </resources>

@@ -131,7 +131,7 @@ export function useContextMenuSetup({
         } 
       },
       { 
-        id: 'selectAll', label: 'Select All', icon: 'clear-all', shortcut: 'Ctrl+A', order: 20,
+        id: 'selectAll', label: 'Select All', icon: 'checklist', shortcut: 'Ctrl+A', order: 20,
         onClick: () => {
           // Always target THIS editor instance (not getEditors()[0])
           editor.focus();
