@@ -17,6 +17,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.core.view.WindowCompat;
@@ -190,11 +191,25 @@ public class MainActivity extends BridgeActivity {
                 );
                 splashDialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
             }
+            TextView versionText = splashDialog.findViewById(R.id.splash_version);
+            if (versionText != null) {
+                versionText.setText(buildVersionLabel());
+            }
             splashDialog.show();
         } catch (Exception e) {
             e.printStackTrace();
             splashDialog = null;
         }
+    }
+
+    private String buildVersionLabel() {
+        String appVersion = "1.0.0";
+        try {
+            appVersion = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            if (appVersion == null || appVersion.isEmpty()) appVersion = "1.0.0";
+        } catch (Exception ignored) {
+        }
+        return "v" + appVersion + "  •  Android " + Build.VERSION.RELEASE;
     }
 
     private void dismissSplashDialog() {
