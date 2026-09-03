@@ -23,10 +23,12 @@
         <item name="android:windowLightStatusBar">false</item>
     </style>
 
-    <!-- Cold-start splash (system SplashScreen API) — solid dark until WebView paints -->
+    <!-- Cold-start: solid dark only (no launcher icon). Custom dialog owns the logo+shimmer. -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/ms_bg_main</item>
-        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <!-- Transparent 1px icon → no centered MSCode logo before dialog -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_transparent</item>
+        <item name="windowSplashScreenAnimationDuration">0</item>
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
         <item name="android:windowBackground">@color/ms_bg_main</item>
         <item name="android:statusBarColor">@color/ms_status_bar</item>

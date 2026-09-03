@@ -23,6 +23,8 @@ import android.widget.Toast;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
+import androidx.core.splashscreen.SplashScreen;
+
 import com.getcapacitor.BridgeActivity;
 
 import java.io.File;
@@ -38,6 +40,11 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Must run before super.onCreate — keeps system splash until our dialog is up
+        final boolean[] dialogReady = { false };
+        SplashScreen systemSplash = SplashScreen.installSplashScreen(this);
+        systemSplash.setKeepOnScreenCondition(() -> !dialogReady[0]);
+
         // Native plugins before super (Capacitor requirement)
         registerPlugin(NativeSearchPlugin.class);
         registerPlugin(NativeTerminalPlugin.class);
@@ -62,8 +69,9 @@ public class MainActivity extends BridgeActivity {
                 .setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         }
 
-        // Android Studio–style loading card (not cancelable by touch)
+        // Custom splash (logo + shimmer) — no prior launcher icon flash
         showSplashDialog();
+        dialogReady[0] = true; // drop system splash; dialog already on screen
 
         // Dismiss when WebView finishes first load, with a safety timeout
         attachSplashDismissHooks();
@@ -203,10 +211,10 @@ public class MainActivity extends BridgeActivity {
     }
 
     private String buildVersionLabel() {
-        String appVersion = "2.0.0";
+        String appVersion = "1.0.0";
         try {
             appVersion = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-            if (appVersion == null || appVersion.isEmpty()) appVersion = "2.0.0";
+            if (appVersion == null || appVersion.isEmpty()) appVersion = "1.0.0";
         } catch (Exception ignored) {
         }
         return "v" + appVersion + "  •  Android " + Build.VERSION.RELEASE;

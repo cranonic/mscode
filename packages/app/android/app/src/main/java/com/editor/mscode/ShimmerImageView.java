@@ -78,7 +78,7 @@ public class ShimmerImageView extends AppCompatImageView {
 
         animator = ValueAnimator.ofFloat(-w * 1.4f, w * 1.4f);
         animator.setDuration(1600);
-        animator.setStartDelay(400);
+        animator.setStartDelay(0); // start shine immediately
         // Note: ValueAnimator has no setRepeatDelay on older SDKs —
         // pause between loops via onAnimationEnd + postDelayed.
         animator.addUpdateListener(a -> {
