@@ -1,5 +1,7 @@
 package com.editor.mscode;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
@@ -25,6 +27,7 @@ public class ShimmerImageView extends AppCompatImageView {
     private final Matrix gradientMatrix = new Matrix();
     private ValueAnimator animator;
     private float translateX = 0f;
+    private boolean detached = false;
 
     public ShimmerImageView(Context context) {
         super(context);
@@ -67,15 +70,31 @@ public class ShimmerImageView extends AppCompatImageView {
     }
 
     private void startShimmer(int w) {
-        if (animator != null) animator.cancel();
+        if (animator != null) {
+            animator.cancel();
+            animator = null;
+        }
+        detached = false;
+
         animator = ValueAnimator.ofFloat(-w * 1.4f, w * 1.4f);
         animator.setDuration(1600);
         animator.setStartDelay(400);
-        animator.setRepeatCount(ValueAnimator.INFINITE);
-        animator.setRepeatDelay(1100);
+        // Note: ValueAnimator has no setRepeatDelay on older SDKs —
+        // pause between loops via onAnimationEnd + postDelayed.
         animator.addUpdateListener(a -> {
             translateX = (float) a.getAnimatedValue();
             invalidate();
+        });
+        animator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if (detached || animator == null) return;
+                postDelayed(() -> {
+                    if (!detached && animator != null) {
+                        animator.start();
+                    }
+                }, 1100);
+            }
         });
         animator.start();
     }
@@ -102,6 +121,10 @@ public class ShimmerImageView extends AppCompatImageView {
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        if (animator != null) animator.cancel();
+        detached = true;
+        if (animator != null) {
+            animator.cancel();
+            animator = null;
+        }
     }
 }
