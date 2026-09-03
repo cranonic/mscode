@@ -1,48 +1,124 @@
 // src/core/native/statusBarSync.ts
 //
-// Keeps the Android system status bar in sync with the active IDE theme.
-// Uses @capacitor/status-bar when available; falls back to a MainActivity bridge.
+// Android system status bar ↔ IDE theme.
+//
+// Colors (from computed CSS on :root / body):
+//   --ms-statusbar-bg    → fallback --ms-bg-side
+//   --ms-statusbar-text  → fallback --ms-text-main
+//
+// Native path: MsStatusBar Capacitor plugin → MainActivity.setStatusBarFromHex
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
 interface MsStatusBarPlugin {
-  setStyle?(options: { style: 'DARK' | 'LIGHT' }): Promise<void>;
+  setStatusBar(options: { color: string; lightIcons: boolean }): Promise<void>;
   setBackgroundColor?(options: { color: string }): Promise<void>;
-  setStatusBar?(options: { color: string; lightIcons: boolean }): Promise<void>;
+  setStyle?(options: { style: 'DARK' | 'LIGHT' }): Promise<void>;
 }
 
-const MsStatusBar = registerPlugin<MsStatusBarPlugin>('MsStatusBar', {
-  web: () => ({
-    setStyle: async () => {},
-    setBackgroundColor: async () => {},
-    setStatusBar: async () => {},
-  }),
-});
+const MsStatusBar = registerPlugin<MsStatusBarPlugin>('MsStatusBar');
 
-const IDE_DARK = '#1E1E1E';
+const FALLBACK_BG = '#252526';
+const FALLBACK_FG = '#cccccc';
 
 function isNativeAndroid(): boolean {
-  return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+  try {
+    return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+  } catch {
+    return false;
+  }
 }
 
-/**
- * Apply status-bar colors for a given IDE chrome background.
- * @param backgroundHex e.g. "#1E1E1E" (from --ms-bg-main)
- * @param darkChrome true when the UI is dark → white status icons
- */
+function toHexColor(raw: string, fallback: string): string {
+  const s = (raw || '').trim();
+  if (!s) return fallback;
+
+  if (s.startsWith('#')) {
+    if (s.length === 4) {
+      const r = s[1], g = s[2], b = s[3];
+      return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+    }
+    if (s.length >= 7) return s.slice(0, 7).toLowerCase();
+  }
+
+  const m = s.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (m) {
+    const h = (n: string) =>
+      Math.max(0, Math.min(255, parseInt(n, 10)))
+        .toString(16)
+        .padStart(2, '0');
+    return `#${h(m[1])}${h(m[2])}${h(m[3])}`;
+  }
+
+  return fallback;
+}
+
+function luminance(hex: string): number {
+  const h = hex.replace('#', '');
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) return 0.2;
+  const r = parseInt(h.slice(0, 2), 16) / 255;
+  const g = parseInt(h.slice(2, 4), 16) / 255;
+  const b = parseInt(h.slice(4, 6), 16) / 255;
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+/** Prefer :root, then body (themeService / MainLayout may set either). */
+function readCssVar(name: string): string {
+  if (typeof document === 'undefined') return '';
+  const fromRoot = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  if (fromRoot) return fromRoot;
+  if (document.body) {
+    return getComputedStyle(document.body).getPropertyValue(name).trim();
+  }
+  return '';
+}
+
+export function resolveStatusBarThemeColors(): {
+  bg: string;
+  text: string;
+  darkChrome: boolean;
+} {
+  const bgRaw =
+    readCssVar('--ms-statusbar-bg') ||
+    readCssVar('--ms-bg-side') ||
+    FALLBACK_BG;
+  const textRaw =
+    readCssVar('--ms-statusbar-text') ||
+    readCssVar('--ms-text-main') ||
+    FALLBACK_FG;
+
+  const bg = toHexColor(bgRaw, FALLBACK_BG);
+  const text = toHexColor(textRaw, FALLBACK_FG);
+  // Light text / dark bg → white system icons (lightIcons=false)
+  const darkChrome = luminance(text) > 0.45 || luminance(bg) < 0.55;
+
+  return { bg, text, darkChrome };
+}
+
 export async function syncNativeStatusBar(
-  backgroundHex: string = IDE_DARK,
+  backgroundHex: string = FALLBACK_BG,
   darkChrome: boolean = true,
 ): Promise<void> {
-  if (!isNativeAndroid()) return;
+  if (!isNativeAndroid()) {
+    console.debug('[statusBarSync] skip — not native Android');
+    return;
+  }
 
-  const color = backgroundHex?.startsWith('#') ? backgroundHex : `#${backgroundHex || '1E1E1E'}`;
-  // Capacitor StatusBar: style DARK = light content (white icons) on dark bar
-  const style = darkChrome ? 'DARK' : 'LIGHT';
-  const lightIcons = !darkChrome; // Android: lightIcons = dark glyphs on light bar
+  const color = toHexColor(backgroundHex, FALLBACK_BG);
+  const lightIcons = !darkChrome;
 
+  console.log('[statusBarSync] apply', { color, lightIcons, darkChrome });
+
+  // 1) Our plugin → MainActivity (most reliable)
   try {
-    // Prefer official plugin if the project includes @capacitor/status-bar
+    await MsStatusBar.setStatusBar({ color, lightIcons });
+    return;
+  } catch (e) {
+    console.warn('[statusBarSync] MsStatusBar.setStatusBar failed', e);
+  }
+
+  // 2) Optional official plugin
+  try {
     const mod = await import('@capacitor/status-bar').catch(() => null);
     if (mod?.StatusBar) {
       await mod.StatusBar.setBackgroundColor({ color });
@@ -51,46 +127,78 @@ export async function syncNativeStatusBar(
       });
       return;
     }
-  } catch {
-    /* optional dependency */
-  }
-
-  try {
-    await MsStatusBar.setStatusBar?.({ color, lightIcons });
-  } catch {
-    try {
-      await MsStatusBar.setBackgroundColor?.({ color });
-      await MsStatusBar.setStyle?.({ style });
-    } catch {
-      /* no native bridge */
-    }
+  } catch (e) {
+    console.warn('[statusBarSync] @capacitor/status-bar failed', e);
   }
 }
 
-/** Call once at app boot for the default dark IDE theme. */
+export function syncStatusBarFromCss(): void {
+  if (typeof document === 'undefined') return;
+  const { bg, darkChrome } = resolveStatusBarThemeColors();
+  void syncNativeStatusBar(bg, darkChrome);
+}
+
+let _timer: ReturnType<typeof setTimeout> | null = null;
+export function scheduleStatusBarSync(delayMs = 50): void {
+  if (_timer) clearTimeout(_timer);
+  _timer = setTimeout(() => {
+    _timer = null;
+    syncStatusBarFromCss();
+  }, delayMs);
+}
+
 export function initNativeStatusBar(): void {
-  void syncNativeStatusBar(IDE_DARK, true);
+  syncStatusBarFromCss();
+  scheduleStatusBarSync(100);
+  scheduleStatusBarSync(400);
 }
 
 /**
- * Read current --ms-bg-main from :root and push to the system bar.
- * Safe to call after theme switches.
+ * Watch theme switches on <html> AND <body>, plus ms-theme-changed events.
  */
-export function syncStatusBarFromCss(): void {
-  if (typeof document === 'undefined') return;
-  const raw = getComputedStyle(document.documentElement)
-    .getPropertyValue('--ms-bg-main')
-    .trim();
-  const bg = raw || IDE_DARK;
-  // Heuristic: luminance — treat near-dark as dark chrome
-  const hex = bg.startsWith('#') ? bg.slice(1) : bg;
-  let dark = true;
-  if (/^[0-9a-fA-F]{6}$/.test(hex)) {
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-    dark = lum < 0.5;
+export function watchThemeStatusBar(): () => void {
+  if (typeof document === 'undefined') return () => {};
+
+  const observe = (el: Element | null) => {
+    if (!el) return null;
+    const mo = new MutationObserver(() => scheduleStatusBarSync(40));
+    mo.observe(el, {
+      attributes: true,
+      attributeFilter: ['data-theme', 'class', 'style'],
+    });
+    return mo;
+  };
+
+  const moRoot = observe(document.documentElement);
+  const moBody = observe(document.body);
+
+  const onThemeEvent = () => scheduleStatusBarSync(40);
+  document.addEventListener('ms-theme-changed', onThemeEvent);
+  window.addEventListener('ms-theme-changed', onThemeEvent);
+
+  const onVis = () => {
+    if (document.visibilityState === 'visible') scheduleStatusBarSync(80);
+  };
+  document.addEventListener('visibilitychange', onVis);
+
+  scheduleStatusBarSync(0);
+
+  return () => {
+    moRoot?.disconnect();
+    moBody?.disconnect();
+    document.removeEventListener('ms-theme-changed', onThemeEvent);
+    window.removeEventListener('ms-theme-changed', onThemeEvent);
+    document.removeEventListener('visibilitychange', onVis);
+    if (_timer) clearTimeout(_timer);
+  };
+}
+
+/** Call when workbench.theme / themeService.applyTheme completes. */
+export function notifyThemeChanged(): void {
+  try {
+    document.dispatchEvent(new CustomEvent('ms-theme-changed'));
+  } catch {
+    /* ignore */
   }
-  void syncNativeStatusBar(bg.startsWith('#') ? bg : `#${hex}`, dark);
+  scheduleStatusBarSync(60);
 }

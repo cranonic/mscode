@@ -24,7 +24,6 @@ import { tabRegistry } from '@/core/extensionAPI/registry/tabRegistry';
 import { customPreviewerRegistry } from '@/core/extensionAPI/registry/previewerRegistry';
 
 import './MainLayout.css';
-import { notifyThemeChanged } from '@/core/native/statusBarSync';
 
 export const MainLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
   const { tabs, activeTabId, addTab, recentTabIds } = useTabStore();
@@ -73,9 +72,6 @@ export const MainLayout: React.FC<{ children?: React.ReactNode }> = ({ children 
     const handleResize = () => setIsLargeScreen(window.innerWidth > 1024 || (window.innerWidth > window.innerHeight));
     window.addEventListener('resize', handleResize);
     document.body.setAttribute('data-theme', currentTheme);
-    document.documentElement.setAttribute('data-theme', currentTheme);
-    // Push status-bar colors after theme CSS vars settle
-    notifyThemeChanged();
     return () => window.removeEventListener('resize', handleResize);
   }, [currentTheme]);
 

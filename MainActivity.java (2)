@@ -29,8 +29,6 @@ import java.io.File;
 public class MainActivity extends BridgeActivity {
 
     private static final int IDE_BG = Color.parseColor("#1E1E1E");
-    private int lastStatusBarColor = IDE_BG;
-    private boolean lastLightIcons = false;
     private Dialog splashDialog;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean splashDismissed = false;
@@ -92,14 +90,10 @@ public class MainActivity extends BridgeActivity {
      * @param lightIcons true → dark icons (light bar); false → light/white icons (dark bar)
      */
     public void applyStatusBarColor(int colorArgb, boolean lightIcons) {
-        lastStatusBarColor = colorArgb;
-        lastLightIcons = lightIcons;
-
         Window window = getWindow();
         if (window == null) return;
 
         window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-        window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
         window.setStatusBarColor(colorArgb);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             window.setNavigationBarColor(colorArgb);
@@ -115,14 +109,6 @@ public class MainActivity extends BridgeActivity {
                 insets.setAppearanceLightNavigationBars(lightIcons);
             }
         }
-        android.util.Log.d("MsStatusBar", "apply color=#" + Integer.toHexString(colorArgb) + " lightIcons=" + lightIcons);
-    }
-
-    @Override
-    public void onResume() {
-        super.onResume();
-        // System / WebView may reset bar after pause — re-apply last theme colors
-        applyStatusBarColor(lastStatusBarColor, lastLightIcons);
     }
 
     /** Called from Capacitor/JS bridge when the active color theme changes. */
