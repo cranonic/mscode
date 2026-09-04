@@ -144,6 +144,7 @@ public class MediaPlaybackService extends Service {
                 } catch (Throwable ignored) {
                     /* ignore */
                 }
+                MediaNotificationPlugin.markServiceStopped();
                 stopSelf();
                 break;
 
@@ -205,6 +206,9 @@ public class MediaPlaybackService extends Service {
             } else {
                 startForeground(NOTIF_ID, n);
             }
+            // Tell the plugin the FG contract is satisfied so later updates
+            // can use plain startService() instead of startForegroundService().
+            MediaNotificationPlugin.markServiceStarted();
         } catch (Throwable e) {
             Log.e(TAG, "startForeground failed", e);
             // Best-effort fallback with a minimal, guaranteed-safe notification.
@@ -219,8 +223,10 @@ public class MediaPlaybackService extends Service {
                 } else {
                     startForeground(NOTIF_ID, minimal);
                 }
+                MediaNotificationPlugin.markServiceStarted();
             } catch (Throwable e2) {
                 Log.e(TAG, "minimal startForeground also failed, stopping service", e2);
+                MediaNotificationPlugin.markServiceStopped();
                 try {
                     stopSelf();
                 } catch (Throwable ignored) {
@@ -302,6 +308,7 @@ public class MediaPlaybackService extends Service {
 
     @Override
     public void onDestroy() {
+        MediaNotificationPlugin.markServiceStopped();
         if (artBitmap != null) {
             try {
                 artBitmap.recycle();

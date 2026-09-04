@@ -17,12 +17,23 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  *   MediaNotification.update({ ... })
  *   MediaNotification.hide()
  *   addListener('mediaAction', ({ action }) => ...)  // play|pause|next|prev|dismiss
+ *
+ * IMPORTANT (Android 12+/15):
+ * Each startForegroundService() starts a system timer that requires
+ * Service.startForeground() within ~5s. Calling it multiple times in quick
+ * succession (e.g. loading→ready→playing state churn) is a common source of
+ * ForegroundServiceDidNotStartInTimeException. We therefore:
+ *  - use startForegroundService() only for the first show / when service is down
+ *  - use plain startService() for subsequent updates
  */
 @CapacitorPlugin(name = "MediaNotification")
 public class MediaNotificationPlugin extends Plugin {
 
     private static final String TAG = "MediaNotification";
     private static MediaNotificationPlugin instance;
+
+    /** True after a successful startForegroundService until hide/stop. */
+    private static volatile boolean sServiceStarted = false;
 
     @Override
     public void load() {
@@ -47,13 +58,24 @@ public class MediaNotificationPlugin extends Plugin {
         }
     }
 
+    /** Called by the service when it successfully enters foreground. */
+    static void markServiceStarted() {
+        sServiceStarted = true;
+    }
+
+    /** Called when service is stopped / destroyed. */
+    static void markServiceStopped() {
+        sServiceStarted = false;
+    }
+
     @PluginMethod
     public void show(PluginCall call) {
         try {
             Intent i = new Intent(getContext(), MediaPlaybackService.class);
             i.setAction(MediaPlaybackService.ACTION_START);
             fillExtras(i, call);
-            startServiceSafely(i);
+            // First start (or restart after hide) must use startForegroundService.
+            startServiceSafely(i, /* preferForeground */ true);
             call.resolve();
         } catch (Throwable e) {
             // Includes ForegroundServiceStartNotAllowedException (Android 12+)
@@ -70,7 +92,10 @@ public class MediaNotificationPlugin extends Plugin {
             Intent i = new Intent(getContext(), MediaPlaybackService.class);
             i.setAction(MediaPlaybackService.ACTION_UPDATE);
             fillExtras(i, call);
-            startServiceSafely(i);
+            // Prefer plain startService when we believe the FG service is already up.
+            // This avoids stacking extra startForegroundService timers that cause
+            // ForegroundServiceDidNotStartInTimeException on mid-range devices.
+            startServiceSafely(i, /* preferForeground */ false);
             call.resolve();
         } catch (Throwable e) {
             Log.e(TAG, "update failed", e);
@@ -84,6 +109,7 @@ public class MediaNotificationPlugin extends Plugin {
             Intent i = new Intent(getContext(), MediaPlaybackService.class);
             i.setAction(MediaPlaybackService.ACTION_STOP);
             getContext().startService(i);
+            sServiceStarted = false;
             call.resolve();
         } catch (Throwable e) {
             Log.e(TAG, "hide failed", e);
@@ -91,11 +117,25 @@ public class MediaNotificationPlugin extends Plugin {
         }
     }
 
-    private void startServiceSafely(Intent i) {
+    /**
+     * @param preferForeground true for show / first start; false for update.
+     *                         When false we still fall back to startForegroundService
+     *                         if we think the service is not running yet.
+     */
+    private void startServiceSafely(Intent i, boolean preferForeground) {
         if (android.os.Build.VERSION.SDK_INT >= 26) {
-            getContext().startForegroundService(i);
+            boolean needFg = preferForeground || !sServiceStarted;
+            if (needFg) {
+                getContext().startForegroundService(i);
+                // Optimistically mark; service will confirm via markServiceStarted().
+                sServiceStarted = true;
+            } else {
+                // Service already in foreground — deliver intent without a new timer.
+                getContext().startService(i);
+            }
         } else {
             getContext().startService(i);
+            sServiceStarted = true;
         }
     }
 

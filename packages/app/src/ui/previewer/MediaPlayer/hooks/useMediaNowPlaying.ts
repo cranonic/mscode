@@ -26,6 +26,16 @@ export const MEDIA_NOTIF_ID = 'mscode-now-playing';
  * - After a dismiss+restore cycle, re-show without outer toast flash when possible
  * - New track / fresh play → toast visible again
  * - Paused / stopped → can be dismissed permanently until play resumes
+ *
+ * Crash fix (Android 12+/15 ForegroundServiceDidNotStartInTimeException):
+ * Engine state churns loading → ready → playing in a few ms. Each change used
+ * to fire show()/update(), and both paths called startForegroundService() on
+ * the native side. We now:
+ *  - call show() only once when the native notification is first needed
+ *    (or when the track changes while active)
+ *  - call update() for subsequent state flips
+ *  - debounce rapid successive native calls (~80ms) so a single FG start
+ *    window is enough even on mid-range devices
  */
 export function useMediaNowPlaying(opts: {
   meta: TagMeta;
@@ -44,6 +54,14 @@ export function useMediaNowPlaying(opts: {
   optsRef.current = opts;
   playingRef.current = snap.state === 'playing';
 
+  // Native side: has the system notification been shown at least once for
+  // the current "session" (until hide / inactive)?
+  const nativeShownRef = useRef(false);
+  // Debounce handle for native show/update
+  const nativeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Last payload we actually sent (to skip identical updates)
+  const lastNativePayloadRef = useRef<string>('');
+
   // Native media-action buttons → JS transport
   useEffect(() => {
     if (!isNativeMediaNotificationAvailable()) return;
@@ -58,6 +76,8 @@ export function useMediaNowPlaying(opts: {
         // sticky: if still playing, native service will be restarted by next effect
         if (playingRef.current) {
           suppressOuterToast.current = true;
+          // Dismiss means service is stopping — allow a fresh show() next time
+          nativeShownRef.current = false;
         }
       }
     }).then((r) => {
@@ -93,6 +113,16 @@ export function useMediaNowPlaying(opts: {
     return unsub;
   }, []);
 
+  // Cleanup debounce on unmount
+  useEffect(() => {
+    return () => {
+      if (nativeDebounceRef.current) {
+        clearTimeout(nativeDebounceRef.current);
+        nativeDebounceRef.current = null;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const title = meta.title || fileLabel || 'MSCode Media';
     const isPlaying = snap.state === 'playing';
@@ -107,6 +137,12 @@ export function useMediaNowPlaying(opts: {
       void hideNativeMediaNotification();
       suppressOuterToast.current = false;
       lastTitleRef.current = '';
+      nativeShownRef.current = false;
+      lastNativePayloadRef.current = '';
+      if (nativeDebounceRef.current) {
+        clearTimeout(nativeDebounceRef.current);
+        nativeDebounceRef.current = null;
+      }
       return;
     }
 
@@ -114,6 +150,8 @@ export function useMediaNowPlaying(opts: {
     if (trackChanged) {
       lastTitleRef.current = title;
       suppressOuterToast.current = false;
+      // New track → allow a fresh show() so metadata is correct
+      nativeShownRef.current = false;
     }
 
     const showToast = isPlaying && !suppressOuterToast.current;
@@ -135,11 +173,29 @@ export function useMediaNowPlaying(opts: {
         artist: meta.artist || '',
         playing: isPlaying,
       };
-      if (isPlaying || trackChanged) {
-        void showNativeMediaNotification(payload);
-      } else {
-        void updateNativeMediaNotification(payload);
+      const payloadKey = `${payload.title}|${payload.artist}|${payload.playing}`;
+
+      // Skip if identical to what we already sent
+      if (payloadKey === lastNativePayloadRef.current && nativeShownRef.current) {
+        return;
       }
+
+      // Debounce rapid state churn (loading → ready → playing)
+      if (nativeDebounceRef.current) {
+        clearTimeout(nativeDebounceRef.current);
+      }
+      nativeDebounceRef.current = setTimeout(() => {
+        nativeDebounceRef.current = null;
+        const key = `${payload.title}|${payload.artist}|${payload.playing}`;
+        lastNativePayloadRef.current = key;
+
+        if (!nativeShownRef.current || trackChanged) {
+          nativeShownRef.current = true;
+          void showNativeMediaNotification(payload);
+        } else {
+          void updateNativeMediaNotification(payload);
+        }
+      }, 80);
     }
   }, [
     meta.title,
