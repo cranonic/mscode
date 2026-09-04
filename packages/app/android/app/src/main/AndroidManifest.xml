@@ -25,11 +25,15 @@
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true">
       
-        <service 
+        <service
             android:name="com.editor.mscode.terminal.TerminalForegroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Embedded developer terminal and language-server processes that must keep running in the background while the user is coding" />
+        </service>
 
         <!-- Sticky MediaStyle "Now Playing" notification + keeps process alive while audio plays -->
         <service

@@ -165,12 +165,20 @@ public class TerminalForegroundService extends Service {
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
+    // Tracks whether we currently hold the foreground state — after a time-limit
+    // release (onTimeout) or a failed startForeground() call, we keep running as
+    // a plain background service instead of retrying in a crash loop.
+    private volatile boolean foregroundActive = false;
+
     @Override
     public void onCreate() {
         super.onCreate();
         rootfs        = new RootfsManager(this);
         scriptWriter  = new InitScriptWriter(rootfs);
         createNotificationChannel();
+        // Never let a startup failure (incl. FGS quota already exhausted from a
+        // previous long session) crash the whole app — startAsForeground() is
+        // fully self-contained and never throws.
         startAsForeground("Terminal ready");
         emitLog("TerminalForegroundService started (native + Termux bootstrap mode)");
     }
@@ -189,15 +197,62 @@ public class TerminalForegroundService extends Service {
         return START_STICKY;
     }
 
-    /** API 29+ must pass foregroundServiceType matching the manifest. */
-    private void startAsForeground(String text) {
-        Notification n = buildNotification(text);
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-        } else if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-        } else {
-            startForeground(NOTIF_ID, n);
+    /**
+     * Uses the "specialUse" foreground service type, which — unlike dataSync —
+     * has no Android 15 execution-time quota, since this service legitimately
+     * needs to run for as long as the user keeps a terminal/LSP session open.
+     *
+     * This method is defensive by design and NEVER throws: any failure here
+     * (permission revoked, OEM restriction, or any other platform error) is
+     * caught, logged, and the service simply continues running without FGS
+     * protection rather than taking the whole app process down with it.
+     * Returns true if the notification is now showing in the foreground state.
+     */
+    private boolean startAsForeground(String text) {
+        try {
+            Notification n = buildNotification(text);
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            } else {
+                // Pre-34 devices don't require/understand an explicit type param.
+                startForeground(NOTIF_ID, n);
+            }
+            foregroundActive = true;
+            return true;
+        } catch (Throwable t) {
+            // Covers ForegroundServiceStartNotAllowedException (quota/background
+            // start restrictions) and anything else the platform can throw here.
+            Log.e(TAG, "startForeground failed — continuing without FGS protection", t);
+            foregroundActive = false;
+            try {
+                // Still surface a plain (non-foreground) notification so the
+                // user can see terminal status, best-effort only.
+                NotificationManager nm = getSystemService(NotificationManager.class);
+                if (nm != null) nm.notify(NOTIF_ID, buildNotification(text));
+            } catch (Throwable ignored) {
+                /* not critical — never escalate */
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Android 15+ (API 35) callback: fired when a time-limited foreground
+     * service type is about to be forcibly stopped by the system. Releasing
+     * the foreground state here ourselves — instead of letting the system do
+     * it — avoids the ForegroundServiceDidNotStartInTimeException crash that
+     * happens if we try to call startForeground() again after the quota for
+     * this window is exhausted. Sessions and the bound service keep running;
+     * we just lose FGS protection until the rolling quota window frees up.
+     */
+    @Override
+    public void onTimeout(int startId, int fgsType) {
+        Log.w(TAG, "FGS time limit reached (type=" + fgsType + ") — releasing foreground state");
+        foregroundActive = false;
+        try {
+            stopForeground(STOP_FOREGROUND_DETACH);
+        } catch (Throwable t) {
+            Log.w(TAG, "stopForeground in onTimeout failed", t);
         }
     }
 
@@ -961,14 +1016,10 @@ public class TerminalForegroundService extends Service {
     }
 
     private void updateNotification(String text) {
-        // Prefer re-asserting FGS so Android doesn't demote the service
-        try {
-            startAsForeground(text);
-        } catch (Exception e) {
-            Notification n = buildNotification(text);
-            NotificationManager nm = getSystemService(NotificationManager.class);
-            if (nm != null) nm.notify(NOTIF_ID, n);
-        }
+        // startAsForeground() is defensive and never throws — if FGS is
+        // unavailable (quota exhausted etc.) it already falls back to a
+        // plain notification internally.
+        startAsForeground(text);
     }
 
     private Notification buildNotification(String text) {
