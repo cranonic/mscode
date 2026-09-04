@@ -206,7 +206,12 @@ export class AndroidFileSystem implements IFileSystem {
   // }
   
   async readFile(path: string): Promise<string> {
-    const isBinary = /\.(png|jpe?g|gif|webp|ico|msxt|zip)$/i.test(path);
+    // Binary: images, archives, and all media the VLC-style player can open.
+    // Missing audio/video here forces UTF-8 decode → non-Latin1 chars → atob crash.
+    const isBinary =
+      /\.(png|jpe?g|gif|webp|ico|bmp|svg|msxt|zip|gz|7z|rar|tar|bin|pdf|mp3|wav|ogg|opus|m4a|aac|flac|mp4|webm|ogv|mov|mkv|m4v|avi|wmv|3gp)$/i.test(
+        path,
+      );
 
     const options: any = {
       path: this.isInternal(path) ? this.getInternalPath(path) : this.getFullPath(path),
@@ -253,8 +258,11 @@ export class AndroidFileSystem implements IFileSystem {
   // }
   
   async writeFile(path: string, content: string): Promise<void> {
-    // Is image ?
-    const isBinary = /\.(png|jpe?g|gif|webp|ico|msxt|zip)$/i.test(path);
+    // Same binary list as readFile (images, archives, audio, video)
+    const isBinary =
+      /\.(png|jpe?g|gif|webp|ico|bmp|svg|msxt|zip|gz|7z|rar|tar|bin|pdf|mp3|wav|ogg|opus|m4a|aac|flac|mp4|webm|ogv|mov|mkv|m4v|avi|wmv|3gp)$/i.test(
+        path,
+      );
 
     const options: any = {
       path: this.isInternal(path) ? this.getInternalPath(path) : this.getFullPath(path),

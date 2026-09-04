@@ -21,7 +21,10 @@ const MIME: Record<string, string> = {
 };
 
 function base64ToBytes(b64: string): Uint8Array {
-  const pure = b64.includes(',') ? b64.split(',')[1] : b64;
+  // Strip data-URL prefix and all whitespace (Capacitor sometimes inserts newlines)
+  let pure = b64.includes(',') ? b64.split(',')[1] : b64;
+  pure = pure.replace(/\s/g, '');
+  // atob only accepts Latin1; invalid input throws the exact error users see
   const bin = atob(pure);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
