@@ -11,7 +11,7 @@ import { contextKeyService } from '@/core/keybindings/contextKeyService';
 import { useNotificationStore } from '@/store/notificationStore';
 import { customPreviewerRegistry } from '@/core/extensionAPI/registry/previewerRegistry';
 import { useFilePickerStore } from '@/store/filePickerStore';
-import { detectMediaMode } from '@/ui/previewer/MediaPlayer/core/mediaKinds';
+import { detectMediaMode } from '@/core/media/mediaKinds';
 
 export function useExplorerActions() {
   const { addTab } = useTabStore();

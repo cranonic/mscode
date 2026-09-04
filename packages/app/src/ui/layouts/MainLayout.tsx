@@ -25,8 +25,8 @@ import { customPreviewerRegistry } from '@/core/extensionAPI/registry/previewerR
 import {
   getActiveMediaTabId,
   subscribeMediaRegistry,
-} from '@/ui/previewer/MediaPlayer/core/engine/playerRegistry';
-import { detectMediaMode } from '@/ui/previewer/MediaPlayer/core/mediaKinds';
+} from '@/core/media/playerRegistry';
+import { detectMediaMode } from '@/core/media/mediaKinds';
 
 import './MainLayout.css';
 import { notifyThemeChanged } from '@/core/native/statusBarSync';
