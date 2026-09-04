@@ -1,3 +1,5 @@
+apply plugin: 'com.android.application'
+
 android {
     namespace = "com.editor.mscode"
     compileSdk = rootProject.ext.compileSdkVersion
