@@ -50,6 +50,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NativeTerminalPlugin.class);
         registerPlugin(SafStoragePlugin.class);
         registerPlugin(MsStatusBarPlugin.class);
+        registerPlugin(com.editor.mscode.media.MediaNotificationPlugin.class);
 
         super.onCreate(savedInstanceState);
 

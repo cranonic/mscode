@@ -14,8 +14,10 @@ import { PlaylistDrawer } from '../playlist/PlaylistDrawer';
 import { SettingsModal } from '../settings/SettingsModal';
 import { loadPrefs, savePrefs, type PlayerPrefs } from '../core/playlist/sessionStore';
 import { useMediaSession } from '../hooks/useMediaSession';
+import { useMediaNowPlaying } from '../hooks/useMediaNowPlaying';
 import { usePlayerLifecycle } from '../hooks/usePlayerLifecycle';
 import { usePlayerKeyboard } from '../hooks/usePlayerKeyboard';
+import { useTabStore } from '@/store/tabStore';
 import '../theme/vlcTokens.css';
 import '../theme/motion.css';
 
@@ -24,8 +26,19 @@ export interface PlayerShellProps {
   filePath: string;
 }
 
-export const PlayerShell: React.FC<PlayerShellProps> = ({ filePath }) => {
+export const PlayerShell: React.FC<PlayerShellProps> = ({ tabId, filePath }) => {
   const [prefs, setPrefs] = useState<PlayerPrefs>(() => loadPrefs());
+
+  // Hide workbench breadcrumb + status bar while this media tab is active
+  useEffect(() => {
+    const { updateTab, tabs, activeTabId } = useTabStore.getState();
+    const id = tabId || activeTabId;
+    if (!id) return;
+    const tab = tabs.find((t) => t.id === id);
+    if (tab && (tab.showStatusBar !== false || tab.showBreadcrumb !== false)) {
+      updateTab(id, { showStatusBar: false, showBreadcrumb: false });
+    }
+  }, [tabId]);
 
   const {
     playlist,
@@ -121,7 +134,7 @@ export const PlayerShell: React.FC<PlayerShellProps> = ({ filePath }) => {
   const onToggle = () => void togglePlay();
   const rootRef = useRef<HTMLDivElement>(null);
 
-  usePlayerLifecycle(engine, snap, rootRef);
+  usePlayerLifecycle(engine, snap, rootRef, tabId);
   useMediaSession({
     meta,
     snap,
@@ -130,6 +143,15 @@ export const PlayerShell: React.FC<PlayerShellProps> = ({ filePath }) => {
     onNext: next,
     onPrev: prev,
     onSeek: seek,
+  });
+  useMediaNowPlaying({
+    meta,
+    snap,
+    fileLabel,
+    onPlay: onToggle,
+    onPause: () => engine.current?.pause(),
+    onNext: next,
+    onPrev: prev,
   });
   usePlayerKeyboard(rootRef, {
     onToggle,

@@ -1,65 +1,45 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import type { MediaEngine } from '../core/engine/MediaEngine';
 import {
   claimPlayback,
-  pauseAllPlayers,
+  clearActiveMediaTab,
   registerPlayer,
 } from '../core/engine/playerRegistry';
 import type { EngineSnapshot } from '../core/engine/types';
 
 /**
  * - Register engine in global registry (single audible player)
- * - Pause when document is hidden
  * - Claim playback when this instance starts playing
+ * - Pin owning tab so LRU / tab switch does NOT unmount the player
+ *
+ * Intentionally does NOT pause on document.hidden or IntersectionObserver —
+ * media must keep playing in the background when the user switches tabs or
+ * leaves the app (notification / media-session controls handle UX).
  */
 export function usePlayerLifecycle(
   engineRef: React.MutableRefObject<MediaEngine | null>,
   snap: EngineSnapshot,
-  rootRef: React.RefObject<HTMLElement | null>,
+  _rootRef: React.RefObject<HTMLElement | null>,
+  tabId?: string,
 ) {
-  // Registry membership
+  // Registry membership (re-bind when engine recreates after path change)
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
-    return registerPlayer(engine);
-  }, [engineRef, snap.state]); // re-bind after engine recreate (path change)
+    return registerPlayer(engine, tabId);
+  }, [engineRef, snap.state, tabId]);
 
-  // Claim when playing
+  // Claim when playing so other instances mute and layout pins this tab
   useEffect(() => {
     if (snap.state !== 'playing') return;
     const engine = engineRef.current;
-    if (engine) claimPlayback(engine);
-  }, [snap.state, engineRef]);
+    if (engine) claimPlayback(engine, tabId);
+  }, [snap.state, engineRef, tabId]);
 
-  // Pause when tab/app hidden
+  // When this player unmounts entirely, drop the pin
   useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState === 'hidden') {
-        pauseAllPlayers();
-      }
+    return () => {
+      if (tabId) clearActiveMediaTab(tabId);
     };
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  }, []);
-
-  // Pause when player root is not displayed (inactive editor tab)
-  const wasVisible = useRef(true);
-  useEffect(() => {
-    const el = rootRef.current;
-    if (!el || typeof IntersectionObserver === 'undefined') return;
-
-    const obs = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0];
-        const visible = !!entry?.isIntersecting && entry.intersectionRatio > 0;
-        if (wasVisible.current && !visible) {
-          engineRef.current?.pause();
-        }
-        wasVisible.current = visible;
-      },
-      { threshold: 0.05 },
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [rootRef, engineRef]);
+  }, [tabId]);
 }

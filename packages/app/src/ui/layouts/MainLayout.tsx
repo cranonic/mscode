@@ -22,6 +22,11 @@ import { StatusBar } from '@/features/statusbar/StatusBar';
 
 import { tabRegistry } from '@/core/extensionAPI/registry/tabRegistry'; 
 import { customPreviewerRegistry } from '@/core/extensionAPI/registry/previewerRegistry';
+import {
+  getActiveMediaTabId,
+  subscribeMediaRegistry,
+} from '@/ui/previewer/MediaPlayer/core/engine/playerRegistry';
+import { detectMediaMode } from '@/ui/previewer/MediaPlayer/core/mediaKinds';
 
 import './MainLayout.css';
 import { notifyThemeChanged } from '@/core/native/statusBarSync';
@@ -38,7 +43,15 @@ export const MainLayout: React.FC<{ children?: React.ReactNode }> = ({ children 
   const currentTheme = settings['workbench.theme'] || 'dracula';
   const maxCachedTabs = settings['workbench.editor.maxCachedTabs'] ?? 10;
   const clickOutsideAction = settings['workbench.sidebar.clickOutsideAction'] || 'collapse';
+
+  // Pin the tab that owns background media so LRU eviction cannot unmount it
+  const [pinnedMediaTabId, setPinnedMediaTabId] = useState<string | null>(() =>
+    getActiveMediaTabId(),
+  );
+  useEffect(() => subscribeMediaRegistry(() => setPinnedMediaTabId(getActiveMediaTabId())), []);
+
   const mountedTabIds = new Set(recentTabIds.slice(0, maxCachedTabs));
+  if (pinnedMediaTabId) mountedTabIds.add(pinnedMediaTabId);
 
   // Stable editor mount order: only append new tabs / remove closed ones.
   // NEVER reorder this list — moving Monaco DOM nodes disposes InstantiationService
@@ -90,7 +103,18 @@ export const MainLayout: React.FC<{ children?: React.ReactNode }> = ({ children 
         const files = await fs.readDir(searchPath);
         const fileItems = files.filter(f => !f.isDirectory).map(file => ({
           id: file.path, label: file.name, description: file.path, leftIcon: 'files' as const,
-          onSelect: () => addTab({ id: file.path, type: 'code', title: file.name, filePath: file.path })
+          onSelect: () => {
+            const isMedia = detectMediaMode(file.path) !== 'unknown';
+            addTab({
+              id: file.path,
+              type: 'code',
+              title: file.name,
+              filePath: file.path,
+              ...(isMedia
+                ? { showStatusBar: false, showBreadcrumb: false }
+                : {}),
+            });
+          }
         }));
         openQuickPick(`Search files in ${workspacePath ? workspacePath.split('/').pop() : 'Root'}...`, fileItems, (selected: any) => { if (selected.onSelect) selected.onSelect(); });
       }

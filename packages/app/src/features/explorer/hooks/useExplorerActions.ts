@@ -11,6 +11,7 @@ import { contextKeyService } from '@/core/keybindings/contextKeyService';
 import { useNotificationStore } from '@/store/notificationStore';
 import { customPreviewerRegistry } from '@/core/extensionAPI/registry/previewerRegistry';
 import { useFilePickerStore } from '@/store/filePickerStore';
+import { detectMediaMode } from '@/ui/previewer/MediaPlayer/core/mediaKinds';
 
 export function useExplorerActions() {
   const { addTab } = useTabStore();
@@ -29,7 +30,16 @@ export function useExplorerActions() {
 
   const handleFileClick = (file: FileStat) => {
     if (!file.isDirectory) {
-      addTab({ id: file.path, type: 'code', title: file.name, filePath: file.path });
+      const isMedia = detectMediaMode(file.path) !== 'unknown';
+      addTab({
+        id: file.path,
+        type: 'code',
+        title: file.name,
+        filePath: file.path,
+        ...(isMedia
+          ? { showStatusBar: false, showBreadcrumb: false }
+          : {}),
+      });
     }
   };
 
