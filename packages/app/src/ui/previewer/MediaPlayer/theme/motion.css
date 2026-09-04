@@ -9,6 +9,7 @@
     opacity: 0;
     transform: translateY(6px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -41,6 +42,7 @@
     opacity: 0;
     transform: translateY(8px) scale(0.98);
   }
+
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
@@ -63,14 +65,34 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce),
-  .vlc-player[data-reduced-motion='true'] {
+/* OS/browser reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
   .vlc-player .vlc-fade-in,
   .vlc-player .vlc-settings-modal,
   .vlc-player .vlc-playlist-drawer {
     animation: none !important;
   }
+
   .vlc-player .vlc-disc--spinning {
     animation: none !important;
   }
+
+  .vlc-player .vlc-disc {
+    transition: none !important;
+  }
+}
+
+/* App-controlled reduced-motion mode */
+.vlc-player[data-reduced-motion='true'] .vlc-fade-in,
+.vlc-player[data-reduced-motion='true'] .vlc-settings-modal,
+.vlc-player[data-reduced-motion='true'] .vlc-playlist-drawer {
+  animation: none !important;
+}
+
+.vlc-player[data-reduced-motion='true'] .vlc-disc--spinning {
+  animation: none !important;
+}
+
+.vlc-player[data-reduced-motion='true'] .vlc-disc {
+  transition: none !important;
 }
