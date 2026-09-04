@@ -3,7 +3,6 @@ import type { MediaBackend } from './types';
 
 export class Html5Backend implements MediaBackend {
   readonly element: HTMLMediaElement;
-  private sourceEl: HTMLSourceElement | null = null;
 
   constructor(kind: 'audio' | 'video') {
     if (kind === 'video') {
@@ -26,7 +25,6 @@ export class Html5Backend implements MediaBackend {
     // Clear previous sources (src attribute + <source> children)
     el.removeAttribute('src');
     while (el.firstChild) el.removeChild(el.firstChild);
-    this.sourceEl = null;
     // Reset internal error state
     try {
       el.load();
@@ -40,7 +38,6 @@ export class Html5Backend implements MediaBackend {
     source.src = url;
     if (mimeHint) source.type = mimeHint;
     el.appendChild(source);
-    this.sourceEl = source;
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -109,7 +106,6 @@ export class Html5Backend implements MediaBackend {
     el.pause();
     el.removeAttribute('src');
     while (el.firstChild) el.removeChild(el.firstChild);
-    this.sourceEl = null;
     try {
       el.load();
     } catch {

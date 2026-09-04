@@ -1,6 +1,5 @@
 // Facade over Html5Backend + object-URL lifecycle
 import { Capacitor } from '@capacitor/core';
-import { Filesystem } from '@capacitor/filesystem';
 import { fs } from '@/core/fileSystem';
 import { Html5Backend } from './Html5Backend';
 import type { EngineListener, EngineSnapshot, EngineState, MediaBackend } from './types';
@@ -35,27 +34,24 @@ function base64ToBytes(b64: string): Uint8Array {
 /**
  * Prefer a native WebView-playable URL (no full-file base64).
  * Falls back to null so caller can build a Blob URL.
+ * Uses convertFileSrc only — avoids Filesystem.getUri which requires Directory.
  */
-async function tryNativeMediaUrl(filePath: string): Promise<string | null> {
+function tryNativeMediaUrl(filePath: string): string | null {
   if (!Capacitor.isNativePlatform()) return null;
-  // content:// and blob: already usable by the WebView in many cases
   if (filePath.startsWith('blob:') || filePath.startsWith('data:')) return filePath;
   if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath;
-  if (filePath.startsWith('content://')) {
-    try {
-      return Capacitor.convertFileSrc(filePath);
-    } catch {
-      return null;
-    }
-  }
   try {
-    // Absolute device path → file:// → https://localhost/_capacitor_file_/...
-    const { uri } = await Filesystem.getUri({ path: filePath });
-    if (!uri) return null;
-    return Capacitor.convertFileSrc(uri);
+    // content:// or absolute path → Capacitor-served URL the WebView can fetch
+    if (filePath.startsWith('content://') || filePath.startsWith('file://')) {
+      return Capacitor.convertFileSrc(filePath);
+    }
+    if (filePath.startsWith('/')) {
+      return Capacitor.convertFileSrc(`file://${filePath}`);
+    }
   } catch {
     return null;
   }
+  return null;
 }
 
 export class MediaEngine {
@@ -144,7 +140,7 @@ export class MediaEngine {
       let url: string | null = null;
 
       // 1) Native path → convertFileSrc (best for large mp3/mp4 on Android WebView)
-      url = await tryNativeMediaUrl(filePath);
+      url = tryNativeMediaUrl(filePath);
 
       // 2) Fallback: read bytes → Blob object URL
       if (!url) {
@@ -158,8 +154,10 @@ export class MediaEngine {
           if (!bytes.byteLength) {
             throw new Error('Media file is empty or could not be decoded');
           }
-          // Pass Uint8Array directly — more reliable than buffer.slice on some WebViews
-          const blob = new Blob([bytes], { type: mime });
+          // Copy into a plain ArrayBuffer so BlobPart typing is happy (no SharedArrayBuffer)
+          const ab = new ArrayBuffer(bytes.byteLength);
+          new Uint8Array(ab).set(bytes);
+          const blob = new Blob([ab], { type: mime });
           url = URL.createObjectURL(blob);
           this.objectUrl = url;
         } else {
