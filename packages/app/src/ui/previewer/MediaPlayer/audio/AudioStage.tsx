@@ -1,5 +1,6 @@
 import React from 'react';
 import { DiscVisualizer } from './DiscVisualizer';
+import { resolveVisualizer } from '../core/api/visualizerRegistry';
 
 export interface AudioStageProps {
   title: string;
@@ -8,10 +9,14 @@ export interface AudioStageProps {
   artUrl?: string | null;
   artist?: string;
   album?: string;
+  currentTime?: number;
+  duration?: number;
 }
 
 /**
- * Audio-only stage — disc or album art + metadata.
+ * Audio-only stage — disc / custom visualizer or album art + metadata.
+ * Custom visualizers from mscode.mediaPlayer.registerVisualizer take over
+ * the no-art path (and can still receive artUrl for their own rendering).
  */
 export const AudioStage: React.FC<AudioStageProps> = ({
   title,
@@ -20,8 +25,15 @@ export const AudioStage: React.FC<AudioStageProps> = ({
   artUrl,
   artist,
   album,
+  currentTime,
+  duration,
 }) => {
   const sub = [artist, album].filter(Boolean).join(' · ');
+  // Built-in disc (id mscode.disc) keeps the stock art-on-disc path.
+  // Only true extension visualizers take over the stage center.
+  const customViz = resolveVisualizer();
+  const useCustomViz = !!(customViz && customViz.id !== 'mscode.disc');
+  const Viz = useCustomViz ? customViz!.component : null;
 
   return (
     <div
@@ -56,7 +68,17 @@ export const AudioStage: React.FC<AudioStageProps> = ({
       />
 
       <div style={{ position: 'relative', zIndex: 1 }}>
-        {artUrl ? (
+        {Viz ? (
+          <Viz
+            playing={playing}
+            label={title}
+            artUrl={artUrl}
+            onToggle={onToggle}
+            currentTime={currentTime}
+            duration={duration}
+            size={180}
+          />
+        ) : artUrl ? (
           <div style={{ position: 'relative', width: 180, height: 180 }}>
             <img
               src={artUrl}
@@ -85,7 +107,6 @@ export const AudioStage: React.FC<AudioStageProps> = ({
                 cursor: 'pointer',
               }}
             />
-            {/* center spindle */}
             <span
               aria-hidden
               style={{

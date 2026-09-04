@@ -4,6 +4,7 @@ import { fs } from '@/core/fileSystem';
 import { Html5Backend } from './Html5Backend';
 import type { EngineListener, EngineSnapshot, EngineState, MediaBackend } from './types';
 import { detectMediaMode, extensionOf } from '../mediaKinds';
+import { resolveBackendFactory } from '../api/backendRegistry';
 
 const MIME: Record<string, string> = {
   mp3: 'audio/mpeg',
@@ -167,7 +168,11 @@ export class MediaEngine {
         }
       }
 
-      const backend = new Html5Backend(mode === 'video' ? 'video' : 'audio');
+      const kind = mode === 'video' ? 'video' : 'audio';
+      const custom = resolveBackendFactory(filePath, kind);
+      const backend = custom
+        ? custom.create(kind)
+        : new Html5Backend(kind);
       this.backend = backend;
       this.bindElement(backend.element);
 

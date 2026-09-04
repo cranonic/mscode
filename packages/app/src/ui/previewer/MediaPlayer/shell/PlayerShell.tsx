@@ -1,7 +1,7 @@
 // Player chrome — Phase 5 settings + context menu + commands
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ThinTopBar } from './ThinTopBar';
-import { PlayerContextMenu, type CtxItem } from './PlayerContextMenu';
+import { openPlayerContextMenu, type PlayerMenuAction } from './PlayerContextMenu';
 import { detectMediaMode, displayName, type MediaMode } from '../core/mediaKinds';
 import { useMediaEngine } from '../hooks/useMediaEngine';
 import { useMediaMetadata } from '../hooks/useMediaMetadata';
@@ -69,7 +69,6 @@ export const PlayerShell: React.FC<PlayerShellProps> = ({ tabId, filePath }) => 
 
   const [drawerOpen, setDrawerOpen] = useState(prefs.showPlaylistOnOpen);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
   const endedHandled = useRef(false);
 
   // Apply rate when prefs change
@@ -172,7 +171,7 @@ export const PlayerShell: React.FC<PlayerShellProps> = ({ tabId, filePath }) => 
 
   const motionOff = prefs.reducedMotion || prefs.motion === 'off';
 
-  const ctxItems: CtxItem[] = [
+  const ctxItems: PlayerMenuAction[] = [
     {
       id: 'pp',
       label: playing ? 'Pause' : 'Play',
@@ -228,10 +227,23 @@ export const PlayerShell: React.FC<PlayerShellProps> = ({ tabId, filePath }) => 
     },
   ];
 
-  const onContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setCtx({ x: e.clientX, y: e.clientY });
-  }, []);
+  const onContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openPlayerContextMenu(e.clientX, e.clientY, ctxItems);
+    },
+    // ctxItems rebuilt each render — intentional for live play/pause label
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      snap.currentTime,
+      snap.duration,
+      playing,
+      playlist.loop,
+      playlist.shuffle,
+      activePath,
+    ],
+  );
 
   const loopLabel =
     playlist.loop === 'one' ? '🔁1' : playlist.loop === 'all' ? '🔁' : '➡️';
@@ -277,14 +289,6 @@ export const PlayerShell: React.FC<PlayerShellProps> = ({ tabId, filePath }) => 
         }}
       />
 
-      {ctx && (
-        <PlayerContextMenu
-          x={ctx.x}
-          y={ctx.y}
-          items={ctxItems}
-          onClose={() => setCtx(null)}
-        />
-      )}
 
       <div
         className="vlc-stage"

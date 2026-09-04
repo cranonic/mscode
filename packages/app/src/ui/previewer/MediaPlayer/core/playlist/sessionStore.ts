@@ -25,7 +25,7 @@ const defaultPrefs: PlayerPrefs = {
   volume: 0.85,
   autoplay: true,
   restorePosition: true,
-  followIdeTheme: false,
+  followIdeTheme: true,
   reducedMotion: false,
   motion: 'full',
   defaultRate: 1,

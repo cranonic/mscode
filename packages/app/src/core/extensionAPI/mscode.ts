@@ -16,6 +16,7 @@ import { createExtensionsModule }     from './modules/extensionsModule';
 import { createGitModule } from './modules/gitModule';
 import { createFilesystemModule } from './modules/filesystemModule';
 import { createAppModule } from './modules/appModule';
+import { createMediaPlayerModule } from './modules/mediaPlayerModule';
 
 
 export interface Disposable {
@@ -126,6 +127,12 @@ export const createMSCodeAPI = (extId: string) => ({
    * const refs = await mscode.search.search({ query: 'myFunction', useRegex: false });
    */
   search: createSearchModule(extId),
+
+  /**
+   * Built-in VLC-style media player.
+   * Open files, register custom backends / visualizers.
+   */
+  mediaPlayer: createMediaPlayerModule(extId),
   
   /**
    * Native UI Toolkit

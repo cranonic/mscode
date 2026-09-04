@@ -4,9 +4,20 @@ import { ImagePreviewer } from '@/ui/previewer/ImagePreviewer/ImagePreviewer';
 import { MediaPreviewer } from '@/ui/previewer/MediaPlayer/MediaPreviewer';
 import { MEDIA_PREVIEW_EXTENSIONS } from '@/ui/previewer/MediaPlayer/core/mediaKinds';
 import { registerMediaPlayerCommands } from '@/ui/previewer/MediaPlayer/commands/registerMediaPlayerCommands';
+import { registerVisualizer } from '@/ui/previewer/MediaPlayer/core/api/visualizerRegistry';
+import { DiscVisualizer } from '@/ui/previewer/MediaPlayer/audio/DiscVisualizer';
 
 export const registerPreviewer = (): void => {
   registerMediaPlayerCommands();
+
+  // Built-in disc visualizer (priority 0 — extensions override with higher priority)
+  registerVisualizer({
+    id: 'mscode.disc',
+    name: 'VLC Disc',
+    priority: 0,
+    component: DiscVisualizer,
+  });
+
   // Built-in image preview (priority 10 — media player can sit above for shared types if needed)
   customPreviewerRegistry.registerPreviewer({
     id: 'mscode.builtin.imagePreview',
@@ -16,7 +27,7 @@ export const registerPreviewer = (): void => {
     priority: 10,
   });
 
-  // VLC Mode media player — Phase 0 shell; engine in Phase 1
+  // VLC Mode media player
   customPreviewerRegistry.registerPreviewer({
     id: 'mscode.mediaPlayer.vlc',
     name: 'VLC Player',
