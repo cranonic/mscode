@@ -135,8 +135,12 @@ export const PlayerShell: React.FC<PlayerShellProps> = ({ filePath }) => {
     onToggle,
     onSeek: (delta) => {
       const s = snap;
-      const nextT = Math.max(0, Math.min(s.duration || s.currentTime + delta, s.currentTime + delta));
-      seek(Math.max(0, s.currentTime + delta));
+      const target = s.currentTime + delta;
+      if (s.duration > 0) {
+        seek(Math.max(0, Math.min(s.duration, target)));
+      } else {
+        seek(Math.max(0, target));
+      }
     },
     onMute: () => setMuted(!snap.muted),
     onNext: next,

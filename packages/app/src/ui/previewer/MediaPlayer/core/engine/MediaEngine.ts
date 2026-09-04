@@ -119,7 +119,7 @@ export class MediaEngine {
         url = raw;
       } else if (typeof raw === 'string') {
         const bytes = base64ToBytes(raw);
-        const blob = new Blob([bytes], { type: mime });
+        const blob = new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], { type: mime });
         url = URL.createObjectURL(blob);
         this.objectUrl = url;
       } else {

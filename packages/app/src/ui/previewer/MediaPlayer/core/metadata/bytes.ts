@@ -25,7 +25,10 @@ export function base64ToBytes(b64: string): Uint8Array {
 }
 
 export function bytesToObjectUrl(bytes: Uint8Array, mime: string): string {
-  const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  const copy = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
   const blob = new Blob([copy], { type: mime });
   return URL.createObjectURL(blob);
 }

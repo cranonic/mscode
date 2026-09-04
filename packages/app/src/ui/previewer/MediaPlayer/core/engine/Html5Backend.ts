@@ -5,13 +5,17 @@ export class Html5Backend implements MediaBackend {
   readonly element: HTMLMediaElement;
 
   constructor(kind: 'audio' | 'video') {
-    this.element =
-      kind === 'video'
-        ? document.createElement('video')
-        : document.createElement('audio');
-    this.element.preload = 'metadata';
-    this.element.playsInline = true;
-    (this.element as HTMLVideoElement).controls = false;
+    if (kind === 'video') {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.playsInline = true;
+      video.controls = false;
+      this.element = video;
+    } else {
+      const audio = document.createElement('audio');
+      audio.preload = 'metadata';
+      this.element = audio;
+    }
   }
 
   async load(url: string, _mimeHint?: string): Promise<void> {
