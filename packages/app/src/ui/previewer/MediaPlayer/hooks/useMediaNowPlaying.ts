@@ -1,5 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { useNotificationStore } from '@/store/notificationStore';
+import {
+  useNotificationStore,
+  type NotificationAction,
+} from '@/store/notificationStore';
 import type { EngineSnapshot } from '../core/engine/types';
 import type { MediaMetadata as TagMeta } from '../core/metadata/types';
 import {
@@ -170,25 +173,25 @@ function pushNowPlaying(args: {
   const message = [meta.artist, meta.album].filter(Boolean).join(' · ') ||
     (playing ? 'Playing' : 'Paused');
 
-  const actions = [
+  const actions: NotificationAction[] = [
     {
       label: playing ? 'Pause' : 'Play',
       onClick: () => (playing ? onPause() : onPlay()),
-      variant: 'type1' as const,
+      variant: 'type1',
     },
   ];
   if (onPrev) {
     actions.push({
       label: 'Prev',
       onClick: () => onPrev(),
-      variant: 'type2' as const,
+      variant: 'type2',
     });
   }
   if (onNext) {
     actions.push({
       label: 'Next',
       onClick: () => onNext(),
-      variant: 'type2' as const,
+      variant: 'type2',
     });
   }
 
