@@ -1,24 +1,13 @@
 // src/core/bootstrap/previewerRegistration
+//
+// Core only keeps lightweight built-ins here.
+// Heavy viewers (VLC media player, PDF, zip, SQL…) must register via
+// window.registerPreviewer from an extension so the IDE binary stays small.
 import { customPreviewerRegistry } from '@/core/extensionAPI/registry/previewerRegistry';
 import { ImagePreviewer } from '@/ui/previewer/ImagePreviewer/ImagePreviewer';
-import { MediaPreviewer } from '@/ui/previewer/MediaPlayer/MediaPreviewer';
-import { MEDIA_PREVIEW_EXTENSIONS } from '@/ui/previewer/MediaPlayer/core/mediaKinds';
-import { registerMediaPlayerCommands } from '@/ui/previewer/MediaPlayer/commands/registerMediaPlayerCommands';
-import { registerVisualizer } from '@/ui/previewer/MediaPlayer/core/api/visualizerRegistry';
-import { DiscVisualizer } from '@/ui/previewer/MediaPlayer/audio/DiscVisualizer';
 
 export const registerPreviewer = (): void => {
-  registerMediaPlayerCommands();
-
-  // Built-in disc visualizer (priority 0 — extensions override with higher priority)
-  registerVisualizer({
-    id: 'mscode.disc',
-    name: 'VLC Disc',
-    priority: 0,
-    component: DiscVisualizer,
-  });
-
-  // Built-in image preview (priority 10 — media player can sit above for shared types if needed)
+  // Built-in image preview only — small, always needed for screenshots / assets
   customPreviewerRegistry.registerPreviewer({
     id: 'mscode.builtin.imagePreview',
     name: 'Mono Image Preview',
@@ -27,12 +16,6 @@ export const registerPreviewer = (): void => {
     priority: 10,
   });
 
-  // VLC Mode media player
-  customPreviewerRegistry.registerPreviewer({
-    id: 'mscode.mediaPlayer.vlc',
-    name: 'VLC Player',
-    extensions: [...MEDIA_PREVIEW_EXTENSIONS],
-    component: MediaPreviewer,
-    priority: 50,
-  });
+  // Media player is NOT registered here anymore.
+  // Install / enable the "VLC Player" extension (mscode.vlc-player).
 };
