@@ -3,42 +3,79 @@ import type { MediaBackend } from './types';
 
 export class Html5Backend implements MediaBackend {
   readonly element: HTMLMediaElement;
+  private sourceEl: HTMLSourceElement | null = null;
 
   constructor(kind: 'audio' | 'video') {
     if (kind === 'video') {
       const video = document.createElement('video');
-      video.preload = 'metadata';
+      video.preload = 'auto';
       video.playsInline = true;
       video.controls = false;
       this.element = video;
     } else {
       const audio = document.createElement('audio');
-      audio.preload = 'metadata';
+      audio.preload = 'auto';
       this.element = audio;
     }
   }
 
-  async load(url: string, _mimeHint?: string): Promise<void> {
+  async load(url: string, mimeHint?: string): Promise<void> {
     const el = this.element;
     el.pause();
+
+    // Clear previous sources (src attribute + <source> children)
     el.removeAttribute('src');
-    el.load();
-    el.src = url;
+    while (el.firstChild) el.removeChild(el.firstChild);
+    this.sourceEl = null;
+    // Reset internal error state
+    try {
+      el.load();
+    } catch {
+      /* ignore */
+    }
+
+    // Prefer <source type="..."> so Android WebView can pick a decoder.
+    // Blob/object URLs often fail "no supported sources" without an explicit type.
+    const source = document.createElement('source');
+    source.src = url;
+    if (mimeHint) source.type = mimeHint;
+    el.appendChild(source);
+    this.sourceEl = source;
+
     await new Promise<void>((resolve, reject) => {
+      let settled = false;
       const onReady = () => {
+        if (settled) return;
+        settled = true;
         cleanup();
         resolve();
       };
       const onErr = () => {
+        if (settled) return;
+        settled = true;
         cleanup();
-        reject(new Error(el.error?.message || 'Failed to load media'));
+        const code = el.error?.code;
+        const msg =
+          el.error?.message ||
+          (code === 4
+            ? 'The element has no supported sources.'
+            : code === 2
+              ? 'Network error while loading media'
+              : code === 3
+                ? 'Media decode error'
+                : 'Failed to load media');
+        reject(new Error(msg));
       };
       const cleanup = () => {
         el.removeEventListener('loadedmetadata', onReady);
+        el.removeEventListener('canplay', onReady);
         el.removeEventListener('error', onErr);
+        source.removeEventListener('error', onErr);
       };
       el.addEventListener('loadedmetadata', onReady);
+      el.addEventListener('canplay', onReady);
       el.addEventListener('error', onErr);
+      source.addEventListener('error', onErr);
       el.load();
     });
   }
@@ -71,7 +108,13 @@ export class Html5Backend implements MediaBackend {
     const el = this.element;
     el.pause();
     el.removeAttribute('src');
-    el.load();
+    while (el.firstChild) el.removeChild(el.firstChild);
+    this.sourceEl = null;
+    try {
+      el.load();
+    } catch {
+      /* ignore */
+    }
     el.remove();
   }
 }

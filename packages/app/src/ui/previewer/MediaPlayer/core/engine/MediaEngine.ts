@@ -1,4 +1,6 @@
 // Facade over Html5Backend + object-URL lifecycle
+import { Capacitor } from '@capacitor/core';
+import { Filesystem } from '@capacitor/filesystem';
 import { fs } from '@/core/fileSystem';
 import { Html5Backend } from './Html5Backend';
 import type { EngineListener, EngineSnapshot, EngineState, MediaBackend } from './types';
@@ -24,11 +26,36 @@ function base64ToBytes(b64: string): Uint8Array {
   // Strip data-URL prefix and all whitespace (Capacitor sometimes inserts newlines)
   let pure = b64.includes(',') ? b64.split(',')[1] : b64;
   pure = pure.replace(/\s/g, '');
-  // atob only accepts Latin1; invalid input throws the exact error users see
   const bin = atob(pure);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+/**
+ * Prefer a native WebView-playable URL (no full-file base64).
+ * Falls back to null so caller can build a Blob URL.
+ */
+async function tryNativeMediaUrl(filePath: string): Promise<string | null> {
+  if (!Capacitor.isNativePlatform()) return null;
+  // content:// and blob: already usable by the WebView in many cases
+  if (filePath.startsWith('blob:') || filePath.startsWith('data:')) return filePath;
+  if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath;
+  if (filePath.startsWith('content://')) {
+    try {
+      return Capacitor.convertFileSrc(filePath);
+    } catch {
+      return null;
+    }
+  }
+  try {
+    // Absolute device path → file:// → https://localhost/_capacitor_file_/...
+    const { uri } = await Filesystem.getUri({ path: filePath });
+    if (!uri) return null;
+    return Capacitor.convertFileSrc(uri);
+  } catch {
+    return null;
+  }
 }
 
 export class MediaEngine {
@@ -111,24 +138,35 @@ export class MediaEngine {
     this.emit({ state: 'loading', error: null, currentTime: 0, duration: 0 });
 
     try {
-      const raw = await fs.readFile(filePath);
       const ext = extensionOf(filePath);
       const mime = MIME[ext] || (mode === 'video' ? 'video/mp4' : 'audio/mpeg');
 
-      let url: string;
-      if (typeof raw === 'string' && raw.startsWith('blob:')) {
-        url = raw;
-      } else if (typeof raw === 'string' && raw.startsWith('data:')) {
-        url = raw;
-      } else if (typeof raw === 'string') {
-        const bytes = base64ToBytes(raw);
-        const blob = new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], { type: mime });
-        url = URL.createObjectURL(blob);
-        this.objectUrl = url;
-      } else {
-        const blob = new Blob([raw as BlobPart], { type: mime });
-        url = URL.createObjectURL(blob);
-        this.objectUrl = url;
+      let url: string | null = null;
+
+      // 1) Native path → convertFileSrc (best for large mp3/mp4 on Android WebView)
+      url = await tryNativeMediaUrl(filePath);
+
+      // 2) Fallback: read bytes → Blob object URL
+      if (!url) {
+        const raw = await fs.readFile(filePath);
+        if (typeof raw === 'string' && raw.startsWith('blob:')) {
+          url = raw;
+        } else if (typeof raw === 'string' && raw.startsWith('data:')) {
+          url = raw;
+        } else if (typeof raw === 'string') {
+          const bytes = base64ToBytes(raw);
+          if (!bytes.byteLength) {
+            throw new Error('Media file is empty or could not be decoded');
+          }
+          // Pass Uint8Array directly — more reliable than buffer.slice on some WebViews
+          const blob = new Blob([bytes], { type: mime });
+          url = URL.createObjectURL(blob);
+          this.objectUrl = url;
+        } else {
+          const blob = new Blob([raw as BlobPart], { type: mime });
+          url = URL.createObjectURL(blob);
+          this.objectUrl = url;
+        }
       }
 
       const backend = new Html5Backend(mode === 'video' ? 'video' : 'audio');
@@ -139,6 +177,7 @@ export class MediaEngine {
       backend.setVolume(vol);
       this.emit({ volume: vol });
 
+      // Pass mime so <source type="audio/mpeg"> is set — fixes "no supported sources"
       await backend.load(url, mime);
       const duration = Number.isFinite(backend.element.duration)
         ? backend.element.duration
