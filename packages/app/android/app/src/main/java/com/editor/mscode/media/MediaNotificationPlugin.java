@@ -40,7 +40,11 @@ public class MediaNotificationPlugin extends Plugin {
         }
         JSObject data = new JSObject();
         data.put("action", shortName);
-        instance.notifyListeners("mediaAction", data);
+        try {
+            instance.notifyListeners("mediaAction", data);
+        } catch (Throwable t) {
+            Log.w(TAG, "notifyListeners failed", t);
+        }
     }
 
     @PluginMethod
@@ -49,15 +53,14 @@ public class MediaNotificationPlugin extends Plugin {
             Intent i = new Intent(getContext(), MediaPlaybackService.class);
             i.setAction(MediaPlaybackService.ACTION_START);
             fillExtras(i, call);
-            if (android.os.Build.VERSION.SDK_INT >= 26) {
-                getContext().startForegroundService(i);
-            } else {
-                getContext().startService(i);
-            }
+            startServiceSafely(i);
             call.resolve();
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            // Includes ForegroundServiceStartNotAllowedException (Android 12+)
+            // and any other platform-level failure — must never crash the app,
+            // just fail this one JS call.
             Log.e(TAG, "show failed", e);
-            call.reject("Failed to show media notification: " + e.getMessage(), e);
+            call.reject("Failed to show media notification: " + e.getMessage());
         }
     }
 
@@ -67,14 +70,11 @@ public class MediaNotificationPlugin extends Plugin {
             Intent i = new Intent(getContext(), MediaPlaybackService.class);
             i.setAction(MediaPlaybackService.ACTION_UPDATE);
             fillExtras(i, call);
-            if (android.os.Build.VERSION.SDK_INT >= 26) {
-                getContext().startForegroundService(i);
-            } else {
-                getContext().startService(i);
-            }
+            startServiceSafely(i);
             call.resolve();
-        } catch (Exception e) {
-            call.reject("Failed to update media notification: " + e.getMessage(), e);
+        } catch (Throwable e) {
+            Log.e(TAG, "update failed", e);
+            call.reject("Failed to update media notification: " + e.getMessage());
         }
     }
 
@@ -85,8 +85,17 @@ public class MediaNotificationPlugin extends Plugin {
             i.setAction(MediaPlaybackService.ACTION_STOP);
             getContext().startService(i);
             call.resolve();
-        } catch (Exception e) {
-            call.reject("Failed to hide media notification: " + e.getMessage(), e);
+        } catch (Throwable e) {
+            Log.e(TAG, "hide failed", e);
+            call.reject("Failed to hide media notification: " + e.getMessage());
+        }
+    }
+
+    private void startServiceSafely(Intent i) {
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            getContext().startForegroundService(i);
+        } else {
+            getContext().startService(i);
         }
     }
 

@@ -27,12 +27,6 @@ import androidx.media.app.NotificationCompat.MediaStyle;
  *
  * Actions: PLAY, PAUSE, NEXT, PREV, STOP — delivered as broadcasts that the
  * Capacitor plugin relays into JS.
- *
- * IMPORTANT: nothing in here is allowed to throw past onStartCommand — this
- * service runs in the app's main process, so an uncaught exception here
- * kills the whole app, not just the notification. Every risky step
- * (bitmap decode, notification build, startForeground) is defensively
- * wrapped.
  */
 public class MediaPlaybackService extends Service {
 
@@ -54,9 +48,6 @@ public class MediaPlaybackService extends Service {
     public static final String EXTRA_PLAYING = "playing";
     public static final String EXTRA_ART_B64 = "artB64";
 
-    // Cap decoded art at this size — avoids OOM on large embedded cover art.
-    private static final int MAX_ART_DIMENSION_PX = 512;
-
     private String title = "MSCode Media";
     private String artist = "";
     private boolean playing = false;
@@ -75,23 +66,6 @@ public class MediaPlaybackService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        try {
-            return handleStartCommand(intent);
-        } catch (Throwable t) {
-            // Absolute last resort: never let this escape and take the app
-            // process down. Log it, stop the service cleanly instead.
-            Log.e(TAG, "onStartCommand failed, stopping service safely", t);
-            try {
-                stopForeground(true);
-            } catch (Throwable ignored) {
-                /* ignore */
-            }
-            stopSelf();
-            return START_NOT_STICKY;
-        }
-    }
-
-    private int handleStartCommand(Intent intent) {
         if (intent == null) {
             return START_STICKY;
         }
@@ -100,50 +74,28 @@ public class MediaPlaybackService extends Service {
 
         switch (action) {
             case ACTION_START:
-            case ACTION_UPDATE: {
+            case ACTION_UPDATE:
                 title = intent.getStringExtra(EXTRA_TITLE);
                 if (title == null || title.isEmpty()) title = "MSCode Media";
                 artist = intent.getStringExtra(EXTRA_ARTIST);
                 if (artist == null) artist = "";
                 playing = intent.getBooleanExtra(EXTRA_PLAYING, true);
-
-                // Post the notification FIRST with whatever art we already
-                // have (or none). This must happen within a few seconds of
-                // startForegroundService() on Android 12+/15 or the system
-                // kills the app with ForegroundServiceDidNotStartInTimeException
-                // — decoding a big embedded cover image before this call is
-                // exactly the kind of delay that can trigger that.
-                startAsForeground();
-
-                // Now decode/refresh art (if any) and update the notification
-                // again. Any failure here (including OutOfMemoryError) is
-                // caught and simply skipped — it must never crash playback.
                 String b64 = intent.getStringExtra(EXTRA_ART_B64);
                 if (b64 != null && !b64.isEmpty()) {
-                    Bitmap decoded = safeDecodeArt(b64);
-                    if (decoded != null) {
-                        Bitmap old = artBitmap;
-                        artBitmap = decoded;
-                        if (old != null && old != decoded) {
-                            try {
-                                old.recycle();
-                            } catch (Throwable ignored) {
-                                /* ignore */
-                            }
-                        }
-                        startAsForeground();
+                    try {
+                        byte[] raw = Base64.decode(b64, Base64.DEFAULT);
+                        if (artBitmap != null) artBitmap.recycle();
+                        artBitmap = BitmapFactory.decodeByteArray(raw, 0, raw.length);
+                    } catch (Exception e) {
+                        Log.w(TAG, "art decode failed", e);
                     }
                 }
+                startAsForeground();
                 break;
-            }
 
             case ACTION_STOP:
             case ACTION_DISMISS:
-                try {
-                    stopForeground(true);
-                } catch (Throwable ignored) {
-                    /* ignore */
-                }
+                stopForeground(true);
                 stopSelf();
                 break;
 
@@ -168,64 +120,19 @@ public class MediaPlaybackService extends Service {
         return START_STICKY;
     }
 
-    /** Decode base64 art safely: downsampled, and never throws (incl. OOM). */
-    private Bitmap safeDecodeArt(String b64) {
-        try {
-            byte[] raw = Base64.decode(b64, Base64.DEFAULT);
-            if (raw.length == 0) return null;
-
-            // First pass: read bounds only, no memory allocated for pixels.
-            BitmapFactory.Options bounds = new BitmapFactory.Options();
-            bounds.inJustDecodeBounds = true;
-            BitmapFactory.decodeByteArray(raw, 0, raw.length, bounds);
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
-
-            int sample = 1;
-            int longest = Math.max(bounds.outWidth, bounds.outHeight);
-            while (longest / sample > MAX_ART_DIMENSION_PX) {
-                sample *= 2;
-            }
-
-            BitmapFactory.Options opts = new BitmapFactory.Options();
-            opts.inSampleSize = sample;
-            opts.inPreferredConfig = Bitmap.Config.RGB_565; // half the memory of ARGB_8888
-            return BitmapFactory.decodeByteArray(raw, 0, raw.length, opts);
-        } catch (Throwable t) {
-            // Includes OutOfMemoryError — must not propagate.
-            Log.w(TAG, "art decode failed, continuing without art", t);
-            return null;
-        }
-    }
-
     private void startAsForeground() {
+        Notification n = buildNotification();
         try {
-            Notification n = buildNotification();
             if (Build.VERSION.SDK_INT >= 29) {
                 startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
             } else {
                 startForeground(NOTIF_ID, n);
             }
-        } catch (Throwable e) {
+        } catch (Exception e) {
             Log.e(TAG, "startForeground failed", e);
-            // Best-effort fallback with a minimal, guaranteed-safe notification.
             try {
-                Notification minimal = new NotificationCompat.Builder(this, CHANNEL_ID)
-                    .setSmallIcon(android.R.drawable.ic_media_play)
-                    .setContentTitle(title)
-                    .setOngoing(playing)
-                    .build();
-                if (Build.VERSION.SDK_INT >= 29) {
-                    startForeground(NOTIF_ID, minimal, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
-                } else {
-                    startForeground(NOTIF_ID, minimal);
-                }
-            } catch (Throwable e2) {
-                Log.e(TAG, "minimal startForeground also failed, stopping service", e2);
-                try {
-                    stopSelf();
-                } catch (Throwable ignored) {
-                    /* ignore */
-                }
+                startForeground(NOTIF_ID, n);
+            } catch (Exception ignored) {
             }
         }
     }
@@ -233,7 +140,7 @@ public class MediaPlaybackService extends Service {
     private Notification buildNotification() {
         Intent openApp = getPackageManager().getLaunchIntentForPackage(getPackageName());
         PendingIntent contentPi = PendingIntent.getActivity(
-            this, 0, openApp != null ? openApp : new Intent(Intent.ACTION_MAIN),
+            this, 0, openApp != null ? openApp : new Intent(),
             PendingIntent.FLAG_UPDATE_CURRENT | pendingImmutable()
         );
 
@@ -248,7 +155,7 @@ public class MediaPlaybackService extends Service {
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setPriority(NotificationCompat.PRIORITY_LOW);
 
-        if (artBitmap != null && !artBitmap.isRecycled()) {
+        if (artBitmap != null) {
             b.setLargeIcon(artBitmap);
         }
 
@@ -287,27 +194,19 @@ public class MediaPlaybackService extends Service {
 
     private void ensureChannel() {
         if (Build.VERSION.SDK_INT < 26) return;
-        try {
-            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-            if (nm == null) return;
-            NotificationChannel ch = new NotificationChannel(
-                CHANNEL_ID, "Media playback", NotificationManager.IMPORTANCE_LOW);
-            ch.setDescription("Now playing controls");
-            ch.setShowBadge(false);
-            nm.createNotificationChannel(ch);
-        } catch (Throwable t) {
-            Log.e(TAG, "ensureChannel failed", t);
-        }
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        NotificationChannel ch = new NotificationChannel(
+            CHANNEL_ID, "Media playback", NotificationManager.IMPORTANCE_LOW);
+        ch.setDescription("Now playing controls");
+        ch.setShowBadge(false);
+        nm.createNotificationChannel(ch);
     }
 
     @Override
     public void onDestroy() {
         if (artBitmap != null) {
-            try {
-                artBitmap.recycle();
-            } catch (Throwable ignored) {
-                /* ignore */
-            }
+            artBitmap.recycle();
             artBitmap = null;
         }
         super.onDestroy();

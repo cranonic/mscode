@@ -1,9 +1,7 @@
 package com.editor.mscode;
 
-import android.Manifest;
 import android.app.Dialog;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -22,8 +20,6 @@ import android.webkit.WebViewClient;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
@@ -36,7 +32,6 @@ import java.io.File;
 public class MainActivity extends BridgeActivity {
 
     private static final int IDE_BG = Color.parseColor("#1E1E1E");
-    private static final int REQ_POST_NOTIFICATIONS = 4201;
     private int lastStatusBarColor = IDE_BG;
     private boolean lastLightIcons = false;
     private Dialog splashDialog;
@@ -61,12 +56,6 @@ public class MainActivity extends BridgeActivity {
 
         // Status bar ↔ IDE dark theme (white icons on #1E1E1E)
         applyStatusBarColor(IDE_BG, /* lightIcons */ false);
-
-        // Android 13+ requires runtime permission to actually show
-        // notifications (incl. the media "Now Playing" one). Without this
-        // the foreground service can still run, but no visible notification
-        // will appear — request it up front so playback UX works fully.
-        requestNotificationPermissionIfNeeded();
 
         // ─── EMERGENCY RESET LOGIC ───
         Intent intent = getIntent();
@@ -102,24 +91,6 @@ public class MainActivity extends BridgeActivity {
                     startActivity(fallbackIntent);
                 }
             }
-        }
-    }
-
-    // ─── Notifications ───────────────────────────────────────────────────────
-
-    private void requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT < 33) return; // not needed pre-Android 13
-        try {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(
-                    this,
-                    new String[]{Manifest.permission.POST_NOTIFICATIONS},
-                    REQ_POST_NOTIFICATIONS
-                );
-            }
-        } catch (Exception e) {
-            android.util.Log.w("MainActivity", "notification permission request failed", e);
         }
     }
 
