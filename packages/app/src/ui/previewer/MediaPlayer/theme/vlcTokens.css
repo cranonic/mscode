@@ -1,0 +1,43 @@
+/* VLC-inspired skin tokens — scoped under .vlc-player */
+.vlc-player {
+  --vlc-bg: #1a1a1a;
+  --vlc-bg-elevated: #242424;
+  --vlc-bg-stage: #121212;
+  --vlc-border: #3c3c3c;
+  --vlc-accent: #ff8800;
+  --vlc-accent-dim: #cc6c00;
+  --vlc-accent-soft: rgba(255, 136, 0, 0.15);
+  --vlc-text: #e0e0e0;
+  --vlc-text-faded: #9a9a9a;
+  --vlc-danger: #e74c3c;
+  --vlc-topbar-h: 38px;
+  --vlc-radius: 6px;
+  --vlc-font: system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: var(--vlc-bg);
+  color: var(--vlc-text);
+  font-family: var(--vlc-font);
+  overflow: hidden;
+  user-select: none;
+}
+
+.vlc-player *,
+.vlc-player *::before,
+.vlc-player *::after {
+  box-sizing: border-box;
+}
+
+/* Optional: follow IDE chrome when host sets data-vlc-follow-ide */
+.vlc-player[data-vlc-follow-ide='true'] {
+  --vlc-bg: var(--ms-bg-main, #1a1a1a);
+  --vlc-bg-elevated: var(--ms-bg-side, #242424);
+  --vlc-border: var(--ms-border-light, #3c3c3c);
+  --vlc-text: var(--ms-text-main, #e0e0e0);
+  --vlc-text-faded: var(--ms-text-faded, #9a9a9a);
+}
