@@ -12,6 +12,7 @@ import { createActivityBarAPI } from './window/activityBarAPI';
 import { createTabAPI }          from './window/tabAPI';
 import { fileDecorationsAPI }  from './window/fileDecorationsAPI';
 import { createSidebarAPI }      from './window/sidebarAPI';
+import { createPreviewerAPI }    from './window/previewerAPI';
 
 import { useTreeViewRegistry } from '../registry/treeViewRegistry';
 import type { TreeDataProvider } from '../registry/treeViewRegistry';
@@ -30,6 +31,7 @@ export const createWindowModule = (extId: string) => {
     createActivityBarAPI(extId),
     createTabAPI(extId),
     createSidebarAPI(extId),
+    createPreviewerAPI(extId),
   
     {
       fileDecorations: fileDecorationsAPI,
