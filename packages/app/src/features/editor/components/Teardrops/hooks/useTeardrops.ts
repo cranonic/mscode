@@ -58,7 +58,8 @@ export function useTeardrops({
       !editor ||
       isDraggingRef.current ||
       isScrollingRef.current ||
-      userScrollingRef.current
+      userScrollingRef.current ||
+      !!(window as any).__monacoTouchScrolling
     ) return;
 
     const sel = editor.getSelection();

@@ -20,6 +20,17 @@ import { bootstrapSymbolProviders } from '@/core/symbols';
 
 loader.config({ monaco });
 
+// Mono Studio core flags (touch + mobile view)
+// useInternalTouchScroll: Phase-1/2 internal Gesture scroll (set false to use legacy useTouchScroll)
+// enableMinimap / enableOverviewRuler: opt-in (default off for phone perf)
+;(window as any).MS_CODE_CORE_CONFIG = {
+  ...(window as any).MS_CODE_CORE_CONFIG,
+  useInternalTouchScroll: (window as any).MS_CODE_CORE_CONFIG?.useInternalTouchScroll ?? true,
+  enableMinimap: (window as any).MS_CODE_CORE_CONFIG?.enableMinimap ?? false,
+  enableOverviewRuler: (window as any).MS_CODE_CORE_CONFIG?.enableOverviewRuler ?? false,
+};
+
+
 (window as any).MonacoEnvironment = {
   getWorker: function (_moduleId: string, label: string) {
     if (label === 'json') return new jsonWorker();

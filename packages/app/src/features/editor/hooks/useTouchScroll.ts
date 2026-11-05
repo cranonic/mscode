@@ -83,6 +83,14 @@ export function useTouchScroll({
     const editor = editorRef.current;
     if (!editor || !domNode) return;
 
+    // Mono Studio Phase-1: when internal Monaco touch scroll is active, skip external layer
+    // Set window.MS_CODE_CORE_CONFIG.useInternalTouchScroll = false to force old external scroll
+    const useInternal = (window as any).MS_CODE_CORE_CONFIG?.useInternalTouchScroll !== false;
+    if (useInternal) {
+      // Match UseMonacoSetupOptions: must return { dispose() } not a bare function
+      return { dispose: () => { /* no-op — internal Gesture handles scroll */ } };
+    }
+
     type ActiveTarget = 'editor' | HTMLElement;
     let activeTarget: ActiveTarget = 'editor';
     let touchStartY  = 0, touchStartX  = 0;
