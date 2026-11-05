@@ -1,5 +1,5 @@
 diff --git a/node_modules/monaco-editor/esm/vs/base/browser/touch.js b/node_modules/monaco-editor/esm/vs/base/browser/touch.js
-index ca78b0b..f46d1b4 100644
+index ca78b0b..4b84f48 100644
 --- a/node_modules/monaco-editor/esm/vs/base/browser/touch.js
 +++ b/node_modules/monaco-editor/esm/vs/base/browser/touch.js
 @@ -24,9 +24,15 @@ var EventType;
@@ -143,7 +143,7 @@ index ca78b0b..f46d1b4 100644
          if (event.initialTarget instanceof Node) {
              for (const ignoreTarget of this.ignoreTargets) {
                  if (ignoreTarget.contains(event.initialTarget)) {
-@@ -228,6 +272,9 @@ class Gesture extends Disposable {
+@@ -228,11 +272,22 @@ class Gesture extends Disposable {
              dispatchTo.forEach(d => d.dispatchEvent(evt));
              if (!stopped) {
                  this.inertia(targetWindow, dispatchTo, now, vX, dirX, x + delta_pos_x, vY, dirY, y + delta_pos_y);
@@ -153,7 +153,20 @@ index ca78b0b..f46d1b4 100644
              }
          });
      }
-@@ -240,14 +287,39 @@ class Gesture extends Disposable {
+     onTouchMove(e) {
+         const timestamp = Date.now(); // use Date.now() because on FF e.timeStamp is not epoch based.
++        // Mono Studio: mark scrolling as early as possible so reveal cannot win the same frame
++        try {
++            mainWindow.__monacoTouchScrolling = true;
++            if (this._scrollFlagTimer) {
++                mainWindow.clearTimeout(this._scrollFlagTimer);
++                this._scrollFlagTimer = null;
++            }
++        } catch (_) { /* ignore */ }
+         for (let i = 0, len = e.changedTouches.length; i < len; i++) {
+             const touch = e.changedTouches.item(i);
+             if (!this.activeTouches.hasOwnProperty(String(touch.identifier))) {
+@@ -240,14 +295,39 @@ class Gesture extends Disposable {
                  continue;
              }
              const data = this.activeTouches[touch.identifier];
@@ -298,6 +311,23 @@ index ba6cdc0..27b72c0 100644
          this._overflowGuardContainer.appendChild(blockOutline.domNode);
          this.domNode.appendChild(this._overflowGuardContainer);
          if (overflowWidgetsDomNode) {
+diff --git a/node_modules/monaco-editor/esm/vs/editor/browser/viewParts/viewLines/viewLines.js b/node_modules/monaco-editor/esm/vs/editor/browser/viewParts/viewLines/viewLines.js
+index d9629bb..09c5ec6 100644
+--- a/node_modules/monaco-editor/esm/vs/editor/browser/viewParts/viewLines/viewLines.js
++++ b/node_modules/monaco-editor/esm/vs/editor/browser/viewParts/viewLines/viewLines.js
+@@ -190,6 +190,12 @@ class ViewLines extends ViewPart {
+         return this._visibleLines.onLinesInserted(e);
+     }
+     onRevealRangeRequest(e) {
++        // Mono Studio: user finger owns the viewport — never auto-pull selection back while touch-scrolling
++        try {
++            if (typeof globalThis !== 'undefined' && globalThis.__monacoTouchScrolling) {
++                return false;
++            }
++        } catch (_) { /* ignore */ }
+         // Using the future viewport here in order to handle multiple
+         // incoming reveal range requests that might all desire to be animated
+         const desiredScrollTop = this._computeScrollTopToRevealRange(this._context.viewLayout.getFutureViewport(), e.source, e.minimalReveal, e.range, e.selections, e.verticalType);
 diff --git a/node_modules/monaco-editor/esm/vs/editor/browser/widget/codeEditor/codeEditorWidget.js b/node_modules/monaco-editor/esm/vs/editor/browser/widget/codeEditor/codeEditorWidget.js
 index 4da52ba..516a9db 100644
 --- a/node_modules/monaco-editor/esm/vs/editor/browser/widget/codeEditor/codeEditorWidget.js
