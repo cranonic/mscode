@@ -54,13 +54,9 @@ export function useTeardrops({
     
     // Safety drop: Guard against frame pacing synchronization glitches 
     // when layout properties are actively moving under action loops.
-    if (
-      !editor ||
-      isDraggingRef.current ||
-      isScrollingRef.current ||
-      userScrollingRef.current ||
-      !!(window as any).__monacoTouchScrolling
-    ) return;
+    // SPCK-style: keep handles synced while scrolling. Only skip mid-drag
+    // (drag handler writes transforms itself).
+    if (!editor || isDraggingRef.current) return;
 
     const sel = editor.getSelection();
 

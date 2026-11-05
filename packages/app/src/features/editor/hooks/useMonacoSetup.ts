@@ -30,6 +30,7 @@ export function useMonacoSetup({
 }: UseMonacoSetupOptions) {
   const disposables    = useRef<Array<{ dispose(): void }>>([]);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollRafRef = useRef<{ _scheduled?: boolean }>({});
 
   const updateViewState = useEditorViewStateStore(state => state.updateViewState);
 
@@ -50,34 +51,22 @@ export function useMonacoSetup({
     // ── Monaco Lifecycle Event Registries ──
     disposables.current.push(
       editor.onDidChangeCursorPosition(() => {
-        if (!userScrollingRef.current) {
-          updateTeardrops();
-        }
+        updateTeardrops();
       }),
       editor.onDidChangeCursorSelection(() => {
-        if (!userScrollingRef.current) {
-          updateTeardrops();
-        }
+        updateTeardrops();
       }),
       editor.onDidScrollChange((e: any) => {
-        // Continuous non-blocking sync tracking viewport scroll layout shifts into historical memory cache.
         updateViewState(tabId, { scrollPos: e.scrollTop });
-
-        // Skip calculations if position shift maps match automated internal cursor center updates.
-        if (!userScrollingRef.current) return;
-
-        isScrollingRef.current = true;
-        setTeardropsOn(false);
-
-        if (scrollTimerRef.current) {
-          clearTimeout(scrollTimerRef.current);
+        // SPCK-style: reposition teardrops every scroll frame (rAF-coalesced)
+        if (!(scrollRafRef as any)._scheduled) {
+          (scrollRafRef as any)._scheduled = true;
+          requestAnimationFrame(() => {
+            (scrollRafRef as any)._scheduled = false;
+            setTeardropsOn(true);
+            updateTeardrops();
+          });
         }
-        
-        scrollTimerRef.current = setTimeout(() => {
-          isScrollingRef.current = false;
-          setTeardropsOn(true);
-          updateTeardrops();
-        }, 150);
       }),
     );
 

@@ -134,7 +134,7 @@ export function useTeardropsDrag({
         stopAutoScroll();
       }
       
-      const target = editor.getTargetAtClientPoint(clientX, clientY - 30);
+      const target = editor.getTargetAtClientPoint(clientX, clientY - 10);
       if (!target?.position) return;
       const newPos = target.position;
       
