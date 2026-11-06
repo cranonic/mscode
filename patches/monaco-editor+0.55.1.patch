@@ -1,26 +1,30 @@
 diff --git a/node_modules/monaco-editor/esm/vs/base/browser/touch.js b/node_modules/monaco-editor/esm/vs/base/browser/touch.js
-index ca78b0b..3b71e50 100644
+index ca78b0b..472318f 100644
 --- a/node_modules/monaco-editor/esm/vs/base/browser/touch.js
 +++ b/node_modules/monaco-editor/esm/vs/base/browser/touch.js
-@@ -24,9 +24,15 @@ var EventType;
+@@ -24,9 +24,19 @@ var EventType;
      EventType.Contextmenu = '-monaco-gesturecontextmenu';
  })(EventType || (EventType = {}));
  class Gesture extends Disposable {
 -    static { this.SCROLL_FRICTION = -5e-3; }
-+    // Mono Studio Phase-1: smoother inertia + forgiving taps on touch devices
-+    static { this.SCROLL_FRICTION = -3.2e-3; }
++    // Mono Studio: SPCK-like scroll physics (velocity ring + exponential decay)
++    static { this.SCROLL_FRICTION = -2.4e-3; } // gentler linear base (fallback)
      static { this.HOLD_DELAY = 700; }
 -    static { this.CLEAR_TAP_COUNT_TIME = 400; } // ms
-+    static { this.CLEAR_TAP_COUNT_TIME = 750; } // ms — slower double-taps on phone
-+    static { this.TAP_MOVE_THRESHOLD = 12; } // px — small scrolls must NOT become taps
-+    static { this.DOUBLE_TAP_DISTANCE = 80; } // px — finger placement variance
-+    static { this.ROLLING_SAMPLES = 5; }
-+    static { this.AXIS_LOCK_THRESHOLD = 8; } // px before choosing axis
-+    static { this.AXIS_LOCK_RATIO = 2.2; } // dominant axis must be this much larger
++    static { this.CLEAR_TAP_COUNT_TIME = 750; } // ms
++    static { this.TAP_MOVE_THRESHOLD = 12; } // px
++    static { this.DOUBLE_TAP_DISTANCE = 80; } // px
++    static { this.ROLLING_SAMPLES = 6; }
++    static { this.AXIS_LOCK_THRESHOLD = 8; } // px
++    static { this.AXIS_LOCK_RATIO = 2.2; }
++    static { this.MAX_VELOCITY = 5.5; } // px/ms
++    static { this.INERTIA_MIN_VELOCITY = 0.05; } // px/ms stop threshold
++    static { this.VELOCITY_SAMPLE_WINDOW_MS = 90; }
++    static { this.MAX_FRAME_DT = 32; } // ms — avoid hitch jumps
      constructor() {
          super();
          this.dispatched = false;
-@@ -35,6 +41,11 @@ class Gesture extends Disposable {
+@@ -35,6 +45,11 @@ class Gesture extends Disposable {
          this.activeTouches = {};
          this.handle = null;
          this._lastSetTapCountTime = 0;
@@ -32,7 +36,7 @@ index ca78b0b..3b71e50 100644
          this._register(Event.runAndSubscribe(onDidRegisterWindow, ({ window, disposables }) => {
              disposables.add(addDisposableListener(window.document, 'touchstart', (e) => this.onTouchStart(e), { passive: false }));
              disposables.add(addDisposableListener(window.document, 'touchend', (e) => this.onTouchEnd(window, e)));
-@@ -79,6 +90,9 @@ class Gesture extends Disposable {
+@@ -79,6 +94,9 @@ class Gesture extends Disposable {
              this.handle.dispose();
              this.handle = null;
          }
@@ -42,7 +46,7 @@ index ca78b0b..3b71e50 100644
          for (let i = 0, len = e.targetTouches.length; i < len; i++) {
              const touch = e.targetTouches.item(i);
              this.activeTouches[touch.identifier] = {
-@@ -112,17 +126,19 @@ class Gesture extends Disposable {
+@@ -112,17 +130,19 @@ class Gesture extends Disposable {
                  continue;
              }
              const data = this.activeTouches[touch.identifier], holdTime = Date.now() - data.initialTimeStamp;
@@ -68,9 +72,37 @@ index ca78b0b..3b71e50 100644
                  const evt = this.newGestureEvent(EventType.Contextmenu, data.initialTarget);
                  evt.pageX = data.rollingPageX.at(-1);
                  evt.pageY = data.rollingPageY.at(-1);
-@@ -136,14 +152,26 @@ class Gesture extends Disposable {
-                 const deltaY = finalY - data.rollingPageY[0];
-                 // We need to get all the dispatch targets on the start of the inertia event
+@@ -131,19 +151,37 @@ class Gesture extends Disposable {
+             else if (activeTouchCount === 1) {
+                 const finalX = data.rollingPageX.at(-1);
+                 const finalY = data.rollingPageY.at(-1);
+-                const deltaT = data.rollingTimestamps.at(-1) - data.rollingTimestamps[0];
+-                const deltaX = finalX - data.rollingPageX[0];
+-                const deltaY = finalY - data.rollingPageY[0];
+-                // We need to get all the dispatch targets on the start of the inertia event
++                // Weighted recent-sample velocity (SPCK-like) — ignore stale early points
++                const times = data.rollingTimestamps;
++                const xs = data.rollingPageX;
++                const ys = data.rollingPageY;
++                const nowTs = times.at(-1);
++                let sumWX = 0, sumWY = 0, sumW = 0;
++                for (let i = 1; i < times.length; i++) {
++                    const age = nowTs - times[i];
++                    if (age > Gesture.VELOCITY_SAMPLE_WINDOW_MS) continue;
++                    const dt = Math.max(times[i] - times[i - 1], 1);
++                    const w = 1 - age / (Gesture.VELOCITY_SAMPLE_WINDOW_MS + 1);
++                    sumWX += ((xs[i] - xs[i - 1]) / dt) * w;
++                    sumWY += ((ys[i] - ys[i - 1]) / dt) * w;
++                    sumW += w;
++                }
++                let velX = sumW > 0 ? sumWX / sumW : 0;
++                let velY = sumW > 0 ? sumWY / sumW : 0;
++                // clamp
++                const maxV = Gesture.MAX_VELOCITY;
++                if (velX > maxV) velX = maxV; else if (velX < -maxV) velX = -maxV;
++                if (velY > maxV) velY = maxV; else if (velY < -maxV) velY = -maxV;
++                if (this._lockedAxis === 'y') velX = 0;
++                else if (this._lockedAxis === 'x') velY = 0;
                  const dispatchTo = [...this.targets].filter(t => data.initialTarget instanceof Node && t.contains(data.initialTarget));
 -                this.inertia(targetWindow, dispatchTo, timestamp, // time now
 -                Math.abs(deltaX) / deltaT, // speed
@@ -80,30 +112,17 @@ index ca78b0b..3b71e50 100644
 -                deltaY > 0 ? 1 : -1, // y direction
 -                finalY // y now
 -                );
-+                const safeDT = Math.max(deltaT, 16);
-+                const speedX = Math.min(Math.abs(deltaX) / safeDT, 4.5);
-+                const speedY = Math.min(Math.abs(deltaY) / safeDT, 4.5);
-+                if (speedX > 0.08 || speedY > 0.08) {
++                const speed = Math.hypot(velX, velY);
++                if (speed > Gesture.INERTIA_MIN_VELOCITY * 1.6) {
 +                    this._isInertiaScrolling = true;
-+                    let iSpeedX = speedX;
-+                    let iSpeedY = speedY;
-+                    if (this._lockedAxis === 'y') {
-+                        iSpeedX = 0;
-+                    } else if (this._lockedAxis === 'x') {
-+                        iSpeedY = 0;
-+                    }
 +                    this.inertia(targetWindow, dispatchTo, timestamp,
-+                        iSpeedX,
-+                        deltaX > 0 ? 1 : -1,
-+                        finalX,
-+                        iSpeedY,
-+                        deltaY > 0 ? 1 : -1,
-+                        finalY);
++                        Math.abs(velX), velX >= 0 ? 1 : -1, finalX,
++                        Math.abs(velY), velY >= 0 ? 1 : -1, finalY);
 +                }
              }
              this.dispatchEvent(this.newGestureEvent(EventType.End, data.initialTarget));
              // forget about this touch
-@@ -165,20 +193,40 @@ class Gesture extends Disposable {
+@@ -165,20 +203,40 @@ class Gesture extends Disposable {
      dispatchEvent(event) {
          if (event.type === EventType.Tap) {
              const currentTime = (new Date()).getTime();
@@ -147,17 +166,76 @@ index ca78b0b..3b71e50 100644
          if (event.initialTarget instanceof Node) {
              for (const ignoreTarget of this.ignoreTargets) {
                  if (ignoreTarget.contains(event.initialTarget)) {
-@@ -228,6 +276,9 @@ class Gesture extends Disposable {
-             dispatchTo.forEach(d => d.dispatchEvent(evt));
+@@ -204,30 +262,53 @@ class Gesture extends Disposable {
+             }
+         }
+     }
+-    inertia(targetWindow, dispatchTo, t1, vX, dirX, x, vY, dirY, y) {
++    inertia(targetWindow, dispatchTo, t1, vX, dirX, x, vY, dirY, y, residualX = 0, residualY = 0) {
+         this.handle = scheduleAtNextAnimationFrame(targetWindow, () => {
+             const now = Date.now();
+-            // velocity: old speed + accel_over_time
+-            const deltaT = now - t1;
++            let deltaT = now - t1;
++            if (deltaT < 1) deltaT = 1;
++            if (deltaT > Gesture.MAX_FRAME_DT) deltaT = Gesture.MAX_FRAME_DT;
++            // Exponential decay: smoother than linear friction (native-list feel)
++            // base depends on speed — fast flicks decay a bit more, slow ones coast longer
++            const speed = Math.hypot(vX, vY);
++            let base;
++            if (speed < 0.4) base = 0.994;
++            else if (speed < 1.5) base = 0.991;
++            else if (speed < 3.5) base = 0.987;
++            else base = 0.982;
++            const decay = Math.pow(base, deltaT);
++            vX *= decay;
++            vY *= decay;
+             let delta_pos_x = 0, delta_pos_y = 0;
+             let stopped = true;
+-            vX += Gesture.SCROLL_FRICTION * deltaT;
+-            vY += Gesture.SCROLL_FRICTION * deltaT;
+-            if (vX > 0) {
++            if (vX > Gesture.INERTIA_MIN_VELOCITY) {
+                 stopped = false;
+-                delta_pos_x = dirX * vX * deltaT;
++                delta_pos_x = dirX * vX * deltaT + residualX;
++            } else {
++                residualX = 0;
+             }
+-            if (vY > 0) {
++            if (vY > Gesture.INERTIA_MIN_VELOCITY) {
+                 stopped = false;
+-                delta_pos_y = dirY * vY * deltaT;
++                delta_pos_y = dirY * vY * deltaT + residualY;
++            } else {
++                residualY = 0;
++            }
++            // Keep sub-pixel residual so slow coast stays continuous
++            const applyX = delta_pos_x >= 0 ? Math.floor(delta_pos_x) : Math.ceil(delta_pos_x);
++            const applyY = delta_pos_y >= 0 ? Math.floor(delta_pos_y) : Math.ceil(delta_pos_y);
++            residualX = delta_pos_x - applyX;
++            residualY = delta_pos_y - applyY;
++            if (applyX !== 0 || applyY !== 0) {
++                const evt = this.newGestureEvent(EventType.Change);
++                evt.translationX = applyX;
++                evt.translationY = applyY;
++                dispatchTo.forEach(d => d.dispatchEvent(evt));
+             }
+-            // dispatch translation event
+-            const evt = this.newGestureEvent(EventType.Change);
+-            evt.translationX = delta_pos_x;
+-            evt.translationY = delta_pos_y;
+-            dispatchTo.forEach(d => d.dispatchEvent(evt));
              if (!stopped) {
-                 this.inertia(targetWindow, dispatchTo, now, vX, dirX, x + delta_pos_x, vY, dirY, y + delta_pos_y);
+-                this.inertia(targetWindow, dispatchTo, now, vX, dirX, x + delta_pos_x, vY, dirY, y + delta_pos_y);
++                this.inertia(targetWindow, dispatchTo, now, vX, dirX, x + applyX, vY, dirY, y + applyY, residualX, residualY);
 +            } else {
 +                this._isInertiaScrolling = false;
 +                try { mainWindow.__monacoTouchScrolling = false; } catch (_) { /* ignore */ }
              }
          });
      }
-@@ -240,14 +291,55 @@ class Gesture extends Disposable {
+@@ -240,14 +321,55 @@ class Gesture extends Disposable {
                  continue;
              }
              const data = this.activeTouches[touch.identifier];
@@ -253,10 +331,20 @@ index be17f49..eb25774 100644
      get ctrlKey() { return this._ctrlKey; }
      get metaKey() { return this._metaKey; }
 diff --git a/node_modules/monaco-editor/esm/vs/editor/browser/controller/pointerHandler.js b/node_modules/monaco-editor/esm/vs/editor/browser/controller/pointerHandler.js
-index a900a6d..44a646d 100644
+index a900a6d..4b0e56a 100644
 --- a/node_modules/monaco-editor/esm/vs/editor/browser/controller/pointerHandler.js
 +++ b/node_modules/monaco-editor/esm/vs/editor/browser/controller/pointerHandler.js
-@@ -38,7 +38,13 @@ class PointerEventHandler extends MouseHandler {
+@@ -23,6 +23,9 @@ class PointerEventHandler extends MouseHandler {
+         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, EventType.Change, (e) => this.onChange(e)));
+         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, EventType.Contextmenu, (e) => this._onContextMenu(new EditorMouseEvent(e, false, this.viewHelper.viewDomNode), false)));
+         this._lastPointerType = 'mouse';
++        this._pendingScrollX = 0;
++        this._pendingScrollY = 0;
++        this._scrollRafScheduled = false;
+         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, 'pointerdown', (e) => {
+             const pointerType = e.pointerType;
+             if (pointerType === 'mouse') {
+@@ -38,7 +41,13 @@ class PointerEventHandler extends MouseHandler {
          }));
          // PonterEvents
          const pointerEvents = new EditorPointerEventFactory(this.viewHelper.viewDomNode);
@@ -271,22 +359,65 @@ index a900a6d..44a646d 100644
          this._register(pointerEvents.onPointerUp(this.viewHelper.viewDomNode, (e) => this._onMouseUp(e)));
          this._register(pointerEvents.onPointerLeave(this.viewHelper.viewDomNode, (e) => this._onMouseLeave(e)));
          this._register(pointerEvents.onPointerDown(this.viewHelper.viewDomNode, (e, pointerId) => this._onMouseDown(e, pointerId)));
-@@ -53,6 +59,7 @@ class PointerEventHandler extends MouseHandler {
+@@ -53,7 +62,23 @@ class PointerEventHandler extends MouseHandler {
      }
      onChange(event) {
          if (this._lastPointerType === 'touch') {
-+            // Internal touch scroll — keep focus (keyboard stays open)
-             this._context.viewModel.viewLayout.deltaScrollNow(-event.translationX, -event.translationY);
+-            this._context.viewModel.viewLayout.deltaScrollNow(-event.translationX, -event.translationY);
++            // Batch finger deltas to one deltaScrollNow per animation frame (smoother, less layout thrash)
++            this._pendingScrollX = (this._pendingScrollX || 0) - event.translationX;
++            this._pendingScrollY = (this._pendingScrollY || 0) - event.translationY;
++            if (!this._scrollRafScheduled) {
++                this._scrollRafScheduled = true;
++                const win = this.viewHelper.viewDomNode.ownerDocument.defaultView || window;
++                win.requestAnimationFrame(() => {
++                    this._scrollRafScheduled = false;
++                    const dx = this._pendingScrollX || 0;
++                    const dy = this._pendingScrollY || 0;
++                    this._pendingScrollX = 0;
++                    this._pendingScrollY = 0;
++                    if (dx !== 0 || dy !== 0) {
++                        this._context.viewModel.viewLayout.deltaScrollNow(dx, dy);
++                    }
++                });
++            }
          }
          if (this._lastPointerType === 'pen') {
-@@ -107,6 +114,7 @@ class TouchHandler extends MouseHandler {
+             this._dispatchGesture(event, /*inSelectionMode*/ true);
+@@ -89,6 +114,9 @@ class PointerEventHandler extends MouseHandler {
+ class TouchHandler extends MouseHandler {
+     constructor(context, viewController, viewHelper) {
+         super(context, viewController, viewHelper);
++        this._pendingScrollX = 0;
++        this._pendingScrollY = 0;
++        this._scrollRafScheduled = false;
+         this._register(Gesture.addTarget(this.viewHelper.linesContentDomNode));
+         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, EventType.Tap, (e) => this.onTap(e)));
+         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, EventType.Change, (e) => this.onChange(e)));
+@@ -107,7 +135,22 @@ class TouchHandler extends MouseHandler {
          }
      }
      onChange(e) {
-+        // Internal touch scroll — keep focus (keyboard stays open)
-         this._context.viewModel.viewLayout.deltaScrollNow(-e.translationX, -e.translationY);
+-        this._context.viewModel.viewLayout.deltaScrollNow(-e.translationX, -e.translationY);
++        this._pendingScrollX = (this._pendingScrollX || 0) - e.translationX;
++        this._pendingScrollY = (this._pendingScrollY || 0) - e.translationY;
++        if (!this._scrollRafScheduled) {
++            this._scrollRafScheduled = true;
++            const win = this.viewHelper.viewDomNode.ownerDocument.defaultView || window;
++            win.requestAnimationFrame(() => {
++                this._scrollRafScheduled = false;
++                const dx = this._pendingScrollX || 0;
++                const dy = this._pendingScrollY || 0;
++                this._pendingScrollX = 0;
++                this._pendingScrollY = 0;
++                if (dx !== 0 || dy !== 0) {
++                    this._context.viewModel.viewLayout.deltaScrollNow(dx, dy);
++                }
++            });
++        }
      }
  }
+ class PointerHandler extends Disposable {
 diff --git a/node_modules/monaco-editor/esm/vs/editor/browser/view.js b/node_modules/monaco-editor/esm/vs/editor/browser/view.js
 index ba6cdc0..27b72c0 100644
 --- a/node_modules/monaco-editor/esm/vs/editor/browser/view.js
