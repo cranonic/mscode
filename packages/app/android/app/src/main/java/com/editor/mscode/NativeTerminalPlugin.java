@@ -337,19 +337,22 @@ public class NativeTerminalPlugin extends Plugin {
     public void spawnLsp(PluginCall call) {
         if (!checkService(call)) return;
 
-        // Taking Alpine-side shell command string 
+        // Shell command that runs the language server (stdio)
         String alpineCommand = call.getString("command", "");
-        if (alpineCommand.isEmpty()) { 
-            call.reject("command is required"); 
-            return; 
+        // native = Termux $PREFIX; proot = Alpine (matches terminal.defaultExecMode)
+        String execType = call.getString("execType", "native");
+        if (alpineCommand.isEmpty()) {
+            call.reject("command is required");
+            return;
         }
 
         new Thread(() -> {
             try {
-                int port = terminalService.spawnProcessServer(alpineCommand);
-                
+                int port = terminalService.spawnProcessServer(alpineCommand, execType);
+
                 JSObject ret = new JSObject();
                 ret.put("port", port);
+                ret.put("execType", execType);
                 call.resolve(ret);
             } catch (Exception e) {
                 Log.e(TAG, "spawnLsp failed", e);

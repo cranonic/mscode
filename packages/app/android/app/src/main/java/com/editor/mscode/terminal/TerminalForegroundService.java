@@ -639,23 +639,57 @@ public class TerminalForegroundService extends Service {
      * Starts a WebSocket↔stdio bridge.
      * Command runs under native toybox ash -c.
      */
+    /** @deprecated Prefer {@link #spawnProcessServer(String, String)} with execType. */
     public int spawnProcessServer(String shellCommand) throws Exception {
-        if (nativeBuilder == null)
+        return spawnProcessServer(shellCommand, "native");
+    }
+
+    /**
+     * Spawn LSP ProcessServer.
+     * @param execType "native" (Termux $PREFIX) or "proot" (Alpine)
+     */
+    public int spawnProcessServer(String shellCommand, String execType) throws Exception {
+        if (nativeBuilder == null || prootBuilder == null)
             throw new IllegalStateException("Builder not initialised");
 
+        boolean useProot = "proot".equals(execType);
+
         synchronized (rootfsLock) {
-            rootfs.ensureNativeBinaries();
+            if (useProot) {
+                String arch = android.os.Build.SUPPORTED_ABIS.length > 0
+                    ? android.os.Build.SUPPORTED_ABIS[0] : "arm64-v8a";
+                // Map Android ABI → alpine arch used by RootfsManager
+                if (arch.contains("arm64") || arch.contains("aarch64")) arch = "aarch64";
+                else if (arch.contains("armeabi") || arch.contains("arm")) arch = "armhf";
+                else if (arch.contains("x86_64")) arch = "x86_64";
+                else if (arch.contains("x86")) arch = "x86";
+                rootfs.ensureBinaries(arch);
+                rootfs.ensureRootfs(arch);
+            } else {
+                rootfs.ensureNativeBinaries();
+            }
         }
 
-        // Rewrite common langserver CLIs so they run via node + linker.
-        // PREFIX/bin/* is not directly executable (targetSdk>28); hyphenated
-        // names cannot be shell functions either.
-        String rewritten = rewriteLspCommand(shellCommand);
-        emitLog("🔌 LSP raw cmd: " + shellCommand);
-        emitLog("🔌 LSP rewritten: " + rewritten);
+        String rewritten;
+        String[] cmd;
+        java.util.Map<String, String> envMap;
 
-        String[] cmd = nativeBuilder.buildBackgroundCommand(rewritten);
-        java.util.Map<String, String> envMap = nativeBuilder.buildBackgroundEnvMap();
+        if (useProot) {
+            // Inside Alpine binaries are executable; no linker rewrite needed.
+            rewritten = rewriteLspCommandProot(shellCommand);
+            emitLog("🔌 LSP (proot) raw: " + shellCommand);
+            emitLog("🔌 LSP (proot) rewritten: " + rewritten);
+            cmd = prootBuilder.buildBackgroundCommand(rewritten);
+            envMap = prootBuilder.buildBackgroundEnvMap();
+        } else {
+            // Rewrite common langserver CLIs so they run via node + linker.
+            // PREFIX/bin/* is not directly executable (targetSdk>28).
+            rewritten = rewriteLspCommand(shellCommand);
+            emitLog("🔌 LSP (native) raw: " + shellCommand);
+            emitLog("🔌 LSP (native) rewritten: " + rewritten);
+            cmd = nativeBuilder.buildBackgroundCommand(rewritten);
+            envMap = nativeBuilder.buildBackgroundEnvMap();
+        }
 
         emitLog("🔌 LSP argv: " + java.util.Arrays.toString(cmd));
         if (envMap != null) {
@@ -668,13 +702,33 @@ public class TerminalForegroundService extends Service {
         }
 
         int port = ProcessServer.findFreePort();
-        // Forward ProcessServer stderr / exit / spawn lines → onLog → JS Output panel
         ProcessServer server = new ProcessServer(port, cmd, envMap, this::emitLog);
         server.startAndAwait();
         processServers.put(port, server);
         emitLog("🔌 ProcessServer listening on port " + port
+            + " execType=" + execType
             + " (stderr/exit will appear as [LSP] / [LSP-stderr] logs)");
         return port;
+    }
+
+    /**
+     * Alpine/proot: pyright is a real executable under /usr/local/bin or via node modules.
+     */
+    private String rewriteLspCommandProot(String shellCommand) {
+        if (shellCommand == null) return "";
+        String s = shellCommand.trim();
+        if (s.startsWith("pyright-langserver") || s.contains("pyright-langserver")) {
+            return "if command -v pyright-langserver >/dev/null 2>&1; then "
+                 + "  exec pyright-langserver --stdio; "
+                 + "elif [ -f /usr/lib/node_modules/pyright/dist/pyright-langserver.js ]; then "
+                 + "  exec node /usr/lib/node_modules/pyright/dist/pyright-langserver.js --stdio; "
+                 + "elif [ -f /usr/local/lib/node_modules/pyright/dist/pyright-langserver.js ]; then "
+                 + "  exec node /usr/local/lib/node_modules/pyright/dist/pyright-langserver.js --stdio; "
+                 + "else "
+                 + "  echo '[LSP] pyright-langserver not found in Alpine' >&2; exit 127; "
+                 + "fi";
+        }
+        return s;
     }
 
     /**

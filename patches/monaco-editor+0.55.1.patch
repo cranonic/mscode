@@ -1,5 +1,5 @@
 diff --git a/node_modules/monaco-editor/esm/vs/base/browser/touch.js b/node_modules/monaco-editor/esm/vs/base/browser/touch.js
-index ca78b0b..4b84f48 100644
+index ca78b0b..3b71e50 100644
 --- a/node_modules/monaco-editor/esm/vs/base/browser/touch.js
 +++ b/node_modules/monaco-editor/esm/vs/base/browser/touch.js
 @@ -24,9 +24,15 @@ var EventType;
@@ -11,9 +11,9 @@ index ca78b0b..4b84f48 100644
 +    static { this.SCROLL_FRICTION = -3.2e-3; }
      static { this.HOLD_DELAY = 700; }
 -    static { this.CLEAR_TAP_COUNT_TIME = 400; } // ms
-+    static { this.CLEAR_TAP_COUNT_TIME = 600; } // ms
-+    static { this.TAP_MOVE_THRESHOLD = 60; } // px
-+    static { this.DOUBLE_TAP_DISTANCE = 50; } // px
++    static { this.CLEAR_TAP_COUNT_TIME = 750; } // ms — slower double-taps on phone
++    static { this.TAP_MOVE_THRESHOLD = 12; } // px — small scrolls must NOT become taps
++    static { this.DOUBLE_TAP_DISTANCE = 80; } // px — finger placement variance
 +    static { this.ROLLING_SAMPLES = 5; }
 +    static { this.AXIS_LOCK_THRESHOLD = 8; } // px before choosing axis
 +    static { this.AXIS_LOCK_RATIO = 2.2; } // dominant axis must be this much larger
@@ -32,16 +32,17 @@ index ca78b0b..4b84f48 100644
          this._register(Event.runAndSubscribe(onDidRegisterWindow, ({ window, disposables }) => {
              disposables.add(addDisposableListener(window.document, 'touchstart', (e) => this.onTouchStart(e), { passive: false }));
              disposables.add(addDisposableListener(window.document, 'touchend', (e) => this.onTouchEnd(window, e)));
-@@ -79,6 +90,8 @@ class Gesture extends Disposable {
+@@ -79,6 +90,9 @@ class Gesture extends Disposable {
              this.handle.dispose();
              this.handle = null;
          }
 +        // Mono Studio Phase-2: new gesture → unlock axis
 +        this._lockedAxis = null;
++        this._gestureDidMove = false;
          for (let i = 0, len = e.targetTouches.length; i < len; i++) {
              const touch = e.targetTouches.item(i);
              this.activeTouches[touch.identifier] = {
-@@ -112,17 +125,16 @@ class Gesture extends Disposable {
+@@ -112,17 +126,19 @@ class Gesture extends Disposable {
                  continue;
              }
              const data = this.activeTouches[touch.identifier], holdTime = Date.now() - data.initialTimeStamp;
@@ -50,7 +51,10 @@ index ca78b0b..4b84f48 100644
 -                && Math.abs(data.initialPageY - data.rollingPageY.at(-1)) < 30) {
 +            const movedX = Math.abs(data.initialPageX - data.rollingPageX.at(-1));
 +            const movedY = Math.abs(data.initialPageY - data.rollingPageY.at(-1));
-+            const stayedStill = movedX < Gesture.TAP_MOVE_THRESHOLD && movedY < Gesture.TAP_MOVE_THRESHOLD;
++            // Tap only if finger never crossed scroll threshold (gestureDidMove set only after that)
++            const stayedStill = !this._gestureDidMove
++                && movedX < Gesture.TAP_MOVE_THRESHOLD
++                && movedY < Gesture.TAP_MOVE_THRESHOLD;
 +            if (holdTime < Gesture.HOLD_DELAY && stayedStill) {
                  const evt = this.newGestureEvent(EventType.Tap, data.initialTarget);
                  evt.pageX = data.rollingPageX.at(-1);
@@ -64,7 +68,7 @@ index ca78b0b..4b84f48 100644
                  const evt = this.newGestureEvent(EventType.Contextmenu, data.initialTarget);
                  evt.pageX = data.rollingPageX.at(-1);
                  evt.pageY = data.rollingPageY.at(-1);
-@@ -136,14 +148,26 @@ class Gesture extends Disposable {
+@@ -136,14 +152,26 @@ class Gesture extends Disposable {
                  const deltaY = finalY - data.rollingPageY[0];
                  // We need to get all the dispatch targets on the start of the inertia event
                  const dispatchTo = [...this.targets].filter(t => data.initialTarget instanceof Node && t.contains(data.initialTarget));
@@ -99,7 +103,7 @@ index ca78b0b..4b84f48 100644
              }
              this.dispatchEvent(this.newGestureEvent(EventType.End, data.initialTarget));
              // forget about this touch
-@@ -165,20 +189,40 @@ class Gesture extends Disposable {
+@@ -165,20 +193,40 @@ class Gesture extends Disposable {
      dispatchEvent(event) {
          if (event.type === EventType.Tap) {
              const currentTime = (new Date()).getTime();
@@ -143,7 +147,7 @@ index ca78b0b..4b84f48 100644
          if (event.initialTarget instanceof Node) {
              for (const ignoreTarget of this.ignoreTargets) {
                  if (ignoreTarget.contains(event.initialTarget)) {
-@@ -228,11 +272,22 @@ class Gesture extends Disposable {
+@@ -228,6 +276,9 @@ class Gesture extends Disposable {
              dispatchTo.forEach(d => d.dispatchEvent(evt));
              if (!stopped) {
                  this.inertia(targetWindow, dispatchTo, now, vX, dirX, x + delta_pos_x, vY, dirY, y + delta_pos_y);
@@ -153,23 +157,29 @@ index ca78b0b..4b84f48 100644
              }
          });
      }
-     onTouchMove(e) {
-         const timestamp = Date.now(); // use Date.now() because on FF e.timeStamp is not epoch based.
-+        // Mono Studio: mark scrolling as early as possible so reveal cannot win the same frame
-+        try {
-+            mainWindow.__monacoTouchScrolling = true;
-+            if (this._scrollFlagTimer) {
-+                mainWindow.clearTimeout(this._scrollFlagTimer);
-+                this._scrollFlagTimer = null;
-+            }
-+        } catch (_) { /* ignore */ }
-         for (let i = 0, len = e.changedTouches.length; i < len; i++) {
-             const touch = e.changedTouches.item(i);
-             if (!this.activeTouches.hasOwnProperty(String(touch.identifier))) {
-@@ -240,14 +295,39 @@ class Gesture extends Disposable {
+@@ -240,14 +291,55 @@ class Gesture extends Disposable {
                  continue;
              }
              const data = this.activeTouches[touch.identifier];
+-            const evt = this.newGestureEvent(EventType.Change, data.initialTarget);
+-            evt.translationX = touch.pageX - data.rollingPageX.at(-1);
+-            evt.translationY = touch.pageY - data.rollingPageY.at(-1);
+-            evt.pageX = touch.pageX;
+-            evt.pageY = touch.pageY;
+-            this.dispatchEvent(evt);
++            // Only treat as "moved/scroll" after real travel — finger jitter must still allow double-tap
++            const totalMovedX = Math.abs(touch.pageX - data.initialPageX);
++            const totalMovedY = Math.abs(touch.pageY - data.initialPageY);
++            if (totalMovedX >= Gesture.TAP_MOVE_THRESHOLD || totalMovedY >= Gesture.TAP_MOVE_THRESHOLD) {
++                this._gestureDidMove = true;
++                try {
++                    mainWindow.__monacoTouchScrolling = true;
++                    if (this._scrollFlagTimer) {
++                        mainWindow.clearTimeout(this._scrollFlagTimer);
++                        this._scrollFlagTimer = null;
++                    }
++                } catch (_) { /* ignore */ }
++            }
 +            let tX = touch.pageX - data.rollingPageX.at(-1);
 +            let tY = touch.pageY - data.rollingPageY.at(-1);
 +            // Mono Studio Phase-2: axis lock (like native lists / previous useTouchScroll)
@@ -195,20 +205,40 @@ index ca78b0b..4b84f48 100644
 +            } else if (this._lockedAxis === 'x') {
 +                tY = 0;
 +            }
-             const evt = this.newGestureEvent(EventType.Change, data.initialTarget);
--            evt.translationX = touch.pageX - data.rollingPageX.at(-1);
--            evt.translationY = touch.pageY - data.rollingPageY.at(-1);
-+            evt.translationX = tX;
-+            evt.translationY = tY;
-             evt.pageX = touch.pageX;
-             evt.pageY = touch.pageY;
-             this.dispatchEvent(evt);
++            // Do not scroll (Change) until past tap threshold — protects double-tap
++            if (this._gestureDidMove) {
++                const evt = this.newGestureEvent(EventType.Change, data.initialTarget);
++                evt.translationX = tX;
++                evt.translationY = tY;
++                evt.pageX = touch.pageX;
++                evt.pageY = touch.pageY;
++                this.dispatchEvent(evt);
++            }
              // only keep a few data points, to average the final speed
 -            if (data.rollingPageX.length > 3) {
 +            if (data.rollingPageX.length > Gesture.ROLLING_SAMPLES) {
                  data.rollingPageX.shift();
                  data.rollingPageY.shift();
                  data.rollingTimestamps.shift();
+diff --git a/node_modules/monaco-editor/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.js b/node_modules/monaco-editor/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.js
+index d694d72..81d0ae7 100644
+--- a/node_modules/monaco-editor/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.js
++++ b/node_modules/monaco-editor/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.js
+@@ -538,6 +538,14 @@ let TextAreaEditContext = class TextAreaEditContext extends AbstractEditContext
+         this._render();
+     }
+     _render() {
++        // Mono Studio: during touch scroll keep textarea off the caret so WebView
++        // does not force the selection line back into the visual viewport
++        try {
++            if (typeof globalThis !== 'undefined' && globalThis.__monacoTouchScrolling && !this._visibleTextArea) {
++                this._renderAtTopLeft();
++                return;
++            }
++        } catch (_) { /* ignore */ }
+         if (this._visibleTextArea) {
+             // The text area is visible for composition reasons
+             const visibleStart = this._visibleTextArea.visibleTextareaStart;
 diff --git a/node_modules/monaco-editor/esm/vs/editor/browser/controller/mouseHandler.js b/node_modules/monaco-editor/esm/vs/editor/browser/controller/mouseHandler.js
 index be17f49..eb25774 100644
 --- a/node_modules/monaco-editor/esm/vs/editor/browser/controller/mouseHandler.js
@@ -345,6 +375,54 @@ index 4da52ba..516a9db 100644
          if (!Range.isIRange(modelRange)) {
              throw new Error('Invalid arguments');
          }
+diff --git a/node_modules/monaco-editor/esm/vs/editor/common/viewLayout/viewLayout.js b/node_modules/monaco-editor/esm/vs/editor/common/viewLayout/viewLayout.js
+index 326dec8..9bf93dd 100644
+--- a/node_modules/monaco-editor/esm/vs/editor/common/viewLayout/viewLayout.js
++++ b/node_modules/monaco-editor/esm/vs/editor/common/viewLayout/viewLayout.js
+@@ -346,6 +346,15 @@ class ViewLayout extends Disposable {
+         return this._scrollable.validateScrollPosition(scrollPosition);
+     }
+     setScrollPosition(position, type) {
++        // Mono Studio: while user is touch-scrolling, ignore reveal/API scroll pulls
++        // (finger path uses deltaScrollNow which sets __monacoAllowScrollApply)
++        try {
++            if (typeof globalThis !== 'undefined'
++                && globalThis.__monacoTouchScrolling
++                && !globalThis.__monacoAllowScrollApply) {
++                return;
++            }
++        } catch (_) { /* ignore */ }
+         if (type === 1 /* ScrollType.Immediate */) {
+             this._scrollable.setScrollPositionNow(position);
+         }
+@@ -358,10 +367,23 @@ class ViewLayout extends Disposable {
+     }
+     deltaScrollNow(deltaScrollLeft, deltaScrollTop) {
+         const currentScrollPosition = this._scrollable.getCurrentScrollPosition();
+-        this._scrollable.setScrollPositionNow({
+-            scrollLeft: currentScrollPosition.scrollLeft + deltaScrollLeft,
+-            scrollTop: currentScrollPosition.scrollTop + deltaScrollTop
+-        });
++        try {
++            if (typeof globalThis !== 'undefined') {
++                globalThis.__monacoAllowScrollApply = true;
++            }
++        } catch (_) { /* ignore */ }
++        try {
++            this._scrollable.setScrollPositionNow({
++                scrollLeft: currentScrollPosition.scrollLeft + deltaScrollLeft,
++                scrollTop: currentScrollPosition.scrollTop + deltaScrollTop
++            });
++        } finally {
++            try {
++                if (typeof globalThis !== 'undefined') {
++                    globalThis.__monacoAllowScrollApply = false;
++                }
++            } catch (_) { /* ignore */ }
++        }
+     }
+ }
+ 
 diff --git a/node_modules/monaco-editor/esm/vs/editor/common/viewModel/viewModelImpl.js b/node_modules/monaco-editor/esm/vs/editor/common/viewModel/viewModelImpl.js
 index 46b6082..4a56049 100644
 --- a/node_modules/monaco-editor/esm/vs/editor/common/viewModel/viewModelImpl.js

@@ -48,11 +48,14 @@ class LspProcessManager {
 
   stopServer(lang?: string): void {
     if (lang) {
+      const cached = this.ports[lang];
       delete this.ports[lang];
       if (this.activeLanguage === lang) this.activeLanguage = null;
-      try {
-        NativeTerminal.killLsp?.({ language: lang });
-      } catch { /* optional native API */ }
+      if (cached?.port) {
+        try {
+          NativeTerminal.killLsp?.({ port: cached.port });
+        } catch { /* optional */ }
+      }
       return;
     }
     Object.keys(this.ports).forEach((l) => this.stopServer(l));
@@ -310,31 +313,37 @@ class LspProcessManager {
       }
     }
 
-    // Spawn language server if native bridge exposes it
+    // Spawn via native ProcessServer (WebSocket ↔ stdio bridge)
+    // Plugin method is spawnLsp({ command, execType }) → { port }
     try {
-      if (typeof NativeTerminal.startLspServer === 'function') {
-        const ret = await NativeTerminal.startLspServer({
-          language: lang,
-          serverCmd: config.serverCmd,
-          execType: execMode,
-        });
-        const port = ret?.port ?? null;
-        if (port != null) {
-          this.ports[lang] = { port, execMode };
-          this.activeLanguage = lang;
-          this.log(channel, `Server listening on ${port} (${execMode})`);
-          return port;
-        }
+      this.log(channel, `spawnLsp command="${config.serverCmd}" execType=${execMode}`);
+      const ret = await NativeTerminal.spawnLsp({
+        command: config.serverCmd,
+        execType: execMode,
+      });
+      const port = ret?.port ?? null;
+      if (port != null && port > 0) {
+        this.ports[lang] = { port, execMode };
+        this.activeLanguage = lang;
+        this.log(channel, `Server listening on ${port} (${execMode})`);
+        return port;
       }
+      this.log(channel, `spawnLsp returned no port: ${JSON.stringify(ret)}`);
     } catch (e: any) {
-      this.log(channel, `startLspServer: ${e?.message || e}`);
+      this.log(channel, `spawnLsp failed: ${e?.message || e}`);
+      useNotificationStore.getState().addNotification({
+        type: 'error',
+        title: 'LSP spawn failed',
+        source: 'LSP',
+        message: e?.message || 'Could not start language server process',
+      });
+      throw e;
     }
 
-    // Fallback: remember backend even without port (transport may attach later)
     this.ports[lang] = { port: 0, execMode };
     this.activeLanguage = lang;
     this.log(channel, `Tools ready under ${execMode}; waiting for transport bind`);
-    return this.ports[lang].port || null;
+    return null;
   }
 }
 
