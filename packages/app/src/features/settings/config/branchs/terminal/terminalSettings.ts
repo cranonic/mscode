@@ -1,3 +1,4 @@
+
 // src/features/settings/config/branchs/terminal/terminalSettings.ts
 //
 // All terminal settings live here (moved out of workbench).
@@ -200,7 +201,7 @@ export const terminalSection: IConfigurationSection = {
       order: 50,
       tags: ['terminal', 'backend'],
       markdownDescription:
-        'Default backend for **New Terminal** (`+` / empty state).\n\n- **native** — Android bionic + Termux `$PREFIX`\n- **proot** — Alpine Linux via proot\n\nWhen **Exclusive Native / PRoot** is ON, `+` always opens this backend (no picker). When Exclusive is OFF, `+` shows a Native / PRoot menu instead.',
+        'Default backend for **New Terminal**, background tasks, and **LSP install** (Pyright, etc.).\n\n- **native** — Android bionic + Termux `$PREFIX` (`pkg`)\n- **proot** — Linux Alpine via proot (`apk`) — use this if native `node`/`npm` fails with **CANNOT LINK EXECUTABLE**\n\nWhen **Exclusive Native / PRoot** is ON, `+` always opens this backend (no picker). When Exclusive is OFF, `+` shows a Native / PRoot menu instead.\n\nIf native LSP setup fails, you will be asked whether to switch to Alpine automatically.',
       enum: ['native', 'proot'],
       enumItemLabels: ['Android bionic (native)', 'Linux Alpine (proot)'],
     },

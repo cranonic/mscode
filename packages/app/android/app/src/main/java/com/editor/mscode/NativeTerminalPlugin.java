@@ -542,6 +542,33 @@ public class NativeTerminalPlugin extends Plugin {
         call.resolve();
     }
 
+    /**
+     * Ensure Alpine minirootfs + proot binaries exist (for switching LSP/terminal to proot).
+     * Called from JS when user confirms "Switch to Alpine" after native node linker failure.
+     */
+    @PluginMethod
+    public void ensureProotRootfs(PluginCall call) {
+        String arch = getArch();
+        if (arch == null) {
+            call.reject("Unsupported ABI");
+            return;
+        }
+        new Thread(() -> {
+            try {
+                RootfsManager rootfsMgr = new RootfsManager(getContext());
+                rootfsMgr.ensureBinaries(arch);
+                rootfsMgr.ensureRootfs(arch);
+                JSObject ret = new JSObject();
+                ret.put("ready", rootfsMgr.isAlpineReady());
+                ret.put("path", rootfsMgr.getRootfsPath());
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "ensureProotRootfs failed", e);
+                call.reject("ensureProotRootfs failed: " + e.getMessage(), e);
+            }
+        }, "ensure-proot-rootfs").start();
+    }
+
     @PluginMethod
     public void resize(PluginCall call) {
         if (!checkService(call)) return;

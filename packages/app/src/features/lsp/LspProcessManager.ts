@@ -1,379 +1,341 @@
 // src/features/lsp/LspProcessManager.ts
+//
+// Boots language servers: install packages → postInstall → spawn via ProcessServer path.
+// Respects terminal.defaultExecMode (native vs proot/Alpine).
+// On native CANNOT LINK / node failure → confirm switch to Alpine (proot).
+
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import type { LspServerConfig } from '@/core/extensionAPI/modules/lspModule';
+import { taskManager } from '@/core/extensionAPI/tasks/taskManager';
+import { useSettingsStore } from '@/features/settings/store/settingsStore';
+import { useModalStore } from '@/store/modalStore';
 import { useNotificationStore } from '@/store/notificationStore';
-import { useStatusBarStore } from '@/features/statusbar/store/statusBarStore';
+import { useOutputStore } from '@/features/termis/components/output/store/outputStore';
 
 const NativeTerminal = registerPlugin<any>('NativeTerminal');
 
-const LANGUAGE_CONFIGS: Record<string, { packages: string[]; postInstall?: string[]; checkCmd: string; serverCmd: string }> = {};
+export type ExecMode = 'native' | 'proot';
 
-// Package manager retry config (Termux/Native Bionic)
-const PKG_MAX_RETRIES    = 3;
-const PKG_RETRY_DELAY_MS = 3_000;
+export interface LspServerConfigExt extends LspServerConfig {
+  /** Optional Alpine/apk package names when exec mode is proot. */
+  prootPackages?: string[];
+}
 
-export class LspProcessManager {
+type PortCache = { port: number; execMode: ExecMode };
 
-    // ─── Port registry ────────────────────────────────────────────────────────
-    // Tracks every language that has a running server: language → port.
-    private activePorts = new Map<string, number>();
-    /** Languages whose WebSocket handshake completed (Android may kill the process later). */
-    private aliveLanguages = new Set<string>();
-    private pendingStarts = new Map<string, Promise<number | null>>();
+class LspProcessManager {
+  /** languageId → config from extensions */
+  dynamicConfigs: Record<string, LspServerConfigExt> = {};
+  private ports: Record<string, PortCache> = {};
+  private activeLanguage: string | null = null;
+  private installLocks: Record<string, Promise<void>> = {};
 
-    // ─── Serial installation queue ────────────────────────────────────────────
-    // Modifying the Termux $PREFIX via `pkg install` concurrently can cause
-    // race conditions or partial extractions. Every new startServer call
-    // chains off this Promise so only one _doStart body executes at a time.
-    private installQueue: Promise<void> = Promise.resolve();
+  registerDynamicConfig(lang: string, config: LspServerConfigExt): void {
+    this.dynamicConfigs[lang] = config;
+  }
 
-    public dynamicConfigs: Record<string, any> = {};
+  removeDynamicConfig(lang: string): void {
+    delete this.dynamicConfigs[lang];
+  }
 
-    public registerDynamicConfig(language: string, config: any): void {
-        this.dynamicConfigs[language] = config;
-        console.log(`[LSP] dynamic config registered for "${language}"`);
+  getActiveLanguage(): string | null {
+    return this.activeLanguage;
+  }
+
+  invalidatePort(lang: string): void {
+    delete this.ports[lang];
+  }
+
+  stopServer(lang?: string): void {
+    if (lang) {
+      delete this.ports[lang];
+      if (this.activeLanguage === lang) this.activeLanguage = null;
+      try {
+        NativeTerminal.killLsp?.({ language: lang });
+      } catch { /* optional native API */ }
+      return;
     }
+    Object.keys(this.ports).forEach((l) => this.stopServer(l));
+    this.activeLanguage = null;
+  }
 
-    public removeDynamicConfig(language: string): void {
-        delete this.dynamicConfigs[language];
+  private preferredExecMode(): ExecMode {
+    const mode = useSettingsStore.getState().settings?.['terminal.defaultExecMode'];
+    return mode === 'proot' ? 'proot' : 'native';
+  }
+
+  private log(channel: string, line: string): void {
+    try {
+      useOutputStore.getState().createChannel(channel);
+      useOutputStore.getState().appendLog(channel, line.endsWith('\n') ? line : `${line}\n`);
+    } catch { /* ignore */ }
+  }
+
+  /**
+   * Ensure packages + postInstall for this language under the given exec mode.
+   */
+  /** Copy a live port mapping so TS/JS family tabs share one process. */
+  sharePort(fromLang: string, toLang: string): void {
+    const src = this.ports[fromLang];
+    if (!src) return;
+    this.ports[toLang] = { ...src };
+  }
+
+  /** Mark language as currently healthy (used by useLspSync after connect). */
+  markAlive(lang: string): void {
+    if (this.ports[lang] || this.dynamicConfigs[lang]) {
+      this.activeLanguage = lang;
     }
+  }
 
-    /**
-     * Reuse an already-spawned process port for a sibling language id
-     * (e.g. typescript → javascript / tsx after one typescript-language-server boot).
-     */
-    public sharePort(fromLanguage: string, toLanguage: string): void {
-        const port = this.activePorts.get(fromLanguage);
-        if (port == null) return;
-        this.activePorts.set(toLanguage, port);
-        if (this.aliveLanguages.has(fromLanguage)) {
-            this.aliveLanguages.add(toLanguage);
-        }
-    }
+  private async ensureInstalled(
+    lang: string,
+    config: LspServerConfigExt,
+    execMode: ExecMode,
+    channel: string,
+  ): Promise<void> {
+    const lockKey = `${lang}:${execMode}`;
+    const existing = this.installLocks[lockKey];
+    if (existing !== undefined) return existing;
 
-    // ─── Low-level streaming ───────────────────────────────
-    private async executeStreamCommand(
-        sessionId: string,
-        command: string,
-        onLog: (data: string) => void
-    ): Promise<number> {
-        return new Promise(async (resolve, reject) => {
-            let dataListener: any;
-            let exitListener: any;
+    this.installLocks[lockKey] = (async () => {
+      const packages =
+        execMode === 'proot' && config.prootPackages?.length
+          ? config.prootPackages
+          : config.packages;
 
-            const cleanup = () => {
-                if (dataListener) dataListener.remove();
-                if (exitListener) exitListener.remove();
-            };
+      // 1) checkCmd
+      if (config.checkCmd) {
+        this.log(channel, `> checkCmd (${execMode}): ${config.checkCmd}`);
+        const check = taskManager.execute(
+          config.checkCmd,
+          '/',
+          (d) => this.log(channel, d),
+          channel,
+          execMode,
+        );
+        const { exitCode } = await check.result;
+        this.log(channel, `> checkCmd exitCode=${exitCode}`);
+        if (exitCode === 0) return;
+      }
 
-            try {
-                dataListener = await NativeTerminal.addListener('onBackgroundData', (event: any) => {
-                    if (event.sessionId === sessionId) onLog(event.data);
-                });
-
-                exitListener = await NativeTerminal.addListener('onBackgroundExit', (event: any) => {
-                    if (event.sessionId === sessionId) {
-                        cleanup();
-                        resolve(event.exitCode);
-                    }
-                });
-
-                await NativeTerminal.streamBackgroundExecute({ sessionId, command });
-            } catch (err) {
-                cleanup();
-                reject(err);
-            }
-        });
-    }
-
-    private async executeWithRetry(
-        baseSessionId: string,
-        command: string,
-        onLog: (data: string) => void,
-    ): Promise<number> {
-        for (let attempt = 1; attempt <= PKG_MAX_RETRIES; attempt++) {
-            const exitCode = await this.executeStreamCommand(
-                `${baseSessionId}_attempt${attempt}`,
-                command,
-                onLog,
-            );
-
-            if (exitCode === 0) return 0;
-
-            if (attempt < PKG_MAX_RETRIES) {
-                onLog(`\n> Command failed (exit ${exitCode}) — retrying in ${PKG_RETRY_DELAY_MS / 1000}s… (${attempt}/${PKG_MAX_RETRIES})\n`);
-                await new Promise(r => setTimeout(r, PKG_RETRY_DELAY_MS));
-                continue;
-            }
-
-            return exitCode; // non-retryable failure
-        }
-        return -1;
-    }
-
-    // ─── Public entry point ───────────────────────────────────────────────────
-    public startServer(language: string): Promise<number | null> {
-        if (!Capacitor.isNativePlatform()) return Promise.resolve(null);
-
-        const config = this.dynamicConfigs[language] || LANGUAGE_CONFIGS[language];
-        if (!config) return Promise.resolve(null);
-
-        // Fast path 1: only reuse port if handshake previously succeeded AND we
-        // have not marked it dead (background kill clears aliveLanguages).
-        const cached = this.activePorts.get(language);
-        if (cached && this.aliveLanguages.has(language)) {
-            return Promise.resolve(cached);
-        }
-        if (cached && !this.aliveLanguages.has(language)) {
-            // Stale cache after process death — drop it and respawn below
-            this.activePorts.delete(language);
-        }
-
-        // Fast path 2: an install for this exact language is already in progress.
-        const inflight = this.pendingStarts.get(language);
-        if (inflight) return inflight;
-
-        // Slow path: queue behind any running installation so we never run two
-        // `pkg install` commands at the same time.
-        let releaseQueue!: () => void;
-        const mySlot = new Promise<void>(r => { releaseQueue = r; });
-
-        // Chain: next caller waits for mySlot, which we release in finally{}.
-        const prevQueue    = this.installQueue;
-        this.installQueue  = mySlot;
-
-        const promise = prevQueue
-            .then(() => this._doStart(language))
-            .finally(() => {
-                this.pendingStarts.delete(language);
-                releaseQueue(); // let the next queued language proceed
-            });
-
-        this.pendingStarts.set(language, promise);
-        return promise;
-    }
-
-    // ─── Core install + spawn logic ───────────────────────────────────────────
-    private async _doStart(language: string): Promise<number | null> {
-        const config = this.dynamicConfigs[language] || LANGUAGE_CONFIGS[language];
-
-        // Re-check: another queued call may have already finished this language
-        // while we were waiting in the queue.
-        const cached = this.activePorts.get(language);
-        if (cached) return cached;
-
-        const notifId   = `lsp-boot-${language}`;
-        let consoleLogs = '';
-
-        useStatusBarStore.getState().updateItem('lsp-status', {
-            label: `Starting ${language}…`,
-            icon: 'sync',
-            spin: true,
-        });
-
-        useNotificationStore.getState().addNotification({
-            id: notifId,
-            type: 'loading',
-            title: `Initializing ${language.toUpperCase()} Server`,
-            source: 'MS Code LSP',
-            message: 'Checking dependencies…',
-        });
-
-        try {
-            consoleLogs += `> Checking for existing installation: ${config.checkCmd}\n`;
-
-            const checkRes = await NativeTerminal.backgroundExecute({
-                sessionId: notifId + '_check',
-                command: config.checkCmd
-            });
-
-            // Log raw result — previous bug: install skipped while tsserver.js missing
-            const checkCode = checkRes?.exitCode ?? checkRes?.code ?? -1;
-            consoleLogs += `> checkCmd exitCode=${checkCode} (raw=${JSON.stringify(checkRes)})\n`;
-
-            let needInstall = checkCode !== 0;
-
-            // Safety net for TypeScript: never trust a green check without tsserver.js
-            if (!needInstall && /typescript-language-server/i.test(config.serverCmd || '')) {
-                const tsVerify = await NativeTerminal.backgroundExecute({
-                    sessionId: notifId + '_tsverify',
-                    command: 'test -f "$PREFIX/lib/node_modules/typescript/lib/tsserver.js" && echo TS_OK || echo TS_MISSING',
-                });
-                const verifyOut = String(tsVerify?.stdout ?? tsVerify?.output ?? tsVerify?.data ?? '');
-                consoleLogs += `> tsserver verify: exit=${tsVerify?.exitCode ?? tsVerify?.code} out=${verifyOut}\n`;
-                if ((tsVerify?.exitCode ?? tsVerify?.code) !== 0 || /TS_MISSING/.test(verifyOut)) {
-                    consoleLogs += `> tsserver.js missing — forcing postInstall despite checkCmd success\n`;
-                    needInstall = true;
-                }
-            }
-
-            if (!needInstall) {
-                consoleLogs += `> Server binary found! Skipping installation.\n`;
-                useNotificationStore.getState().updateNotification(notifId, {
-                    message: 'Dependencies verified. Booting up server…',
-                    fullMessage: consoleLogs,
-                });
-            } else {
-                const pkgs = config.packages.join(' ');
-                if (pkgs) {
-                    consoleLogs += `> Executing: pkg install ${pkgs}\n`;
-                    useNotificationStore.getState().updateNotification(notifId, {
-                        message: `Installing ${language} toolchain… (expand to view logs)`,
-                        fullMessage: consoleLogs,
-                    });
-
-                    const exitCode = await this.executeWithRetry(
-                        notifId,
-                        `pkg install ${pkgs}`,
-                        (data) => {
-                            consoleLogs += data;
-                            useNotificationStore.getState().updateNotification(notifId, { fullMessage: consoleLogs });
-                        }
-                    );
-
-                    if (exitCode !== 0) throw new Error(`Package installation failed (Exit Code: ${exitCode})`);
-                }
-
-                if (config.postInstall?.length) {
-                    for (const cmd of config.postInstall) {
-                        consoleLogs += `\n> Executing: ${cmd}\n`;
-                        useNotificationStore.getState().updateNotification(notifId, {
-                            message: `Running setup: ${cmd}…`,
-                            fullMessage: consoleLogs,
-                        });
-
-                        const exitCode = await this.executeWithRetry(
-                            `${notifId}_post`,
-                            cmd,
-                            (data) => {
-                                consoleLogs += data;
-                                useNotificationStore.getState().updateNotification(notifId, { fullMessage: consoleLogs });
-                            }
-                        );
-
-                        if (exitCode !== 0) throw new Error(`Setup command failed: ${cmd}`);
-                    }
-                } else {
-                    consoleLogs += `> No postInstall hooks for ${language}\n`;
-                }
-            }
-
-            consoleLogs += `\n> Booting language server process…\n`;
-            consoleLogs += `> serverCmd: ${config.serverCmd}\n`;
-            useNotificationStore.getState().updateNotification(notifId, {
-                message: 'Booting up server…',
-                fullMessage: consoleLogs,
-            });
-
-            // Pipe native emitLog / ProcessServer stderr into notification + console
-            // (user builds via CI — no logcat; onLog is the debug channel)
-            let logHandle: { remove: () => void } | null = null;
-            try {
-                logHandle = await NativeTerminal.addListener('onLog', (ev: { message?: string }) => {
-                    const line = ev?.message ?? '';
-                    if (!line) return;
-                    // Only keep LSP-related noise during this boot
-                    if (!/LSP|typescript|tsserver|node|pkg/i.test(line)) return;
-                    consoleLogs += line + '\n';
-                    console.log('[LSP-native]', line);
-                    useNotificationStore.getState().updateNotification(notifId, {
-                        fullMessage: consoleLogs,
-                    });
-                });
-            } catch (e) {
-                console.warn('[LSP] onLog listener failed:', e);
-            }
-
-            const result = await NativeTerminal.spawnLsp({ command: config.serverCmd });
-
-            // Keep listener briefly so first stderr lines after spawn arrive
-            await new Promise(r => setTimeout(r, 400));
-            try { logHandle?.remove(); } catch (_) {}
-
-            if (result?.port) {
-                this.activePorts.set(language, result.port);
-                consoleLogs += `> spawnLsp returned port ${result.port}\n`;
-                useNotificationStore.getState().updateNotification(notifId, {
-                    message: 'Server process spawned. Connecting to editor…',
-                    fullMessage: consoleLogs,
-                });
-                return result.port;
-            }
-            throw new Error('Port not received from Java Backend');
-
-        } catch (err: any) {
-            console.error(`[LSP] Failed to start ${language} server:`, err);
-            useNotificationStore.getState().updateNotification(notifId, {
-                type: 'error',
-                message: `Boot failed: ${err.message}`,
-                fullMessage: consoleLogs + `\n[ERROR] ${err.message}`,
-            });
-            useStatusBarStore.getState().updateItem('lsp-status', {
-                label: 'LSP Error',
-                icon: 'error',
-                spin: false,
-                color: 'var(--vscode-errorForeground)',
-            });
-            return null;
-        }
-    }
-
-    /**
-     * Stops tracked LSP server(s).
-     * Always attempts a native killLsp so the language-server process
-     * and listening WebSocket are torn down — not just the JS port map.
-     */
-    /** Call after LSP initialize succeeds. */
-    public markAlive(language: string): void {
-        this.aliveLanguages.add(language);
-    }
-
-    /** Call when WebSocket dies / boot fails — forces respawn on next startServer. */
-    public invalidatePort(language: string): void {
-        this.activePorts.delete(language);
-        this.aliveLanguages.delete(language);
-    }
-
-    public stopServer(language?: string): void {
-        const killPort = (port: number) => {
-            // Drop every language key that shared this port (TS family sharePort)
-            for (const [lang, p] of [...this.activePorts.entries()]) {
-                if (p === port) {
-                    this.activePorts.delete(lang);
-                    this.aliveLanguages.delete(lang);
-                }
-            }
-            NativeTerminal.killLsp({ port }).catch((err: any) => {
-                console.warn(`[LSP] killLsp(${port}) failed:`, err);
-            });
-        };
-
-        if (language) {
-            const port = this.activePorts.get(language);
-            if (port != null) killPort(port);
-            else {
-                this.activePorts.delete(language);
-                this.aliveLanguages.delete(language);
-            }
+      // 2) packages
+      if (packages?.length) {
+        if (execMode === 'native' && Capacitor.isNativePlatform()) {
+          this.log(channel, `> pkgInstall: ${packages.join(', ')}`);
+          try {
+            await NativeTerminal.pkgInstall({ packages });
+            this.log(channel, '[pkg] already installed / install done');
+          } catch (e: any) {
+            this.log(channel, `[pkg] install error: ${e?.message || e}`);
+          }
         } else {
-            const ports = new Set(this.activePorts.values());
-            this.activePorts.clear();
-            this.aliveLanguages.clear();
-            for (const port of ports) {
-                NativeTerminal.killLsp({ port }).catch((err: any) => {
-                    console.warn(`[LSP] killLsp(${port}) failed:`, err);
-                });
-            }
-            NativeTerminal.killAllLsp?.().catch(() => {});
+          // Alpine: apk add
+          const apk = `apk add --no-cache ${packages.join(' ')}`;
+          this.log(channel, `> ${apk}`);
+          const r = taskManager.execute(apk, '/', (d) => this.log(channel, d), channel, 'proot');
+          const { exitCode } = await r.result;
+          if (exitCode !== 0) {
+            throw new Error(`apk add failed (exit ${exitCode})`);
+          }
         }
+      }
+
+      // 3) postInstall (e.g. npm install -g pyright)
+      const posts = config.postInstall || [];
+      for (const cmd of posts) {
+        this.log(channel, `> Executing: ${cmd}`);
+        let out = '';
+        const job = taskManager.execute(
+          cmd,
+          '/',
+          (d) => {
+            out += d;
+            this.log(channel, d);
+          },
+          channel,
+          execMode,
+        );
+        const { exitCode } = await job.result;
+        if (exitCode !== 0) {
+          const linkerFail =
+            /CANNOT LINK EXECUTABLE/i.test(out) ||
+            /cannot locate symbol/i.test(out) ||
+            /libnode|nodejs.*not found/i.test(out);
+          const err = new Error(
+            linkerFail
+              ? `LINKER_FAIL: ${cmd}`
+              : `Setup command failed: ${cmd}`,
+          );
+          (err as any).linkerFail = linkerFail;
+          (err as any).output = out;
+          throw err;
+        }
+      }
+    })();
+
+    try {
+      await this.installLocks[lockKey];
+    } finally {
+      delete this.installLocks[lockKey];
+    }
+  }
+
+  /**
+   * Ask user to switch terminal backend to Alpine (proot) after native failure.
+   */
+  private async confirmSwitchToAlpine(detail: string): Promise<boolean> {
+    const choice = await useModalStore.getState().showModal({
+      title: 'Native terminal failed',
+      message:
+        'Node/Python tools could not run in the Android (native) terminal.\n\n' +
+        'This usually means Termux node cannot load the right C++ libraries on this device.\n\n' +
+        'Switch to Linux Alpine (proot) terminal?\n' +
+        '• If Alpine is not set up yet, setup will run first.\n' +
+        '• Then LSP install will retry inside Alpine.\n\n' +
+        detail.slice(0, 280),
+      iconName: 'warning',
+      buttons: ['Switch to Alpine', 'Stay on Native'],
+    });
+    return choice === 'Switch to Alpine';
+  }
+
+  private async setDefaultExecMode(mode: ExecMode): Promise<void> {
+    try {
+      const store = useSettingsStore.getState();
+      if (typeof store.updateSetting === 'function') {
+        store.updateSetting('terminal.defaultExecMode', mode);
+      }
+    } catch { /* best effort */ }
+  }
+
+  /**
+   * Ensure Alpine rootfs exists (proot path). Uses native plugin if available.
+   */
+  private async ensureAlpineReady(channel: string): Promise<void> {
+    this.log(channel, '[Alpine] Ensuring proot rootfs…');
+    try {
+      if (typeof NativeTerminal.ensureProotRootfs === 'function') {
+        await NativeTerminal.ensureProotRootfs({});
+        this.log(channel, '[Alpine] ensureProotRootfs OK');
+        return;
+      }
+      // Fallback: open a short proot background command that forces rootfs extract
+      const probe = taskManager.execute(
+        'test -f /etc/alpine-release && cat /etc/alpine-release || echo missing',
+        '/',
+        (d) => this.log(channel, d),
+        channel,
+        'proot',
+      );
+      const { exitCode } = await probe.result;
+      if (exitCode !== 0) {
+        throw new Error('Alpine rootfs not ready');
+      }
+      this.log(channel, '[Alpine] rootfs ready');
+    } catch (e: any) {
+      this.log(channel, `[Alpine] setup error: ${e?.message || e}`);
+      throw e;
+    }
+  }
+
+  /**
+   * Install (if needed) and return a local port for the language server.
+   * Actual process spawn is still owned by native ProcessServer when present;
+   * here we guarantee tools exist under the chosen backend.
+   */
+  async startServer(lang: string): Promise<number | null> {
+    const config = this.dynamicConfigs[lang];
+    if (!config) {
+      console.warn(`[LspProcessManager] No config for ${lang}`);
+      return null;
     }
 
-    public getActiveLanguage(): string | null {
-        // Prefer a language that completed handshake; fall back to last port key.
-        const alive = [...this.aliveLanguages];
-        if (alive.length) return alive[alive.length - 1];
-        const keys = [...this.activePorts.keys()];
-        return keys.at(-1) ?? null;
+    const channel = `LSP: ${lang}`;
+    useOutputStore.getState().createChannel(channel);
+
+    let execMode = this.preferredExecMode();
+    this.log(channel, `Starting ${lang} (preferred backend: ${execMode})`);
+
+    try {
+      await this.ensureInstalled(lang, config, execMode, channel);
+    } catch (e: any) {
+      const linkerFail = !!(e?.linkerFail || /LINKER_FAIL|CANNOT LINK/i.test(String(e?.message)));
+      this.log(channel, `[ERROR] ${e?.message || e}`);
+
+      if (execMode === 'native' && linkerFail) {
+        const ok = await this.confirmSwitchToAlpine(String(e?.output || e?.message || ''));
+        if (ok) {
+          await this.setDefaultExecMode('proot');
+          useNotificationStore.getState().addNotification({
+            type: 'info',
+            title: 'Terminal backend',
+            source: 'LSP',
+            message: 'Switched default terminal to Linux Alpine (proot). Setting up…',
+          });
+          await this.ensureAlpineReady(channel);
+          execMode = 'proot';
+          await this.ensureInstalled(lang, config, 'proot', channel);
+        } else {
+          useNotificationStore.getState().addNotification({
+            type: 'error',
+            title: 'LSP setup failed',
+            source: 'LSP',
+            message: e?.message || 'Setup command failed',
+          });
+          throw e;
+        }
+      } else if (execMode === 'proot') {
+        // First time proot may need rootfs
+        try {
+          await this.ensureAlpineReady(channel);
+          await this.ensureInstalled(lang, config, 'proot', channel);
+        } catch (e2: any) {
+          useNotificationStore.getState().addNotification({
+            type: 'error',
+            title: 'LSP setup failed',
+            source: 'LSP',
+            message: e2?.message || 'Alpine setup failed',
+          });
+          throw e2;
+        }
+      } else {
+        useNotificationStore.getState().addNotification({
+          type: 'error',
+          title: 'LSP setup failed',
+          source: 'LSP',
+          message: e?.message || 'Setup command failed',
+        });
+        throw e;
+      }
     }
+
+    // Spawn language server if native bridge exposes it
+    try {
+      if (typeof NativeTerminal.startLspServer === 'function') {
+        const ret = await NativeTerminal.startLspServer({
+          language: lang,
+          serverCmd: config.serverCmd,
+          execType: execMode,
+        });
+        const port = ret?.port ?? null;
+        if (port != null) {
+          this.ports[lang] = { port, execMode };
+          this.activeLanguage = lang;
+          this.log(channel, `Server listening on ${port} (${execMode})`);
+          return port;
+        }
+      }
+    } catch (e: any) {
+      this.log(channel, `startLspServer: ${e?.message || e}`);
+    }
+
+    // Fallback: remember backend even without port (transport may attach later)
+    this.ports[lang] = { port: 0, execMode };
+    this.activeLanguage = lang;
+    this.log(channel, `Tools ready under ${execMode}; waiting for transport bind`);
+    return this.ports[lang].port || null;
+  }
 }
 
 export const lspProcessManager = new LspProcessManager();

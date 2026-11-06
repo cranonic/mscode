@@ -10,7 +10,13 @@ interface INativeTerminalPlugin {
    * Spawns an asynchronous background process or terminal worker thread on the mobile filesystem.
    * @param options Target execution arguments mapping setup variables.
    */
-  streamBackgroundExecute(options: { sessionId: string; command: string; cwd: string }): Promise<void>;
+  streamBackgroundExecute(options: {
+    sessionId: string;
+    command: string;
+    cwd: string;
+    /** 'native' = Termux $PREFIX; 'proot' = Alpine. Optional for older native builds. */
+    execType?: 'native' | 'proot';
+  }): Promise<void>;
   
   /**
    * Dispatches an immediate hard kill signal targeting a specific active system shell process thread.
@@ -159,6 +165,7 @@ class TaskManager {
     cwd:           string,
     onData:        (d: string) => void,
     outputChannel: string | false = false,
+    execType:      'native' | 'proot' = 'native',
   ): { result: Promise<{ exitCode: number }>; kill: () => void } {
     this.ensureListeners();
 
@@ -213,6 +220,7 @@ class TaskManager {
           sessionId,
           command: wrapped,
           cwd: safeCwd,
+          execType, // 'native' (Termux $PREFIX) or 'proot' (Alpine)
         });
       } else {
         // Fallback simulation mock grid rendering data sets on web browser sandbox footprints

@@ -3,9 +3,11 @@
 import { lspProcessManager } from '@/features/lsp/LspProcessManager';
 
 export interface LspServerConfig {
-  /** Array of package names to install via the system package manager (e.g., 'pkg i'). */
+  /** Package names for native (Termux $PREFIX / pkg). */
   packages: string[];
-  /** Optional shell commands to run after packages are installed (e.g., 'pip install'). */
+  /** Optional Alpine/apk package names when terminal backend is proot. */
+  prootPackages?: string[];
+  /** Optional shell commands after packages are installed (e.g. 'npm install -g pyright'). */
   postInstall?: string[];
   /** Shell command to check if the server is already installed. Must return exit code 0. */
   checkCmd: string;
