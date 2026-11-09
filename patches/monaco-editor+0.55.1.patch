@@ -507,10 +507,10 @@ index 4da52ba..516a9db 100644
              throw new Error('Invalid arguments');
          }
 diff --git a/node_modules/monaco-editor/esm/vs/editor/common/viewLayout/viewLayout.js b/node_modules/monaco-editor/esm/vs/editor/common/viewLayout/viewLayout.js
-index 326dec8..9bf93dd 100644
+index 326dec8..7f7d726 100644
 --- a/node_modules/monaco-editor/esm/vs/editor/common/viewLayout/viewLayout.js
 +++ b/node_modules/monaco-editor/esm/vs/editor/common/viewLayout/viewLayout.js
-@@ -346,6 +346,15 @@ class ViewLayout extends Disposable {
+@@ -346,6 +346,16 @@ class ViewLayout extends Disposable {
          return this._scrollable.validateScrollPosition(scrollPosition);
      }
      setScrollPosition(position, type) {
@@ -519,14 +519,15 @@ index 326dec8..9bf93dd 100644
 +        try {
 +            if (typeof globalThis !== 'undefined'
 +                && globalThis.__monacoTouchScrolling
-+                && !globalThis.__monacoAllowScrollApply) {
++                && !globalThis.__monacoAllowScrollApply
++                && !globalThis.__monacoScrollbarDragging) {
 +                return;
 +            }
 +        } catch (_) { /* ignore */ }
          if (type === 1 /* ScrollType.Immediate */) {
              this._scrollable.setScrollPositionNow(position);
          }
-@@ -358,10 +367,23 @@ class ViewLayout extends Disposable {
+@@ -358,10 +368,23 @@ class ViewLayout extends Disposable {
      }
      deltaScrollNow(deltaScrollLeft, deltaScrollTop) {
          const currentScrollPosition = this._scrollable.getCurrentScrollPosition();

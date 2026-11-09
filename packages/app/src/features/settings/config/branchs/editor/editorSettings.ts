@@ -10,6 +10,7 @@ import { minimapProperties }     from './parts/minimapSettings';
 import { suggestionProperties }  from './parts/suggestionSettings';
 import { menuProperties }  from './parts/menuSettings';
 import { findProperties, formattingProperties } from './parts/findSettings';
+import { touchProperties } from './parts/touchSettings';
 
 export const editorSection: IConfigurationSection = {
   id: 'editor',
@@ -26,5 +27,6 @@ export const editorSection: IConfigurationSection = {
     ...suggestionProperties,  // Quick Suggestions, Hover, InlayHints, Params…
     ...findProperties,        // Find Loop, Seed, Auto Find…
     ...formattingProperties,  // Format On Save/Type/Paste…
+    ...touchProperties
   },
 };
