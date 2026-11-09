@@ -1,5 +1,5 @@
 // src/features/editor/components/Scrollbar/EditorScrollbar.tsx
-// SPCK-style: continuous thumb drag (X+Y), no stop, no React re-render jank mid-drag.
+// Continuous thumb drag: editor always follows thumb (no stop mid-drag).
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import './EditorScrollbar.css';
@@ -37,18 +37,20 @@ interface EditorScrollbarProps {
   config?: Partial<ScrollbarConfig>;
 }
 
-function setScrollbarDragging(on: boolean) {
+function beginScrollApply() {
   try {
-    (globalThis as any).__monacoScrollbarDragging = on;
-    if (on) {
-      // don't let touch-scroll block setScrollTop during thumb drag
-      (globalThis as any).__monacoAllowScrollApply = true;
-    } else {
-      (globalThis as any).__monacoAllowScrollApply = false;
-    }
-  } catch {
-    /* ignore */
-  }
+    (globalThis as any).__monacoScrollbarDragging = true;
+    (globalThis as any).__monacoAllowScrollApply = true;
+    // Don't let touch-scroll block path win mid-drag
+    (globalThis as any).__monacoTouchScrolling = false;
+  } catch { /* ignore */ }
+}
+
+function endScrollApply() {
+  try {
+    (globalThis as any).__monacoScrollbarDragging = false;
+    (globalThis as any).__monacoAllowScrollApply = false;
+  } catch { /* ignore */ }
 }
 
 export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config: cfgOverride }) => {
@@ -69,21 +71,16 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
   const yTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const xTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // Live metrics during drag (avoid stale React state)
-  const metricsRef = useRef({ scrollTop: 0, scrollLeft: 0, contentH: 1, contentW: 1, viewH: 1, viewW: 1, maxST: 0, maxSL: 0 });
+  const metricsRef = useRef({
+    scrollTop: 0, scrollLeft: 0, contentH: 1, contentW: 1, viewH: 1, viewW: 1, maxST: 0, maxSL: 0,
+  });
   const yThumbRef = useRef<HTMLDivElement>(null);
   const xThumbRef = useRef<HTMLDivElement>(null);
   const yTrackRef = useRef<HTMLDivElement>(null);
   const xTrackRef = useRef<HTMLDivElement>(null);
 
-  const yDrag = useRef<{ on: boolean; pointerId: number; startClient: number; startScroll: number }>({
-    on: false, pointerId: -1, startClient: 0, startScroll: 0,
-  });
-  const xDrag = useRef<{ on: boolean; pointerId: number; startClient: number; startScroll: number }>({
-    on: false, pointerId: -1, startClient: 0, startScroll: 0,
-  });
-  const rafRef = useRef<number | null>(null);
-  const pendingScroll = useRef<{ top?: number; left?: number } | null>(null);
+  const yDrag = useRef({ on: false, pointerId: -1, startClient: 0, startScroll: 0 });
+  const xDrag = useRef({ on: false, pointerId: -1, startClient: 0, startScroll: 0 });
 
   const showY = useCallback((delay: number) => {
     if (yAlways) return;
@@ -99,28 +96,27 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
     xTimer.current = setTimeout(() => setXVis(0), delay);
   }, [xAlways]);
 
-  const keepYVisible = useCallback(() => {
-    if (!yAlways) setYVis(1);
-  }, [yAlways]);
-  const keepXVisible = useCallback(() => {
-    if (!xAlways) setXVis(1);
-  }, [xAlways]);
+  const keepYVisible = useCallback(() => { if (!yAlways) setYVis(1); }, [yAlways]);
+  const keepXVisible = useCallback(() => { if (!xAlways) setXVis(1); }, [xAlways]);
 
-  const flushScroll = useCallback(() => {
-    rafRef.current = null;
-    const p = pendingScroll.current;
-    pendingScroll.current = null;
-    if (!p || !editor || editor._isDisposed) return;
-    if (p.top !== undefined) editor.setScrollTop(p.top);
-    if (p.left !== undefined) editor.setScrollLeft?.(p.left);
+  /** Live metrics from editor — never trust stale maxST mid-drag */
+  const refreshMetrics = useCallback(() => {
+    if (!editor || editor._isDisposed) return metricsRef.current;
+    const st = editor.getScrollTop();
+    const sl = editor.getScrollLeft?.() ?? 0;
+    const ch = editor.getScrollHeight?.() ?? editor.getContentHeight?.() ?? 1;
+    const cw = editor.getScrollWidth?.() ?? 1;
+    const li = editor.getLayoutInfo();
+    const vh = li.height;
+    const vw = li.width;
+    // Prefer scrollHeight - height for max (matches Monaco internal)
+    const maxST = Math.max(0, ch - vh);
+    const maxSL = Math.max(0, cw - vw);
+    metricsRef.current = {
+      scrollTop: st, scrollLeft: sl, contentH: ch, contentW: cw, viewH: vh, viewW: vw, maxST, maxSL,
+    };
+    return metricsRef.current;
   }, [editor]);
-
-  const scheduleScroll = useCallback((next: { top?: number; left?: number }) => {
-    pendingScroll.current = { ...pendingScroll.current, ...next };
-    if (rafRef.current == null) {
-      rafRef.current = requestAnimationFrame(flushScroll);
-    }
-  }, [flushScroll]);
 
   const updateThumbDom = useCallback(() => {
     const m = metricsRef.current;
@@ -138,37 +134,51 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
     }
   }, [cfg.thumbFixedSize]);
 
+  /** Apply scroll immediately with flags held open */
+  const applyScrollTop = useCallback((top: number) => {
+    if (!editor || editor._isDisposed) return;
+    beginScrollApply();
+    try {
+      editor.setScrollTop(top);
+      // If Monaco still ignored, force via layout API
+      const got = editor.getScrollTop();
+      if (Math.abs(got - top) > 1) {
+        editor.setScrollTop(top);
+      }
+      metricsRef.current.scrollTop = editor.getScrollTop();
+    } finally {
+      // keep dragging flag true while finger is down — endScrollApply only on pointerup
+      if (!yDrag.current.on && !xDrag.current.on) endScrollApply();
+      else beginScrollApply();
+    }
+  }, [editor]);
+
+  const applyScrollLeft = useCallback((left: number) => {
+    if (!editor || editor._isDisposed) return;
+    beginScrollApply();
+    try {
+      editor.setScrollLeft?.(left);
+      metricsRef.current.scrollLeft = editor.getScrollLeft?.() ?? left;
+    } finally {
+      if (!yDrag.current.on && !xDrag.current.on) endScrollApply();
+      else beginScrollApply();
+    }
+  }, [editor]);
+
   useEffect(() => {
     if (!editor || editor._isDisposed) return;
 
-    const syncMetrics = () => {
-      const st = editor.getScrollTop();
-      const sl = editor.getScrollLeft?.() ?? 0;
-      const ch = editor.getContentHeight();
-      const cw = editor.getScrollWidth?.() ?? 1;
-      const li = editor.getLayoutInfo();
-      const vh = li.height;
-      const vw = li.width;
-      metricsRef.current = {
-        scrollTop: st,
-        scrollLeft: sl,
-        contentH: ch,
-        contentW: cw,
-        viewH: vh,
-        viewW: vw,
-        maxST: Math.max(0, ch - vh),
-        maxSL: Math.max(0, cw - vw),
-      };
-      setScrollTop(st);
-      setScrollLeft(sl);
-      setContentH(ch);
-      setContentW(cw);
-      setViewH(vh);
-      setViewW(vw);
+    const sync = () => {
+      const m = refreshMetrics();
+      setScrollTop(m.scrollTop);
+      setScrollLeft(m.scrollLeft);
+      setContentH(m.contentH);
+      setContentW(m.contentW);
+      setViewH(m.viewH);
+      setViewW(m.viewW);
       updateThumbDom();
     };
-
-    syncMetrics();
+    sync();
     if (cfg.showOnMount) {
       showY(cfg.mountFlashDuration);
       showX(cfg.mountFlashDuration);
@@ -178,9 +188,8 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
       editor.onDidScrollChange((e: any) => {
         metricsRef.current.scrollTop = e.scrollTop;
         metricsRef.current.scrollLeft = e.scrollLeft;
-        // During drag, only move thumb via DOM — skip React setState (no jank)
         if (yDrag.current.on || xDrag.current.on) {
-          updateThumbDom();
+          // During drag thumb is driven by finger math; still sync metrics
           return;
         }
         if (e.scrollTopChanged) {
@@ -196,44 +205,47 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
       editor.onDidContentSizeChange((e: any) => {
         metricsRef.current.contentH = e.contentHeight;
         metricsRef.current.contentW = e.contentWidth ?? 1;
-        metricsRef.current.maxST = Math.max(0, e.contentHeight - metricsRef.current.viewH);
-        metricsRef.current.maxSL = Math.max(0, (e.contentWidth ?? 1) - metricsRef.current.viewW);
-        setContentH(e.contentHeight);
-        setContentW(e.contentWidth ?? 1);
+        const m = refreshMetrics();
+        setContentH(m.contentH);
+        setContentW(m.contentW);
       }),
-      editor.onDidLayoutChange((e: any) => {
-        metricsRef.current.viewH = e.height;
-        metricsRef.current.viewW = e.width;
-        metricsRef.current.maxST = Math.max(0, metricsRef.current.contentH - e.height);
-        metricsRef.current.maxSL = Math.max(0, metricsRef.current.contentW - e.width);
-        setViewH(e.height);
-        setViewW(e.width);
+      editor.onDidLayoutChange(() => {
+        const m = refreshMetrics();
+        setViewH(m.viewH);
+        setViewW(m.viewW);
       }),
     ];
 
     const onPointerMove = (e: PointerEvent) => {
       if (yDrag.current.on && e.pointerId === yDrag.current.pointerId) {
         e.preventDefault();
-        const m = metricsRef.current;
+        beginScrollApply();
+        const m = refreshMetrics();
         const maxYOffset = Math.max(1, m.viewH - cfg.thumbFixedSize);
         const ratio = m.maxST / maxYOffset;
         const delta = e.clientY - yDrag.current.startClient;
         const next = Math.max(0, Math.min(yDrag.current.startScroll + delta * ratio, m.maxST));
+        // Thumb tracks intended scroll (even if editor lags one frame)
         metricsRef.current.scrollTop = next;
+        metricsRef.current.maxST = m.maxST;
+        metricsRef.current.viewH = m.viewH;
         updateThumbDom();
-        scheduleScroll({ top: next });
+        applyScrollTop(next);
         keepYVisible();
       }
       if (xDrag.current.on && e.pointerId === xDrag.current.pointerId) {
         e.preventDefault();
-        const m = metricsRef.current;
+        beginScrollApply();
+        const m = refreshMetrics();
         const maxXOffset = Math.max(1, m.viewW - cfg.thumbFixedSize);
         const ratio = m.maxSL / maxXOffset;
         const delta = e.clientX - xDrag.current.startClient;
         const next = Math.max(0, Math.min(xDrag.current.startScroll + delta * ratio, m.maxSL));
         metricsRef.current.scrollLeft = next;
+        metricsRef.current.maxSL = m.maxSL;
+        metricsRef.current.viewW = m.viewW;
         updateThumbDom();
-        scheduleScroll({ left: next });
+        applyScrollLeft(next);
         keepXVisible();
       }
     };
@@ -241,15 +253,19 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
     const onPointerUp = (e: PointerEvent) => {
       if (yDrag.current.on && e.pointerId === yDrag.current.pointerId) {
         yDrag.current.on = false;
-        setScrollbarDragging(false);
+        endScrollApply();
         showY(cfg.autoHideDelay);
-        setScrollTop(metricsRef.current.scrollTop);
+        const m = refreshMetrics();
+        setScrollTop(m.scrollTop);
+        updateThumbDom();
       }
       if (xDrag.current.on && e.pointerId === xDrag.current.pointerId) {
         xDrag.current.on = false;
-        setScrollbarDragging(false);
+        endScrollApply();
         showX(cfg.autoHideDelay);
-        setScrollLeft(metricsRef.current.scrollLeft);
+        const m = refreshMetrics();
+        setScrollLeft(m.scrollLeft);
+        updateThumbDom();
       }
     };
 
@@ -264,10 +280,9 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerUp);
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-      setScrollbarDragging(false);
+      endScrollApply();
     };
-  }, [editor, cfg, showY, showX, keepYVisible, keepXVisible, scheduleScroll, updateThumbDom]);
+  }, [editor, cfg, showY, showX, keepYVisible, keepXVisible, updateThumbDom, refreshMetrics, applyScrollTop, applyScrollLeft]);
 
   const maxST = Math.max(0, contentH - viewH);
   const maxSL = Math.max(0, contentW - viewW);
@@ -285,30 +300,32 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
     e.preventDefault();
     e.stopPropagation();
     (e.currentTarget as HTMLDivElement).setPointerCapture?.(e.pointerId);
+    const m = refreshMetrics();
     yDrag.current = {
       on: true,
       pointerId: e.pointerId,
       startClient: e.clientY,
-      startScroll: editor.getScrollTop(),
+      startScroll: m.scrollTop,
     };
     clearTimeout(yTimer.current);
     keepYVisible();
-    setScrollbarDragging(true);
+    beginScrollApply();
   };
 
   const beginX = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     (e.currentTarget as HTMLDivElement).setPointerCapture?.(e.pointerId);
+    const m = refreshMetrics();
     xDrag.current = {
       on: true,
       pointerId: e.pointerId,
       startClient: e.clientX,
-      startScroll: editor.getScrollLeft?.() ?? 0,
+      startScroll: m.scrollLeft,
     };
     clearTimeout(xTimer.current);
     keepXVisible();
-    setScrollbarDragging(true);
+    beginScrollApply();
   };
 
   const onYTrackDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -317,11 +334,11 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
     e.stopPropagation();
     const rect = yTrackRef.current!.getBoundingClientRect();
     const ratio = (e.clientY - rect.top) / rect.height;
-    const m = metricsRef.current;
+    const m = refreshMetrics();
     const next = Math.max(0, Math.min(ratio * m.contentH - m.viewH / 2, m.maxST));
-    setScrollbarDragging(true);
-    editor.setScrollTop(next);
-    setScrollbarDragging(false);
+    beginScrollApply();
+    applyScrollTop(next);
+    endScrollApply();
     showY(cfg.autoHideDelay);
   };
 
@@ -331,11 +348,11 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
     e.stopPropagation();
     const rect = xTrackRef.current!.getBoundingClientRect();
     const ratio = (e.clientX - rect.left) / rect.width;
-    const m = metricsRef.current;
+    const m = refreshMetrics();
     const next = Math.max(0, Math.min(ratio * m.contentW - m.viewW / 2, m.maxSL));
-    setScrollbarDragging(true);
-    editor.setScrollLeft?.(next);
-    setScrollbarDragging(false);
+    beginScrollApply();
+    applyScrollLeft(next);
+    endScrollApply();
     showX(cfg.autoHideDelay);
   };
 
@@ -347,13 +364,21 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
         <div
           ref={yTrackRef}
           className="ms-sb-track ms-sb-track--y"
-          style={{ opacity: yVis, width: cfg.trackWidth, height: hasBoth ? `calc(100% - ${cfg.trackWidth}px)` : '100%' }}
+          style={{
+            opacity: yVis,
+            width: cfg.trackWidth,
+            height: hasBoth ? `calc(100% - ${cfg.trackWidth}px)` : '100%',
+          }}
           onPointerDown={onYTrackDown}
         >
           <div
             ref={yThumbRef}
             className="ms-sb-thumb ms-sb-thumb--y"
-            style={{ height: yThumbH, width: cfg.thumbWidth, transform: `translate3d(0, ${yOffset}px, 0)` }}
+            style={{
+              height: yThumbH,
+              width: cfg.thumbWidth,
+              transform: `translate3d(0, ${yOffset}px, 0)`,
+            }}
             onPointerDown={beginY}
           />
         </div>
@@ -362,13 +387,21 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
         <div
           ref={xTrackRef}
           className="ms-sb-track ms-sb-track--x"
-          style={{ opacity: xVis, height: cfg.trackWidth, width: hasBoth ? `calc(100% - ${cfg.trackWidth}px)` : '100%' }}
+          style={{
+            opacity: xVis,
+            height: cfg.trackWidth,
+            width: hasBoth ? `calc(100% - ${cfg.trackWidth}px)` : '100%',
+          }}
           onPointerDown={onXTrackDown}
         >
           <div
             ref={xThumbRef}
             className="ms-sb-thumb ms-sb-thumb--x"
-            style={{ width: xThumbW, height: cfg.thumbWidth, transform: `translate3d(${xOffset}px, 0, 0)` }}
+            style={{
+              width: xThumbW,
+              height: cfg.thumbWidth,
+              transform: `translate3d(${xOffset}px, 0, 0)`,
+            }}
             onPointerDown={beginX}
           />
         </div>
