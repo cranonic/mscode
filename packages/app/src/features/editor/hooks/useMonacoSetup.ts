@@ -21,8 +21,8 @@ interface UseMonacoSetupOptions {
 export function useMonacoSetup({
   tabId,
   editorRef,
-  isScrollingRef,
-  userScrollingRef,
+  // isScrollingRef,
+  // userScrollingRef,
   isDraggingRef,
   updateTeardrops,
   setTeardropsOn,
