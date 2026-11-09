@@ -105,7 +105,7 @@ export const terminalSection: IConfigurationSection = {
       title: 'Show Selection Lens',
       type: 'boolean',
       subCategory: 'Appearance',
-      defaultValue: true,
+      defaultValue: false,
       order: 16,
       tags: ['terminal', 'selection'],
       markdownDescription:
