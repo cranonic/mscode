@@ -67,7 +67,6 @@ export const TeardropsOverlay: React.FC<TeardropsOverlayProps> = ({
     }
   };
 
-  // Active handle stays fully visible; idle handles slightly soft while dragging
   const styleFor = (type: 'cursor' | 'start' | 'end'): React.CSSProperties => {
     const isActive = activeDragType === type;
     const isDragging = activeDragType != null;
@@ -77,35 +76,33 @@ export const TeardropsOverlay: React.FC<TeardropsOverlayProps> = ({
       transition: isDragging ? 'none' : 'opacity 0.15s',
       zIndex: isActive ? 120 : 100,
       pointerEvents: 'auto',
+      // Anchor transform to the selection EDGE, not geometric center of drop:
+      // start → right edge of handle = edge; end → left edge; cursor → center
+      marginLeft:
+        type === 'start' ? -DROP_W : type === 'end' ? 0 : -DROP_W / 2,
     };
   };
 
   return (
     <>
       <style>{`
-        @keyframes ms-caret-blink {
-          0%, 49% { opacity: 1; }
+        
           50%, 100% { opacity: 0; }
-        }
-        .ms-teardrop-caret--blink {
-          animation: ms-caret-blink 1s step-end infinite;
-        }
-        .ms-teardrop-handle {
-          position: absolute;
         }
         .ms-teardrop-handle__body {
           position: relative;
           display: flex;
           flex-direction: column;
           align-items: center;
+          width: ${DROP_W}px;
         }
       `}</style>
 
-      {/* Cursor Drop — caret always on tip when shown / active */}
+      {/* Single cursor handle — caret center 50% */}
       <div
         ref={cursorDOMRef}
         className="ms-teardrop-handle"
-        style={{ ...styleFor('cursor'), marginLeft: -DROP_W / 2 }}
+        style={styleFor('cursor')}
         onTouchStart={onDragStart}
         onTouchMove={e => onDragMove(e, 'cursor')}
         onTouchEnd={handleTouchEnd}
@@ -114,16 +111,16 @@ export const TeardropsOverlay: React.FC<TeardropsOverlayProps> = ({
         onContextMenu={e => e.preventDefault()}
       >
         <div className="ms-teardrop-handle__body">
-          <HandleCaret visible blinking={activeDragType === 'cursor' || activeDragType == null} />
+          <HandleCaret visible align="center" />
           <CursorDropSVG />
         </div>
       </div>
 
-      {/* Start Drop */}
+      {/* Left / start handle — caret at right: 0% */}
       <div
         ref={selectionStartDOMRef}
         className="ms-teardrop-handle"
-        style={{ ...styleFor('start'), marginLeft: -DROP_W }}
+        style={styleFor('start')}
         onTouchStart={onDragStart}
         onTouchMove={e => onDragMove(e, 'start')}
         onTouchEnd={handleTouchEnd}
@@ -132,12 +129,12 @@ export const TeardropsOverlay: React.FC<TeardropsOverlayProps> = ({
         onContextMenu={e => e.preventDefault()}
       >
         <div className="ms-teardrop-handle__body">
-          <HandleCaret visible={activeDragType === 'start'} blinking />
+          <HandleCaret visible={activeDragType === 'start' || activeDragType == null} align="start" />
           <StartDropSVG />
         </div>
       </div>
 
-      {/* End Drop */}
+      {/* Right / end handle — caret at left: 0% */}
       <div
         ref={selectionEndDOMRef}
         className="ms-teardrop-handle"
@@ -150,7 +147,7 @@ export const TeardropsOverlay: React.FC<TeardropsOverlayProps> = ({
         onContextMenu={e => e.preventDefault()}
       >
         <div className="ms-teardrop-handle__body">
-          <HandleCaret visible={activeDragType === 'end'} blinking />
+          <HandleCaret visible={activeDragType === 'end' || activeDragType == null} align="end" />
           <EndDropSVG />
         </div>
       </div>

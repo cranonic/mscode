@@ -3,8 +3,7 @@ import React from 'react';
 
 export const ACCENT = 'var(--ms-accent-color, #007acc)';
 export const DROP_W = 32;
-export const DROP_H = 36;
-/** Caret height sitting on top of the teardrop tip (SPCK-style) */
+export const DROP_H = 38;
 export const CARET_H = 22;
 export const CARET_W = 2;
 
@@ -13,7 +12,7 @@ export const CursorDropSVG = ({ style = {} as React.CSSProperties }) => (
     width={DROP_W}
     height={DROP_H}
     viewBox="0 0 24 32"
-    style={{ display: 'block', transform: 'translateX(1px)', ...style }}
+    style={{ display: 'block', ...style }}
   >
     <path
       d="M12 0
@@ -43,29 +42,43 @@ export const EndDropSVG = () => (
   />
 );
 
+export type CaretAlign = 'start' | 'end' | 'center';
+
 /**
- * Thin caret drawn ABOVE the teardrop tip.
- * "পুকুর ছাড়া জল হয় না — cursor ছাড়া teardrop হয় না"
+ * Solid white caret on teardrop tip — no blink, no animation.
+ * Align:
+ * - start → right: 0%
+ * - end   → left: 0%
+ * - center→ left: 50%
  */
-export const HandleCaret: React.FC<{ visible?: boolean; blinking?: boolean }> = ({
-  visible = true,
-  blinking = true,
-}) => {
+export const HandleCaret: React.FC<{
+  visible?: boolean;
+  align?: CaretAlign;
+}> = ({ visible = true, align = 'center' }) => {
   if (!visible) return null;
+
+  const horiz: React.CSSProperties =
+    align === 'start'
+      ? { left: 'auto', right: 0, marginLeft: 0 }
+      : align === 'end'
+        ? { left: 0, right: 'auto', marginLeft: 0 }
+        : { left: '50%', right: 'auto', marginLeft: -CARET_W / 2 };
+
   return (
     <div
-      className={blinking ? 'ms-teardrop-caret ms-teardrop-caret--blink' : 'ms-teardrop-caret'}
+      className="ms-teardrop-caret"
       style={{
         position: 'absolute',
-        left: '50%',
-        top: -CARET_H + 2,
+        top: -CARET_H + 4,
         width: CARET_W,
         height: CARET_H,
-        marginLeft: -CARET_W / 2,
-        background: ACCENT,
+        background: '#ffffff',
         borderRadius: 1,
         pointerEvents: 'none',
-        boxShadow: '0 0 0 1px rgba(0,0,0,0.15)',
+        boxShadow: '0 0 0 1px rgba(0,0,0,0.25)',
+        opacity: 1,
+        animation: 'none',
+        ...horiz,
       }}
     />
   );

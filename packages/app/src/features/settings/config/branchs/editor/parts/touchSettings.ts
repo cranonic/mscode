@@ -16,7 +16,7 @@ export const touchProperties: IConfigurationSection['properties'] = {
     title: 'Selection Magnifier Lens',
     type: 'boolean',
     subCategory: 'Touch',
-    defaultValue: true,
+    defaultValue: false,
     order: 2,
     tags: ['touch', 'teardrops', 'lens'],
     description:

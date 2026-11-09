@@ -103,7 +103,7 @@ export const SelectionMagnifier: React.FC<SelectionMagnifierProps> = ({
       className="ms-selection-magnifier"
       style={{
         position: 'fixed',
-        top: 0,
+        top: '-20px',
         left: 0,
         width,
         height,

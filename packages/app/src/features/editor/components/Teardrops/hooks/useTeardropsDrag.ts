@@ -1,22 +1,20 @@
 // src/features/editor/components/Teardrops/hooks/useTeardropsDrag.ts
-// Phase 2 SPCK selection feel:
-// - Free handle under finger (smooth)
-// - Caret on tip (overlay HandleCaret)
-// - Tip Y lightly biased toward glyph baseline of sticky line (less float)
-// - Line switch hysteresis: down 0.42×, up 0.55× lineHeight
-// - Character-precise X via hit on sticky line mid
+//
+// Visual vs logic split (SPCK):
+// - Teardrop handle: 100% free under finger (any %, no 50% stepping)
+// - Selection line: only changes when finger/caret crosses >50% of CURRENT line (up)
+// - On grab after double-tap: sticky line = existing selection edge (no instant jump up)
 
 import { useRef, useState, useCallback } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 
 const DROP_H = 36;
 const CARET_H = 22;
-/** Hit-test lift: caret + drop tip into glyph row */
-const HIT_LIFT = DROP_H + CARET_H * 0.4;
+/** Default distance from finger on teardrop bulb to handle origin (top tip of teardrop) */
+const DEFAULT_HANDLE_LIFT = 28;
 const LINE_SWITCH_FRAC_DOWN = 0.42;
-const LINE_SWITCH_FRAC_UP = 0.55;
-/** How much handle Y blends toward true baseline (0=pure finger, 1=locked to line) */
-const BASELINE_BLEND = 0.35;
+/** Up only when past >50% of the current selected line */
+const LINE_SWITCH_FRAC_UP = 0.51;
 
 interface UseTeardropsDragOptions {
   editorRef: MutableRefObject<any>;
@@ -55,7 +53,12 @@ export function useTeardropsDrag({
   const dragAnchorRef = useRef<any>(null);
   const lastPosRef = useRef<{ lineNumber: number; column: number } | null>(null);
   const latestTouchRef = useRef<{ x: number; y: number; type: 'cursor' | 'start' | 'end' } | null>(null);
+  /** Selection sticky line — independent of free handle Y */
   const stickyLineRef = useRef<number | null>(null);
+  /** Which edge we are dragging — set on first move */
+  const dragTypeRef = useRef<'cursor' | 'start' | 'end' | null>(null);
+  /** Finger offset below handle origin (teardrop tip / bottom of caret) */
+  const handleLiftRef = useRef<number>(DEFAULT_HANDLE_LIFT);
 
   const [activeDragType, setActiveDragType] = useState<'cursor' | 'start' | 'end' | null>(null);
 
@@ -96,97 +99,115 @@ export function useTeardropsDrag({
       dragAnchorRef.current = null;
       lastPosRef.current = null;
       stickyLineRef.current = null;
+      dragTypeRef.current = null;
+
+      // Measure exact finger distance below the handle origin (bottom of selected line)
+      const touch = e.touches[0];
+      const handleEl = e.currentTarget as HTMLElement | null;
+      if (touch && handleEl) {
+        const handleRect = handleEl.getBoundingClientRect();
+        const rawLift = touch.clientY - handleRect.top;
+        handleLiftRef.current = Math.max(18, Math.min(DROP_H + 4, rawLift));
+      } else {
+        handleLiftRef.current = DEFAULT_HANDLE_LIFT;
+      }
+
       if (onDragStartCb) onDragStartCb();
     },
     [isDraggingRef, onDragStartCb],
   );
 
-  const positionFromFinger = useCallback((editor: any, clientX: number, clientY: number) => {
-    const raw =
-      editor.getTargetAtClientPoint(clientX, clientY - HIT_LIFT) ||
-      editor.getTargetAtClientPoint(clientX, clientY - DROP_H) ||
-      editor.getTargetAtClientPoint(clientX, clientY - 16);
+  /**
+   * Selection position from finger — sticky line hysteresis only.
+   * Uses the exact middle of the visible Caret (handleLift + half caret height).
+   */
+  const positionFromFinger = useCallback(
+    (editor: any, clientX: number, clientY: number, type: 'cursor' | 'start' | 'end') => {
+      // Middle of the visible Caret = handle tip (clientY - handleLift) minus half caret height
+      const hitLift = handleLiftRef.current + CARET_H * 0.45;
 
-    if (!raw?.position) return null;
+      const raw =
+        editor.getTargetAtClientPoint(clientX, clientY - hitLift) ||
+        editor.getTargetAtClientPoint(clientX, clientY - handleLiftRef.current) ||
+        editor.getTargetAtClientPoint(clientX, clientY - 16);
 
-    let lineNumber = raw.position.lineNumber;
-    let column = raw.position.column;
+      if (!raw?.position) return null;
 
-    if (stickyLineRef.current == null) {
-      stickyLineRef.current = lineNumber;
-    }
+      let column = raw.position.column;
+      const hitLine = raw.position.lineNumber;
+      const dom = editor.getDomNode?.() as HTMLElement | null;
 
-    const sticky = stickyLineRef.current!;
-    const stickyVis = editor.getScrolledVisiblePosition({ lineNumber: sticky, column: 1 });
-    const dom = editor.getDomNode?.() as HTMLElement | null;
-    const lineHeight = Math.max(14, stickyVis?.height ?? 20);
-
-    if (stickyVis && dom) {
-      const rect = dom.getBoundingClientRect();
-      const lineMidClientY = rect.top + stickyVis.top + stickyVis.height / 2;
-      const dy = clientY - HIT_LIFT - lineMidClientY;
-
-      if (dy > lineHeight * LINE_SWITCH_FRAC_DOWN) {
-        const maxLine = editor.getModel()?.getLineCount?.() ?? sticky + 1;
-        stickyLineRef.current = Math.min(maxLine, sticky + 1);
-      } else if (dy < -lineHeight * LINE_SWITCH_FRAC_UP) {
-        stickyLineRef.current = Math.max(1, sticky - 1);
-      }
-    }
-
-    lineNumber = stickyLineRef.current ?? lineNumber;
-
-    // Column from X on sticky line mid-Y (character precise, not next-line noise)
-    const stickyVis2 = editor.getScrolledVisiblePosition({ lineNumber, column: 1 });
-    if (stickyVis2 && dom) {
-      const rect = dom.getBoundingClientRect();
-      const yOnLine = rect.top + stickyVis2.top + stickyVis2.height * 0.5;
-      const hit =
-        editor.getTargetAtClientPoint(clientX, yOnLine) ||
-        editor.getTargetAtClientPoint(clientX, clientY - HIT_LIFT);
-      if (hit?.position) {
-        const model = editor.getModel?.();
-        const maxCol = model?.getLineMaxColumn?.(lineNumber) ?? hit.position.column;
-        if (hit.position.lineNumber === lineNumber) {
-          column = hit.position.column;
+      // ── Seed sticky from EXISTING selection edge (prevents jump on grab) ──
+      if (stickyLineRef.current == null) {
+        const sel = editor.getSelection?.();
+        if (sel && !sel.isEmpty() && type !== 'cursor') {
+          stickyLineRef.current =
+            type === 'start'
+              ? sel.getStartPosition().lineNumber
+              : sel.getEndPosition().lineNumber;
+        } else if (sel && sel.isEmpty() && type === 'cursor') {
+          stickyLineRef.current = sel.getStartPosition().lineNumber;
         } else {
-          column = Math.max(1, Math.min(hit.position.column, maxCol));
+          stickyLineRef.current = hitLine;
         }
       }
-    }
 
-    return { lineNumber, column };
-  }, []);
+      const sticky = stickyLineRef.current!;
+      const stickyVis = editor.getScrolledVisiblePosition({ lineNumber: sticky, column: 1 });
+      const lineHeight = Math.max(14, stickyVis?.height ?? 20);
+
+      if (stickyVis && dom) {
+        const rect = dom.getBoundingClientRect();
+        // Caret mid sample relative to CURRENT selection line mid
+        const lineMidClientY = rect.top + stickyVis.top + stickyVis.height / 2;
+        const dy = clientY - hitLift - lineMidClientY;
+
+        if (dy > lineHeight * LINE_SWITCH_FRAC_DOWN) {
+          const maxLine = editor.getModel()?.getLineCount?.() ?? sticky + 1;
+          stickyLineRef.current = Math.min(maxLine, sticky + 1);
+        } else if (dy < -lineHeight * LINE_SWITCH_FRAC_UP) {
+          // Only after >50% of current line upward
+          stickyLineRef.current = Math.max(1, sticky - 1);
+        }
+        // else: stay on sticky — no jump
+      }
+
+      const lineNumber = stickyLineRef.current ?? hitLine;
+
+      // Column from X on sticky line mid (character-precise)
+      const stickyVis2 = editor.getScrolledVisiblePosition({ lineNumber, column: 1 });
+      if (stickyVis2 && dom) {
+        const rect = dom.getBoundingClientRect();
+        const yOnLine = rect.top + stickyVis2.top + stickyVis2.height * 0.5;
+        const hit =
+          editor.getTargetAtClientPoint(clientX, yOnLine) ||
+          editor.getTargetAtClientPoint(clientX, clientY - hitLift);
+        if (hit?.position) {
+          const model = editor.getModel?.();
+          const maxCol = model?.getLineMaxColumn?.(lineNumber) ?? hit.position.column;
+          if (hit.position.lineNumber === lineNumber) {
+            column = hit.position.column;
+          } else {
+            column = Math.max(1, Math.min(hit.position.column, maxCol));
+          }
+        }
+      }
+
+      return { lineNumber, column };
+    },
+    [],
+  );
 
   /**
-   * Free handle: X tracks finger; Y blends toward selection baseline so caret
-   * tip sits nearer the glyph row (SPCK “anchored but free” feel).
+   * PURE free visual — finger stays on the teardrop bulb (localY to localY + DROP_H),
+   * while the Caret (localY - CARET_H to localY) sits one line above on the selected line.
    */
   const placeHandleFree = useCallback(
-    (
-      type: 'cursor' | 'start' | 'end',
-      clientX: number,
-      clientY: number,
-      container: HTMLElement,
-      edgePos?: { lineNumber: number; column: number } | null,
-      editor?: any,
-    ) => {
+    (type: 'cursor' | 'start' | 'end', clientX: number, clientY: number, container: HTMLElement) => {
       const rect = container.getBoundingClientRect();
-      let localX = clientX - rect.left;
-      let localY = clientY - rect.top - DROP_H * 0.35;
-
-      if (edgePos && editor) {
-        const vis = editor.getScrolledVisiblePosition(edgePos);
-        if (vis) {
-          // Handle origin is top-left of stack; caret sits above drop.
-          // Baseline for tip ≈ line bottom (vis.top + vis.height) in editor coords.
-          const baselineY = vis.top + vis.height;
-          const fingerY = clientY - rect.top - DROP_H * 0.35;
-          localY = fingerY * (1 - BASELINE_BLEND) + baselineY * BASELINE_BLEND;
-          // X stays mostly free; tiny pull toward edge column looks steadier
-          localX = clientX - rect.left;
-        }
-      }
+      const localX = clientX - rect.left;
+      // Lift handle origin by handleLiftRef so teardrop stays under finger & caret sits on selected line
+      const localY = clientY - rect.top - handleLiftRef.current;
 
       const apply = (el: HTMLDivElement | null) => {
         if (!el) return;
@@ -231,6 +252,7 @@ export function useTeardropsDrag({
 
       setActiveDragType(prev => (prev !== type ? type : prev));
       onHandleActive(type);
+      dragTypeRef.current = type;
 
       const touch = e.touches[0];
       if (!touch) return;
@@ -241,9 +263,9 @@ export function useTeardropsDrag({
       onLensMove?.({ x: clientX, y: clientY, type });
 
       const container = containerRef.current;
-      const editorNow = editorRef.current;
+      // Immediate free visual every sample — zero lag, any %
       if (container) {
-        placeHandleFree(type, clientX, clientY, container, lastPosRef.current, editorNow);
+        placeHandleFree(type, clientX, clientY, container);
       }
 
       if (dragMoveRafRef.current) return;
@@ -257,6 +279,9 @@ export function useTeardropsDrag({
 
         const { x, y, type: t } = sample;
 
+        // Keep visual in sync with latest finger (rAF may lag one sample)
+        placeHandleFree(t, x, y, container);
+
         const rect = container.getBoundingClientRect();
         const EDGE = 56;
         let delta = 0;
@@ -266,22 +291,18 @@ export function useTeardropsDrag({
         if (delta !== 0) ensureAutoScrollLoop();
         else stopAutoScroll();
 
-        const newPos = positionFromFinger(editor, x, y);
-        if (!newPos) {
-          placeHandleFree(t, x, y, container, lastPosRef.current, editor);
-          return;
-        }
+        // Selection logic only (sticky line + column)
+        const newPos = positionFromFinger(editor, x, y, t);
+        if (!newPos) return;
 
         const last = lastPosRef.current;
         if (last && last.lineNumber === newPos.lineNumber && last.column === newPos.column) {
-          placeHandleFree(t, x, y, container, newPos, editor);
-          return;
+          return; // visual already updated; selection unchanged
         }
         lastPosRef.current = { lineNumber: newPos.lineNumber, column: newPos.column };
 
         if (t === 'cursor') {
           editor.setPosition(newPos);
-          placeHandleFree(t, x, y, container, newPos, editor);
           return;
         }
 
@@ -291,11 +312,9 @@ export function useTeardropsDrag({
           if (!currentSel) return;
           anchor = t === 'start' ? currentSel.getEndPosition() : currentSel.getStartPosition();
           dragAnchorRef.current = anchor;
-          stickyLineRef.current = newPos.lineNumber;
         }
 
         if (newPos.lineNumber === anchor.lineNumber && newPos.column === anchor.column) {
-          placeHandleFree(t, x, y, container, newPos, editor);
           return;
         }
 
@@ -303,7 +322,7 @@ export function useTeardropsDrag({
           new monaco.Selection(anchor.lineNumber, anchor.column, newPos.lineNumber, newPos.column),
         );
 
-        placeHandleFree(t, x, y, container, newPos, editor);
+        // Opposite handle stays on real edge (not free-finger)
         placeOppositeFromSelection(editor, t);
       });
     },
@@ -327,6 +346,7 @@ export function useTeardropsDrag({
     dragAnchorRef.current = null;
     lastPosRef.current = null;
     stickyLineRef.current = null;
+    dragTypeRef.current = null;
     latestTouchRef.current = null;
     onLensMove?.(null);
 
@@ -341,6 +361,7 @@ export function useTeardropsDrag({
       isPointerBlockRef.current = false;
     }, 300);
 
+    // Snap handles back to real selection edges only on release
     updateTeardrops();
     setTimeout(() => {
       if (onDragEndCb) onDragEndCb();
