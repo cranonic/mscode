@@ -25,6 +25,7 @@ import { useContextMenuSetup }  from './hooks/useContextMenuSetup';
 
 // ── UI Components ──────────────────────────────────────────────────────────────
 import { TeardropsOverlay }                          from './components/Teardrops/TeardropsOverlay';
+import { SelectionMagnifier }                        from './components/Teardrops/SelectionMagnifier';
 import { EditorScrollbar, DEFAULT_SCROLLBAR_CONFIG } from './components/Scrollbar/EditorScrollbar';
 import type { ScrollbarConfig }                      from './components/Scrollbar/EditorScrollbar';
 import { Keyboard }                                  from '@capacitor/keyboard';
@@ -75,10 +76,32 @@ export const MemoryCodeEditor: React.FC<MemoryCodeEditorProps> = ({
   const [editorInstance, setEditorInstance] = useState<any>(null);
   const monaco = useMonaco();
 
+  const [lens, setLens] = useState<{
+    active: boolean;
+    x: number;
+    y: number;
+    type: 'cursor' | 'start' | 'end' | null;
+  }>({ active: false, x: 0, y: 0, type: null });
+
   // ── Stores ─────────────────────────────────────────────────────────────────
   const settings      = useSettingsStore(s => s.settings);
   const activeThemeId = useThemeStore(s => s.activeThemeId);
   const foldingPosition = settings['editor.foldingPosition'] || 'right';
+
+  const teardropsEnabled = settings['editor.teardrops.enabled'] !== false;
+  const lensEnabled = settings['editor.teardrops.lens.enabled'] !== false;
+  const lensScale = Number(settings['editor.teardrops.lens.scale'] ?? 1.75);
+
+  const onLensMove = useCallback(
+    (pos: { x: number; y: number; type: 'cursor' | 'start' | 'end' } | null) => {
+      if (!pos) {
+        setLens(s => (s.active ? { ...s, active: false } : s));
+        return;
+      }
+      setLens({ active: true, x: pos.x, y: pos.y, type: pos.type });
+    },
+    [],
+  );
 
   // Close custom editor menu on new editor focus
   refs.closeMenuRef.current = () => {
@@ -125,6 +148,7 @@ export const MemoryCodeEditor: React.FC<MemoryCodeEditorProps> = ({
     onHandleActive:  (type) => { refs.lastActiveHandleRef.current = type; },
     onDragStartCb:   ()     => refs.closeMenuRef.current(),
     onDragEndCb:     ()     => refs.showMenuRef.current(),
+    onLensMove,
   });
 
   useContextMenuSetup({
@@ -230,7 +254,8 @@ export const MemoryCodeEditor: React.FC<MemoryCodeEditorProps> = ({
       target.closest('.colorpicker-widget')    ||
       target.closest('.suggest-widget')        ||
       target.closest('.ms-teardrop-handle')    ||
-      target.closest('.find-widget')
+      target.closest('.find-widget')          ||
+      target.closest('.ms-selection-magnifier')
     ) return;
 
     if (
@@ -288,7 +313,7 @@ export const MemoryCodeEditor: React.FC<MemoryCodeEditorProps> = ({
         <EditorScrollbar editor={editorInstance} config={scrollbarConfig} />
       )}
 
-      {teardropsOn && (
+      {teardropsEnabled && teardropsOn && (
         <TeardropsOverlay
           cursorDOMRef={refs.cursorDOMRef}
           selectionStartDOMRef={refs.selectionStartDOMRef}
@@ -313,6 +338,18 @@ export const MemoryCodeEditor: React.FC<MemoryCodeEditorProps> = ({
               }, 150);
             }
           }}
+        />
+      )}
+
+      {lensEnabled && editorInstance && (
+        <SelectionMagnifier
+          enabled={lensEnabled}
+          active={lens.active}
+          clientX={lens.x}
+          clientY={lens.y}
+          editor={editorInstance}
+          handleType={lens.type}
+          scale={lensScale}
         />
       )}
     </div>
