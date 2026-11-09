@@ -1,20 +1,22 @@
 // src/features/editor/components/Teardrops/hooks/useTeardropsDrag.ts
-//
-// SPCK feel:
-// - Free handle follows finger (smooth)
-// - Caret sits ON TOP of the moving teardrop (HandleCaret in overlay)
-// - Character-precise X; line switch only past ~half lineHeight
-// - Upward line switch slightly less sensitive
+// Phase 2 SPCK selection feel:
+// - Free handle under finger (smooth)
+// - Caret on tip (overlay HandleCaret)
+// - Tip Y lightly biased toward glyph baseline of sticky line (less float)
+// - Line switch hysteresis: down 0.42×, up 0.55× lineHeight
+// - Character-precise X via hit on sticky line mid
 
 import { useRef, useState, useCallback } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 
 const DROP_H = 36;
 const CARET_H = 22;
-/** Total visual stack above finger contact: caret + tip */
-const HIT_LIFT = DROP_H + CARET_H * 0.35;
+/** Hit-test lift: caret + drop tip into glyph row */
+const HIT_LIFT = DROP_H + CARET_H * 0.4;
 const LINE_SWITCH_FRAC_DOWN = 0.42;
 const LINE_SWITCH_FRAC_UP = 0.55;
+/** How much handle Y blends toward true baseline (0=pure finger, 1=locked to line) */
+const BASELINE_BLEND = 0.35;
 
 interface UseTeardropsDragOptions {
   editorRef: MutableRefObject<any>;
@@ -103,16 +105,12 @@ export function useTeardropsDrag({
     const raw =
       editor.getTargetAtClientPoint(clientX, clientY - HIT_LIFT) ||
       editor.getTargetAtClientPoint(clientX, clientY - DROP_H) ||
-      editor.getTargetAtClientPoint(clientX, clientY - 20);
+      editor.getTargetAtClientPoint(clientX, clientY - 16);
 
     if (!raw?.position) return null;
 
     let lineNumber = raw.position.lineNumber;
     let column = raw.position.column;
-
-    const probeLine = stickyLineRef.current ?? lineNumber;
-    const stickyVis0 = editor.getScrolledVisiblePosition({ lineNumber: probeLine, column: 1 });
-    const lineHeight = Math.max(14, stickyVis0?.height ?? 20);
 
     if (stickyLineRef.current == null) {
       stickyLineRef.current = lineNumber;
@@ -121,6 +119,8 @@ export function useTeardropsDrag({
     const sticky = stickyLineRef.current!;
     const stickyVis = editor.getScrolledVisiblePosition({ lineNumber: sticky, column: 1 });
     const dom = editor.getDomNode?.() as HTMLElement | null;
+    const lineHeight = Math.max(14, stickyVis?.height ?? 20);
+
     if (stickyVis && dom) {
       const rect = dom.getBoundingClientRect();
       const lineMidClientY = rect.top + stickyVis.top + stickyVis.height / 2;
@@ -136,6 +136,7 @@ export function useTeardropsDrag({
 
     lineNumber = stickyLineRef.current ?? lineNumber;
 
+    // Column from X on sticky line mid-Y (character precise, not next-line noise)
     const stickyVis2 = editor.getScrolledVisiblePosition({ lineNumber, column: 1 });
     if (stickyVis2 && dom) {
       const rect = dom.getBoundingClientRect();
@@ -144,14 +145,12 @@ export function useTeardropsDrag({
         editor.getTargetAtClientPoint(clientX, yOnLine) ||
         editor.getTargetAtClientPoint(clientX, clientY - HIT_LIFT);
       if (hit?.position) {
+        const model = editor.getModel?.();
+        const maxCol = model?.getLineMaxColumn?.(lineNumber) ?? hit.position.column;
         if (hit.position.lineNumber === lineNumber) {
           column = hit.position.column;
         } else {
-          const model = editor.getModel?.();
-          if (model) {
-            const maxCol = model.getLineMaxColumn(lineNumber);
-            column = Math.max(1, Math.min(hit.position.column, maxCol));
-          }
+          column = Math.max(1, Math.min(hit.position.column, maxCol));
         }
       }
     }
@@ -160,17 +159,34 @@ export function useTeardropsDrag({
   }, []);
 
   /**
-   * Free handle under finger. Transform is the TOP-LEFT of the handle stack;
-   * caret is drawn above the teardrop inside the handle body.
-   * Offset so the CARET tip aims near the glyph baseline the user is selecting.
+   * Free handle: X tracks finger; Y blends toward selection baseline so caret
+   * tip sits nearer the glyph row (SPCK “anchored but free” feel).
    */
   const placeHandleFree = useCallback(
-    (type: 'cursor' | 'start' | 'end', clientX: number, clientY: number, container: HTMLElement) => {
+    (
+      type: 'cursor' | 'start' | 'end',
+      clientX: number,
+      clientY: number,
+      container: HTMLElement,
+      edgePos?: { lineNumber: number; column: number } | null,
+      editor?: any,
+    ) => {
       const rect = container.getBoundingClientRect();
-      const localX = clientX - rect.left;
-      // Finger on drop body; stack grows upward (caret then drop).
-      // Put drop center near finger, caret above.
-      const localY = clientY - rect.top - DROP_H * 0.35;
+      let localX = clientX - rect.left;
+      let localY = clientY - rect.top - DROP_H * 0.35;
+
+      if (edgePos && editor) {
+        const vis = editor.getScrolledVisiblePosition(edgePos);
+        if (vis) {
+          // Handle origin is top-left of stack; caret sits above drop.
+          // Baseline for tip ≈ line bottom (vis.top + vis.height) in editor coords.
+          const baselineY = vis.top + vis.height;
+          const fingerY = clientY - rect.top - DROP_H * 0.35;
+          localY = fingerY * (1 - BASELINE_BLEND) + baselineY * BASELINE_BLEND;
+          // X stays mostly free; tiny pull toward edge column looks steadier
+          localX = clientX - rect.left;
+        }
+      }
 
       const apply = (el: HTMLDivElement | null) => {
         if (!el) return;
@@ -193,13 +209,15 @@ export function useTeardropsDrag({
         const end = editor.getScrolledVisiblePosition(sel.getEndPosition());
         if (end && selectionEndDOMRef.current) {
           selectionEndDOMRef.current.style.display = 'block';
-          selectionEndDOMRef.current.style.transform = `translate3d(${end.left}px, ${end.top + end.height}px, 0)`;
+          selectionEndDOMRef.current.style.transform =
+            `translate3d(${end.left}px, ${end.top + end.height}px, 0)`;
         }
       } else if (type === 'end') {
         const start = editor.getScrolledVisiblePosition(sel.getStartPosition());
         if (start && selectionStartDOMRef.current) {
           selectionStartDOMRef.current.style.display = 'block';
-          selectionStartDOMRef.current.style.transform = `translate3d(${start.left}px, ${start.top + start.height}px, 0)`;
+          selectionStartDOMRef.current.style.transform =
+            `translate3d(${start.left}px, ${start.top + start.height}px, 0)`;
         }
       }
     },
@@ -223,8 +241,10 @@ export function useTeardropsDrag({
       onLensMove?.({ x: clientX, y: clientY, type });
 
       const container = containerRef.current;
-      // Immediate free move every touch sample → SPCK smoothness
-      if (container) placeHandleFree(type, clientX, clientY, container);
+      const editorNow = editorRef.current;
+      if (container) {
+        placeHandleFree(type, clientX, clientY, container, lastPosRef.current, editorNow);
+      }
 
       if (dragMoveRafRef.current) return;
       dragMoveRafRef.current = requestAnimationFrame(() => {
@@ -238,30 +258,30 @@ export function useTeardropsDrag({
         const { x, y, type: t } = sample;
 
         const rect = container.getBoundingClientRect();
-        const EDGE = 60;
+        const EDGE = 56;
         let delta = 0;
-        if (y < rect.top + EDGE) delta = -12;
-        else if (y > rect.bottom - EDGE) delta = 12;
+        if (y < rect.top + EDGE) delta = -14;
+        else if (y > rect.bottom - EDGE) delta = 14;
         autoScrollDeltaRef.current = delta;
         if (delta !== 0) ensureAutoScrollLoop();
         else stopAutoScroll();
 
         const newPos = positionFromFinger(editor, x, y);
         if (!newPos) {
-          placeHandleFree(t, x, y, container);
+          placeHandleFree(t, x, y, container, lastPosRef.current, editor);
           return;
         }
 
         const last = lastPosRef.current;
         if (last && last.lineNumber === newPos.lineNumber && last.column === newPos.column) {
-          placeHandleFree(t, x, y, container);
+          placeHandleFree(t, x, y, container, newPos, editor);
           return;
         }
         lastPosRef.current = { lineNumber: newPos.lineNumber, column: newPos.column };
 
         if (t === 'cursor') {
           editor.setPosition(newPos);
-          placeHandleFree(t, x, y, container);
+          placeHandleFree(t, x, y, container, newPos, editor);
           return;
         }
 
@@ -275,7 +295,7 @@ export function useTeardropsDrag({
         }
 
         if (newPos.lineNumber === anchor.lineNumber && newPos.column === anchor.column) {
-          placeHandleFree(t, x, y, container);
+          placeHandleFree(t, x, y, container, newPos, editor);
           return;
         }
 
@@ -283,7 +303,7 @@ export function useTeardropsDrag({
           new monaco.Selection(anchor.lineNumber, anchor.column, newPos.lineNumber, newPos.column),
         );
 
-        placeHandleFree(t, x, y, container);
+        placeHandleFree(t, x, y, container, newPos, editor);
         placeOppositeFromSelection(editor, t);
       });
     },

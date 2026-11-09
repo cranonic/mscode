@@ -1,5 +1,5 @@
 // src/features/editor/components/Teardrops/SelectionMagnifier.tsx
-// Android-style rectangular loupe while dragging teardrop handles.
+// Phase 2: richer line slice, centered caret, smart edge flip
 
 import React, { useEffect, useRef } from 'react';
 
@@ -16,7 +16,8 @@ export interface SelectionMagnifierProps {
 }
 
 const DROP_H = 36;
-const HIT_LIFT = DROP_H + 8;
+const CARET_H = 22;
+const HIT_LIFT = DROP_H + CARET_H * 0.4;
 
 export const SelectionMagnifier: React.FC<SelectionMagnifierProps> = ({
   enabled,
@@ -25,12 +26,13 @@ export const SelectionMagnifier: React.FC<SelectionMagnifierProps> = ({
   clientY,
   editor,
   handleType = null,
-  width = 168,
-  height = 52,
+  width = 180,
+  height = 56,
   scale = 1.75,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
-  const textRef = useRef<HTMLDivElement>(null);
+  const beforeRef = useRef<HTMLSpanElement>(null);
+  const afterRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     if (!enabled || !active || !editor || editor._isDisposed) {
@@ -39,52 +41,53 @@ export const SelectionMagnifier: React.FC<SelectionMagnifierProps> = ({
     }
 
     const root = rootRef.current;
-    const textEl = textRef.current;
-    if (!root || !textEl) return;
+    const beforeEl = beforeRef.current;
+    const afterEl = afterRef.current;
+    if (!root || !beforeEl || !afterEl) return;
 
-    // Read characters around the hit point (lifted into glyph line)
-    let label = '';
+    let before = '';
+    let after = '';
     try {
-      const target = editor.getTargetAtClientPoint(clientX, clientY - HIT_LIFT)
-        || editor.getTargetAtClientPoint(clientX, clientY - DROP_H);
+      const target =
+        editor.getTargetAtClientPoint(clientX, clientY - HIT_LIFT) ||
+        editor.getTargetAtClientPoint(clientX, clientY - DROP_H);
       const pos = target?.position;
       if (pos) {
         const model = editor.getModel?.();
         if (model) {
           const line = model.getLineContent(pos.lineNumber) as string;
-          const col = pos.column - 1; // 0-based
-          const pad = 12;
+          const col = Math.max(0, pos.column - 1);
+          const pad = 14;
           const from = Math.max(0, col - pad);
           const to = Math.min(line.length, col + pad);
-          const slice = line.slice(from, to);
-          const caretInSlice = col - from;
-          // Mark caret with thin space marker
-          label = slice.slice(0, caretInSlice) + '│' + slice.slice(caretInSlice);
+          before = line.slice(from, col);
+          after = line.slice(col, to);
         }
       }
     } catch {
       /* ignore */
     }
 
-    textEl.textContent = label || ' ';
-    // Magnify font relative to editor
+    beforeEl.textContent = before || '\u00a0';
+    afterEl.textContent = after || '\u00a0';
+
     let fontSize = 14;
+    let fontFamily = 'monospace';
     try {
-      fontSize = editor.getOption?.(50 /* fontSize */) ?? 14;
+      // Monaco EditorOption.fontSize / fontFamily numeric ids vary; try getOption by name path
+      fontSize = editor.getOption?.(50) ?? editor.getOption?.(48) ?? 14;
+      fontFamily = editor.getOption?.(49) ?? editor.getOption?.(47) ?? 'monospace';
     } catch {
       /* ignore */
     }
-    textEl.style.fontSize = `${Math.round(fontSize * scale)}px`;
-    textEl.style.fontFamily =
-      (typeof editor.getOption === 'function'
-        ? editor.getOption(49 /* fontFamily */)
-        : null) || 'monospace';
+    const magnified = Math.round(fontSize * scale);
+    beforeEl.style.fontSize = afterEl.style.fontSize = `${magnified}px`;
+    beforeEl.style.fontFamily = afterEl.style.fontFamily = fontFamily;
 
-    // Smart position: above finger, flip below near top edge
-    const gap = 56;
+    const gap = 58;
     let left = clientX - width / 2;
     let top = clientY - height - gap;
-    if (top < 8) top = clientY + gap * 0.6;
+    if (top < 8) top = clientY + gap * 0.55;
     left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
     top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
 
@@ -107,10 +110,10 @@ export const SelectionMagnifier: React.FC<SelectionMagnifierProps> = ({
         zIndex: 10000,
         pointerEvents: 'none',
         display: 'none',
-        borderRadius: 10,
+        borderRadius: 12,
         overflow: 'hidden',
-        boxShadow: '0 6px 20px rgba(0,0,0,0.5)',
-        border: '1.5px solid rgba(255,255,255,0.22)',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.55)',
+        border: '1.5px solid rgba(255,255,255,0.2)',
         background: 'var(--ms-bg-side, #252526)',
         alignItems: 'center',
         justifyContent: 'center',
@@ -118,31 +121,33 @@ export const SelectionMagnifier: React.FC<SelectionMagnifierProps> = ({
       }}
     >
       <div
-        ref={textRef}
         style={{
-          padding: '0 12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          maxWidth: '100%',
+          padding: '0 10px',
+          overflow: 'hidden',
           whiteSpace: 'pre',
           color: 'var(--ms-text-main, #ccc)',
           lineHeight: 1.2,
-          maxWidth: '100%',
-          overflow: 'hidden',
         }}
-      />
-      {/* caret accent bar in center of lens */}
-      <div
-        style={{
-          position: 'absolute',
-          left: '50%',
-          top: 6,
-          bottom: 6,
-          width: 2,
-          marginLeft: -1,
-          background: 'var(--ms-accent, #007acc)',
-          opacity: 0.85,
-          borderRadius: 1,
-          pointerEvents: 'none',
-        }}
-      />
+      >
+        <span ref={beforeRef} style={{ opacity: 0.95 }} />
+        {/* Center caret bar between before/after */}
+        <span
+          style={{
+            display: 'inline-block',
+            width: 2,
+            height: '1.1em',
+            margin: '0 1px',
+            background: 'var(--ms-accent, #007acc)',
+            borderRadius: 1,
+            flexShrink: 0,
+          }}
+        />
+        <span ref={afterRef} style={{ opacity: 0.95 }} />
+      </div>
     </div>
   );
 };
