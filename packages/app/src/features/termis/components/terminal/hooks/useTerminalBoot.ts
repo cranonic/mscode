@@ -25,24 +25,47 @@ export function useTerminalBoot(): void {
                     return; 
                 }
 
-                // 2. Notify the user of the ongoing environment extraction process
+                // 2. Alpine-branded setup status (version + progress-style loading)
                 const notifId = 'term-setup-boot';
                 useNotificationStore.getState().addNotification({
                     id: notifId,
                     type: 'loading',
-                    title: 'Setting up Terminal Environment',
+                    title: 'Alpine Linux',
                     source: 'System',
-                    message: 'Extracting Alpine Linux... Please wait.',
+                    message:
+                        'Alpine minirootfs 3.24.4\n' +
+                        'Downloading / extracting rootfs…\n' +
+                        'This may take a minute on first launch.',
+                    progress: 15,
                 });
 
                 // 3. Perform asynchronous file system setup and binary installation
+                try {
+                    useNotificationStore.getState().updateNotification(notifId, {
+                        progress: 40,
+                        message:
+                            'Alpine Linux 3.24.4\n' +
+                            'Installing root filesystem…',
+                    });
+                } catch { /* ignore */ }
+
                 await NativeTerminal.initSetup();
+
+                // Prefer explicit proot rootfs ensure (CDN 3.24.4)
+                try {
+                    useNotificationStore.getState().updateNotification(notifId, {
+                        progress: 75,
+                        message: 'Alpine Linux 3.24.4\nFinishing setup…',
+                    });
+                    await NativeTerminal.ensureProotRootfs?.({});
+                } catch { /* initSetup may already cover native bootstrap */ }
 
                 // 4. Signal successful installation to the user interface
                 useNotificationStore.getState().updateNotification(notifId, {
-                    type: 'info',
-                    title: 'Terminal Ready',
-                    message: 'Terminal environment is installed and ready to use.',
+                    type: 'success',
+                    title: 'Alpine Linux Ready',
+                    message: 'Alpine 3.24.4 is installed. Linux terminal is ready.',
+                    progress: 100,
                 });
                 
                 // Clear the notification after a brief success delay

@@ -335,23 +335,35 @@ public class RootfsManager {
         }
 
         String a = normalizeAlpineArch(arch);
-        String assetName = "alpine-" + a + ".zip";
-        if (hasAsset(assetName)) {
-            Log.i(TAG, "Extracting bundled Alpine (" + assetName + ")...");
-            extractAlpineFromAsset(assetName, rootfsPath);
-            if (!isAlpineReady()) {
-                throw new IOException(
-                    "Extracted " + assetName + " but etc/alpine-release missing under " + rootfsPath);
-            }
-            Log.i(TAG, "Alpine rootfs extracted from assets → " + rootfsPath);
-            return;
+        // Prefer official CDN minirootfs (assets optional; user may remove alpine zip for smaller APK)
+        String alpineUrl;
+        if ("aarch64".equals(a)) {
+            alpineUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-minirootfs-3.24.4-aarch64.tar.gz";
+        } else if ("x86_64".equals(a)) {
+            alpineUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-minirootfs-3.24.4-x86_64.tar.gz";
+        } else if ("armv7".equals(a) || "armhf".equals(a)) {
+            alpineUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/armhf/alpine-minirootfs-3.24.4-armhf.tar.gz";
+        } else {
+            alpineUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-minirootfs-3.24.4-aarch64.tar.gz";
         }
 
-        String alpineUrl = "aarch64".equals(a)
-            ? "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/aarch64/alpine-minirootfs-3.23.3-aarch64.tar.gz"
-            : "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-minirootfs-3.21.0-x86_64.tar.gz";
+        String assetName = "alpine-" + a + ".zip";
+        // CDN first; fall back to bundled asset only if download fails later is harder —
+        // try asset first only if present AND we want offline; user removed assets → skip.
+        if (hasAsset(assetName)) {
+            Log.i(TAG, "Bundled " + assetName + " present — extracting (offline)…");
+            try {
+                extractAlpineFromAsset(assetName, rootfsPath);
+                if (isAlpineReady()) {
+                    Log.i(TAG, "Alpine rootfs extracted from assets → " + rootfsPath);
+                    return;
+                }
+            } catch (IOException e) {
+                Log.w(TAG, "Asset extract failed, will download: " + e.getMessage());
+            }
+        }
 
-        Log.i(TAG, "No asset " + assetName + " — downloading Alpine rootfs for " + a + "...");
+        Log.i(TAG, "Downloading Alpine minirootfs 3.24.4 for " + a + " from CDN…");
         File tarGz = new File(filesDir, "alpine.tar.gz");
         downloadFile(alpineUrl, tarGz);
         new File(rootfsPath).mkdirs();

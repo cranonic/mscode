@@ -17,6 +17,7 @@ import { createGitModule } from './modules/gitModule';
 import { createFilesystemModule } from './modules/filesystemModule';
 import { createAppModule } from './modules/appModule';
 import { createMediaPlayerModule } from './modules/mediaPlayerModule';
+import { createTerminalSwitchModule } from './modules/terminalSwitch';
 
 
 export interface Disposable {
@@ -76,6 +77,15 @@ export const createMSCodeAPI = (extId: string) => ({
    * Run shell commands and stream output to the Output panel.
    */
   tasks: createTasksModule(extId),
+
+  /**
+   * Terminal backend switch (native ↔ proot / Alpine).
+   * Plugins request a backend without their own confirmation UI.
+   * Example:
+   *   await terminalSwitch.requestBackend({ preferred: 'proot', message: '…' });
+   *   await terminalSwitch.run('clang --version', { preferred: 'proot' });
+   */
+  terminalSwitch: createTerminalSwitchModule(extId),
 
   /**
    * Termis panel control.

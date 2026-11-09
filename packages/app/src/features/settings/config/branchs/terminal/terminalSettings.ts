@@ -1,4 +1,3 @@
-
 // src/features/settings/config/branchs/terminal/terminalSettings.ts
 //
 // All terminal settings live here (moved out of workbench).
@@ -79,6 +78,27 @@ export const terminalSection: IConfigurationSection = {
       order: 13,
       tags: ['terminal', 'font'],
       markdownDescription: 'Letter spacing in the terminal. `0` = default.',
+    },
+
+    'terminal.integrated.theme': {
+      title: 'Terminal Theme',
+      type: 'select',
+      subCategory: 'Appearance',
+      defaultValue: 'mscode',
+      order: 15,
+      tags: ['terminal', 'theme'],
+      markdownDescription:
+        'Color theme for the integrated terminal.\n\n**MS Code Dark** is the default polished look. Other built-in themes: VS Code Dark, Light, Dracula, Nord, One Dark, Solarized Dark.',
+      enum: ['mscode', 'vscode', 'light', 'dracula', 'nord', 'onedark', 'solarized'],
+      enumItemLabels: [
+        'MS Code Dark (default)',
+        'VS Code Dark',
+        'Light',
+        'Dracula',
+        'Nord',
+        'One Dark',
+        'Solarized Dark',
+      ],
     },
 
     'terminal.integrated.fontLigatures': {
@@ -197,11 +217,11 @@ export const terminalSection: IConfigurationSection = {
       title: 'Default Terminal Backend',
       type: 'select',
       subCategory: 'Backend',
-      defaultValue: 'native',
+      defaultValue: 'proot',
       order: 50,
       tags: ['terminal', 'backend'],
       markdownDescription:
-        'Default backend for **New Terminal**, background tasks, and **LSP install** (Pyright, etc.).\n\n- **native** — Android bionic + Termux `$PREFIX` (`pkg`)\n- **proot** — Linux Alpine via proot (`apk`) — use this if native `node`/`npm` fails with **CANNOT LINK EXECUTABLE**\n\nWhen **Exclusive Native / PRoot** is ON, `+` always opens this backend (no picker). When Exclusive is OFF, `+` shows a Native / PRoot menu instead.\n\nIf native LSP setup fails, you will be asked whether to switch to Alpine automatically.',
+        'Default backend for **New Terminal**, Git, and most plugins.\n\n**Linux Alpine (proot)** is the recommended default for everyday work.\n**Android bionic (native)** is kept for heavier native-only tasks (future Android build / Java tooling).\n\nBoth backends remain available; only the default changes.',
       enum: ['native', 'proot'],
       enumItemLabels: ['Android bionic (native)', 'Linux Alpine (proot)'],
     },

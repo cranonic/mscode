@@ -23,7 +23,7 @@ export interface TerminalSettingsSchema {
   'terminal.integrated.rightClickSelectsWord': boolean;
   'terminal.integrated.fastScrollModifier': 'alt' | 'ctrl' | 'shift';
 
-  'terminal.defaultExecMode': 'native' | 'proot';
+  'terminal.defaultExecMode': 'proot' | 'proot';
   'terminal.exclusiveMode': boolean;
   'terminal.confirmBeforeKill': boolean;
   'terminal.skipConfirmIfIdle': boolean;
@@ -55,7 +55,7 @@ export const TERMINAL_SETTINGS_DEFAULTS: TerminalSettingsSchema = {
   'terminal.integrated.rightClickSelectsWord': false,
   'terminal.integrated.fastScrollModifier': 'alt',
 
-  'terminal.defaultExecMode': 'native',
+  'terminal.defaultExecMode': 'proot',
   'terminal.exclusiveMode': true,
   'terminal.confirmBeforeKill': true,
   'terminal.skipConfirmIfIdle': true,

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { TerminalProcess }  from '../core/TerminalProcess';
-import { XtermAdapter, DARK_XTERM_THEME, LIGHT_XTERM_THEME } from '../core/XtermAdapter';
+import { XtermAdapter, LIGHT_XTERM_THEME, resolveTerminalTheme } from '../core/XtermAdapter';
 import { useTerminalStore } from '../store/terminalStore';
 import { useSettingsStore } from '@/features/settings/store/settingsStore';
 import { terminalProcessRegistry } from '../core/TerminalRegistry';
@@ -229,8 +229,11 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
         clear: () => { adapterRef.current?.clear(); },
       });
 
+      const themeId = settings['terminal.integrated.theme'] as string | undefined;
       const isLight = settings['workbench.theme'] === 'vs-light';
-      const theme   = isLight ? LIGHT_XTERM_THEME : DARK_XTERM_THEME;
+      const theme   = themeId
+        ? resolveTerminalTheme(themeId)
+        : (isLight ? LIGHT_XTERM_THEME : resolveTerminalTheme('mscode'));
 
       const adapter = new XtermAdapter(
         containerRef.current!,
@@ -344,9 +347,13 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
 
   useEffect(() => {
     if (!adapterRef.current) return;
+    const themeId = settings['terminal.integrated.theme'] as string | undefined;
     const isLight = settings['workbench.theme'] === 'vs-light';
-    adapterRef.current.setTheme(isLight ? LIGHT_XTERM_THEME : DARK_XTERM_THEME);
-  }, [settings['workbench.theme']]);
+    const theme = themeId
+      ? resolveTerminalTheme(themeId)
+      : (isLight ? LIGHT_XTERM_THEME : resolveTerminalTheme('mscode'));
+    adapterRef.current.setTheme(theme);
+  }, [settings['workbench.theme'], settings['terminal.integrated.theme']]);
 
   useEffect(() => {
     adapterRef.current?.updateSettings({

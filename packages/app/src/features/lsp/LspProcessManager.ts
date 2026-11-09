@@ -64,7 +64,7 @@ class LspProcessManager {
 
   private preferredExecMode(): ExecMode {
     const mode = useSettingsStore.getState().settings?.['terminal.defaultExecMode'];
-    return mode === 'proot' ? 'proot' : 'native';
+    return mode === 'native' ? 'native' : 'proot';
   }
 
   private log(channel: string, line: string): void {
@@ -132,6 +132,8 @@ class LspProcessManager {
           } catch (e: any) {
             this.log(channel, `[pkg] install error: ${e?.message || e}`);
           }
+          // Probe node — many devices have broken Termux node (libc++ symbol mismatch)
+          await this.ensureNativeNodeWorks(channel);
         } else {
           // Alpine: apk add
           const apk = `apk add --no-cache ${packages.join(' ')}`;
@@ -182,6 +184,51 @@ class LspProcessManager {
     } finally {
       delete this.installLocks[lockKey];
     }
+  }
+
+  /**
+   * Verify native $PREFIX node runs. On CANNOT LINK, try libc++ + reinstall nodejs once.
+   */
+  private async ensureNativeNodeWorks(channel: string): Promise<void> {
+    const probe = async (): Promise<{ code: number; out: string }> => {
+      let out = '';
+      const job = taskManager.execute(
+        'node -v 2>&1 || true',
+        '/',
+        (d) => { out += d; this.log(channel, d); },
+        channel,
+        'native',
+      );
+      const { exitCode } = await job.result;
+      return { code: exitCode, out };
+    };
+
+    let r = await probe();
+    const broken = (s: string) =>
+      /CANNOT LINK EXECUTABLE/i.test(s) || /cannot locate symbol/i.test(s);
+
+    if (r.code === 0 && !broken(r.out) && /v\d+/i.test(r.out)) {
+      this.log(channel, `[native] node OK: ${r.out.trim()}`);
+      return;
+    }
+
+    this.log(channel, '[native] node broken or missing — trying libc++ + nodejs reinstall');
+    try {
+      await NativeTerminal.pkgInstall({ packages: ['libc++', 'nodejs', 'npm'] });
+    } catch (e: any) {
+      this.log(channel, `[native] pkgInstall libc++/nodejs: ${e?.message || e}`);
+    }
+
+    r = await probe();
+    if (r.code === 0 && !broken(r.out) && /v\d+/i.test(r.out)) {
+      this.log(channel, `[native] node recovered: ${r.out.trim()}`);
+      return;
+    }
+
+    const err = new Error('LINKER_FAIL: native node cannot run (libc++ / NDK mismatch)');
+    (err as any).linkerFail = true;
+    (err as any).output = r.out;
+    throw err;
   }
 
   /**
@@ -267,6 +314,7 @@ class LspProcessManager {
       this.log(channel, `[ERROR] ${e?.message || e}`);
 
       if (execMode === 'native' && linkerFail) {
+        this.log(channel, '[native] Node linker broken on this device — offering Alpine (proot)');
         const ok = await this.confirmSwitchToAlpine(String(e?.output || e?.message || ''));
         if (ok) {
           await this.setDefaultExecMode('proot');
@@ -274,7 +322,7 @@ class LspProcessManager {
             type: 'info',
             title: 'Terminal backend',
             source: 'LSP',
-            message: 'Switched default terminal to Linux Alpine (proot). Setting up…',
+            message: 'Switched to Linux Alpine (proot). Native node cannot run on this device.',
           });
           await this.ensureAlpineReady(channel);
           execMode = 'proot';
@@ -282,9 +330,10 @@ class LspProcessManager {
         } else {
           useNotificationStore.getState().addNotification({
             type: 'error',
-            title: 'LSP setup failed',
+            title: 'Native node broken',
             source: 'LSP',
-            message: e?.message || 'Setup command failed',
+            message:
+              'Termux node fails with CANNOT LINK (libc++). Use Settings → Terminal → Linux Alpine (proot), or reinstall nodejs/libc++.',
           });
           throw e;
         }

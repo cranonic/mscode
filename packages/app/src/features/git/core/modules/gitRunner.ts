@@ -1,7 +1,6 @@
 // src/features/git/core/modules/gitRunner.ts
 
 import { taskManager }          from '@/core/extensionAPI/tasks/taskManager';
-import { createTasksModule }    from '@/core/extensionAPI/modules/tasksModule';
 import { useNotificationStore } from '@/store/notificationStore';
 import { useOutputStore }       from '@/features/termis/components/output/store/outputStore';
 import { useTermisStore }       from '@/features/termis/store/termisStore';
@@ -44,32 +43,66 @@ function isPermissionError(msg: string): boolean {
   );
 }
 
+function gitExecMode(): 'native' | 'proot' {
+  try {
+    const { useSettingsStore } = require('@/features/settings/store/settingsStore');
+    const mode = useSettingsStore.getState().settings?.['terminal.defaultExecMode'];
+    return mode === 'native' ? 'native' : 'proot';
+  } catch {
+    return 'proot';
+  }
+}
+
 async function ensureGitInstalled(): Promise<void> {
   if (isGitVerified)  return;
   if (installPromise) return installPromise;
 
   installPromise = new Promise<void>(async (resolve, reject) => {
+    const execMode = gitExecMode();
     try {
-      const check = taskManager.execute('git --version', '/', () => {});
-      const res = await check.result;
+      // Prefer default backend (proot); fall back to native if git already there
+      let check = taskManager.execute('git --version', '/', () => {}, false, execMode);
+      let res = await check.result;
       if (res.exitCode === 0) {
         isGitVerified = true;
         return resolve();
       }
+      if (execMode === 'proot') {
+        check = taskManager.execute('git --version', '/', () => {}, false, 'native');
+        res = await check.result;
+        if (res.exitCode === 0) {
+          isGitVerified = true;
+          return resolve();
+        }
+      }
 
+      // Soft status — do not hard-error if terminal/rootfs not ready yet
       useNotificationStore.getState().addNotification({
-        type: 'info', title: 'Git Setup', source: 'Git',
-        message: 'Git is not installed. Installing in the background…',
+        type: 'info',
+        title: 'Git',
+        source: 'Git',
+        message:
+          execMode === 'proot'
+            ? 'Set up the Linux (Alpine) terminal first, then Git will install automatically.'
+            : 'Git is not installed. Installing in the background…',
       });
 
       useOutputStore.getState().createChannel('Git Setup');
       useOutputStore.getState().setActiveChannel('Git Setup');
       useTermisStore.getState().setActiveView('output');
 
-      const tasks   = createTasksModule('system');
-      const install = tasks.runInBackground(
-        'pkg update; pkg install git; command -v git >/dev/null || ls "$PREFIX/bin/git"',
-        { cwd: '/', outputChannel: 'Git Setup' },
+      const installCmd =
+        execMode === 'proot'
+          ? 'apk add --no-cache git; command -v git'
+          : 'pkg install git; command -v git >/dev/null || ls "$PREFIX/bin/git"';
+
+      // runInBackground may not pass execType — use taskManager.execute
+      const install = taskManager.execute(
+        installCmd,
+        '/',
+        () => {},
+        'Git Setup',
+        execMode,
       );
 
       const { exitCode: code } = await install.result;
@@ -81,13 +114,38 @@ async function ensureGitInstalled(): Promise<void> {
         });
         resolve();
       } else {
-        useNotificationStore.getState().addNotification({
-          type: 'error', title: 'Git Setup', source: 'Git',
-          message: 'Failed to install Git. Check the Output panel.',
-        });
-        reject(new Error('Git installation failed.'));
+        // Retry other backend once
+        const other: 'native' | 'proot' = execMode === 'proot' ? 'native' : 'proot';
+        const altCmd =
+          other === 'proot'
+            ? 'apk add --no-cache git; command -v git'
+            : 'pkg install git; command -v git >/dev/null || ls "$PREFIX/bin/git"';
+        const alt = taskManager.execute(altCmd, '/', () => {}, 'Git Setup', other);
+        const altRes = await alt.result;
+        if (altRes.exitCode === 0) {
+          isGitVerified = true;
+          useNotificationStore.getState().addNotification({
+            type: 'success', title: 'Git Setup', source: 'Git',
+            message: `Git installed on ${other} backend.`,
+          });
+          resolve();
+        } else {
+          useNotificationStore.getState().addNotification({
+            type: 'info',
+            title: 'Git',
+            source: 'Git',
+            message: 'Open Terminal and finish setup, then try Git again.',
+          });
+          reject(new Error('Git not ready — set up terminal first'));
+        }
       }
     } catch (e) {
+      useNotificationStore.getState().addNotification({
+        type: 'info',
+        title: 'Git',
+        source: 'Git',
+        message: 'Set up the terminal first, then use Git.',
+      });
       reject(e);
     } finally {
       installPromise = null;

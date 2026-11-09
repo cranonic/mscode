@@ -59,6 +59,11 @@ interface NativeTerminalPlugin {
   initSetup(): Promise<void>;
 
   /**
+   * Ensures Alpine minirootfs exists for proot sessions (CDN download if needed).
+   */
+  ensureProotRootfs?(options?: Record<string, unknown>): Promise<{ ready?: boolean; path?: string }>;
+
+  /**
    * Rewrites internal machine naming domains registered inside host identification parameters.
    * 
    * @param options Structure mapping the designated host destination string.
