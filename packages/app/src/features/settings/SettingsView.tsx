@@ -1,5 +1,6 @@
 // src/features/settings/components/SettingsView.tsx
 import React, { useState, useMemo, memo, useEffect } from 'react';
+import { ClearDataModal } from '@/features/termis/components/terminal/components/ClearDataModal';
 import { configRegistry, type SettingDefinition } from '@/core/extensionAPI/registry/configurationRegistry';
 import { SettingItem } from './components/SettingItem';
 import { InputBox, InputAction } from '@/ui/components/InputBox/InputBox';
@@ -15,6 +16,7 @@ interface SettingGroup {
 
 export const SettingsView: React.FC = memo(() => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [clearDataTarget, setClearDataTarget] = useState<'native' | 'proot' | null>(null);
   const { openMenu } = useMenuStore();
   const extRecords = useExtensionStore(state => state.records); 
 
@@ -27,7 +29,16 @@ export const SettingsView: React.FC = memo(() => {
       }
     };
     document.addEventListener('ms-settings-search', handleExternalSearch);
-    return () => document.removeEventListener('ms-settings-search', handleExternalSearch);
+    const handleSettingsButton = (e: Event) => {
+      const action = (e as CustomEvent).detail?.action as string | undefined;
+      if (action === 'terminal.clearData.proot') setClearDataTarget('proot');
+      if (action === 'terminal.clearData.native') setClearDataTarget('native');
+    };
+    document.addEventListener('ms-settings-button', handleSettingsButton);
+    return () => {
+      document.removeEventListener('ms-settings-search', handleExternalSearch);
+      document.removeEventListener('ms-settings-button', handleSettingsButton);
+    };
   }, []);
 
   const handleFilterClick = (e: React.MouseEvent) => {
@@ -145,32 +156,40 @@ export const SettingsView: React.FC = memo(() => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--ms-settings-bg)' }}>
-      <div style={{ padding: '15px 20px', backgroundColor: 'var(--ms-bg-main)', position: 'sticky', top: 0, zIndex: 110 }}>
-        <InputBox 
-          placeholder="Search settings..." 
-          value={searchQuery} 
-          onChange={setSearchQuery}
-          insideIcons={
-            <>
-              {searchQuery.length > 0 && (
+    <>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--ms-settings-bg)' }}>
+        <div style={{ padding: '15px 20px', backgroundColor: 'var(--ms-bg-main)', position: 'sticky', top: 0, zIndex: 110 }}>
+          <InputBox 
+            placeholder="Search settings..." 
+            value={searchQuery} 
+            onChange={setSearchQuery}
+            insideIcons={
+              <>
+                {searchQuery.length > 0 && (
+                  <InputAction 
+                    icon={<Icon name="close" size={16} />} 
+                    onClick={() => setSearchQuery('')} 
+                  />
+                )}
                 <InputAction 
-                  icon={<Icon name="close" size={16} />} 
-                  onClick={() => setSearchQuery('')} 
+                  icon={<Icon name="filter" size={16} />} 
+                  onClick={handleFilterClick as any} 
                 />
-              )}
-              <InputAction 
-                icon={<Icon name="filter" size={16} />} 
-                onClick={handleFilterClick as any} 
-              />
-            </>
-          }
-        />
+              </>
+            }
+          />
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', paddingBottom: '100px' }}>
+          {Object.entries(settingsTree).map(([catName, group]) => renderGroup(catName, group, 0, 0))}
+        </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', paddingBottom: '100px' }}>
-        {Object.entries(settingsTree).map(([catName, group]) => renderGroup(catName, group, 0, 0))}
-      </div>
-    </div>
+      <ClearDataModal
+        execType={clearDataTarget || 'proot'}
+        isOpen={!!clearDataTarget}
+        onClose={() => setClearDataTarget(null)}
+      />
+    </>
   );
 });

@@ -1,13 +1,17 @@
 // src/features/termis/components/terminal/components/TerminalInstance.tsx
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useTerminalInstance } from '../hooks/useTerminalInstance';
 import { StartDropSVG, EndDropSVG, DROP_W } from '@/features/editor/components/Teardrops/components/TeardropsShapes';
 import { useSettingsStore } from '@/features/settings/store/settingsStore';
 
 interface TerminalInstanceProps {
   terminalId: string;
-  isActive:   boolean;
+  isActive: boolean;
 }
+
+const LENS_W = 120;
+const LENS_H = 72;
+const LENS_ZOOM = 2.2;
 
 export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, isActive }) => {
   const {
@@ -15,6 +19,7 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
     focus,
     fit,
     selection,
+    menuReady,
     handleCopy,
     handlePaste,
     beginHandleDrag,
@@ -23,66 +28,143 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
   } = useTerminalInstance({ terminalId });
 
   const draggingRef = useRef<'start' | 'end' | null>(null);
-  const showLens = !!useSettingsStore.getState().settings?.['terminal.integrated.showLens'];
-  const [lens, setLens] = React.useState<{ x: number; y: number } | null>(null);
+  const showLensSetting = !!useSettingsStore.getState().settings?.['terminal.integrated.showLens'];
+  // Default true if setting missing
+  const showLens =
+    useSettingsStore.getState().settings?.['terminal.integrated.showLens'] !== false;
+
+  const [lens, setLens] = useState<{
+    x: number;
+    y: number;
+    srcX: number;
+    srcY: number;
+  } | null>(null);
+  const lensCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffectFocus(isActive, fit, focus);
 
-  // ── Teardrop drag (pointer events → works for mouse + touch) ─────────────
-
-  const onHandlePointerDown = useCallback((
-    which: 'start' | 'end',
-    e: React.PointerEvent
-  ) => {
-    e.preventDefault();
-    e.stopPropagation();
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-    draggingRef.current = which;
-    beginHandleDrag(which, e.clientX, e.clientY);
-  }, [beginHandleDrag]);
-
-  const onHandlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!draggingRef.current) return;
-    e.preventDefault();
-    e.stopPropagation();
-    moveHandleDrag(draggingRef.current, e.clientX, e.clientY);
-    if (showLens) {
-      const above = e.clientY > 120;
-      setLens({ x: e.clientX, y: above ? e.clientY - 90 : e.clientY + 70 });
+  const paintLens = useCallback((clientX: number, clientY: number) => {
+    if (!showLens) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const canvas = container.querySelector(
+      '.xterm-screen canvas, canvas',
+    ) as HTMLCanvasElement | null;
+    if (!canvas) {
+      setLens({ x: clientX, y: clientY, srcX: 0, srcY: 0 });
+      return;
     }
-  }, [moveHandleDrag, showLens]);
 
-  const onHandlePointerUp = useCallback((e: React.PointerEvent) => {
-    if (!draggingRef.current) return;
-    e.preventDefault();
-    e.stopPropagation();
-    try {
-      (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
-    } catch {}
-    endHandleDrag();
-    draggingRef.current = null;
-    setLens(null);
-  }, [endHandleDrag]);
+    const cr = container.getBoundingClientRect();
+    const localX = clientX - cr.left;
+    const localY = clientY - cr.top;
 
-  // Menu follows the RIGHT (end) handle / cursor — not the left edge
+    // Map CSS pixels → canvas bitmap pixels
+    const scaleX = canvas.width / (canvas.clientWidth || canvas.width || 1);
+    const scaleY = canvas.height / (canvas.clientHeight || canvas.height || 1);
+    const srcCssW = LENS_W / LENS_ZOOM;
+    const srcCssH = LENS_H / LENS_ZOOM;
+    const srcX = Math.max(0, localX - srcCssW / 2) * scaleX;
+    const srcY = Math.max(0, localY - srcCssH / 2) * scaleY;
+    const srcW = srcCssW * scaleX;
+    const srcH = srcCssH * scaleY;
+
+    const above = clientY > cr.top + 100;
+    const lx = clientX;
+    const ly = above ? clientY - LENS_H - 28 : clientY + 36;
+
+    setLens({ x: lx, y: ly, srcX, srcY });
+
+    // Paint after state flush
+    requestAnimationFrame(() => {
+      const lc = lensCanvasRef.current;
+      if (!lc) return;
+      const ctx = lc.getContext('2d');
+      if (!ctx) return;
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, LENS_W, LENS_H);
+      try {
+        ctx.drawImage(canvas, srcX, srcY, srcW, srcH, 0, 0, LENS_W, LENS_H);
+      } catch {
+        /* cross-origin / empty */
+      }
+      // Crosshair
+      ctx.strokeStyle = 'rgba(88, 166, 255, 0.9)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(LENS_W / 2, 0);
+      ctx.lineTo(LENS_W / 2, LENS_H);
+      ctx.moveTo(0, LENS_H / 2);
+      ctx.lineTo(LENS_W, LENS_H / 2);
+      ctx.stroke();
+    });
+  }, [showLens, containerRef]);
+
+  const onHandlePointerDown = useCallback(
+    (which: 'start' | 'end', e: React.PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      draggingRef.current = which;
+      beginHandleDrag(which, e.clientX, e.clientY);
+      paintLens(e.clientX, e.clientY);
+    },
+    [beginHandleDrag, paintLens],
+  );
+
+  const onHandlePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!draggingRef.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      moveHandleDrag(draggingRef.current, e.clientX, e.clientY);
+      paintLens(e.clientX, e.clientY);
+    },
+    [moveHandleDrag, paintLens],
+  );
+
+  const onHandlePointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      if (!draggingRef.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+      } catch {
+        /* */
+      }
+      endHandleDrag();
+      draggingRef.current = null;
+      setLens(null);
+    },
+    [endHandleDrag],
+  );
+
   const winW = typeof window !== 'undefined' ? window.innerWidth : 400;
+  const viewH = containerRef.current?.clientHeight ?? 400;
   const menuW = 140;
+
+  // Menu anchors to the END (right) teardrop — can sit above OR below that line
   const menuX = selection
     ? Math.max(8, Math.min(selection.endX - menuW / 2, winW - menuW - 8))
     : 0;
-  const menuY = selection
-    ? Math.max(8, Math.min(selection.endY, selection.startY) - 52)
-    : 0;
-
-  // Teardrop offsets: push slightly outward from selection edges
-  const EDGE_INSET = 2; // px outward from cell edge
-  let startHandleX = selection ? selection.startX - EDGE_INSET : 0;
-  let endHandleX = selection ? selection.endX + EDGE_INSET : 0;
-  // Near left screen edge: shift left teardrop inward so it stays usable
-  const LEFT_EDGE_ZONE = 28;
-  if (selection && selection.startX < LEFT_EDGE_ZONE) {
-    startHandleX = Math.min(selection.startX + 18, selection.endX - 12);
+  let menuY = selection ? selection.endY - 52 : 0;
+  if (selection) {
+    // Prefer above end handle; if not enough room, place below
+    if (menuY < 8) menuY = Math.min(selection.endY + 12, viewH - 44);
+    menuY = Math.max(8, Math.min(menuY, viewH - 44));
   }
+
+  // Extra outward placement (metricsToUI already offsets; add DROP half alignment)
+  const LEFT_EDGE_ZONE = 32;
+  let startHandleX = selection ? selection.startX : 0;
+  let endHandleX = selection ? selection.endX : 0;
+  if (selection && selection.startX < LEFT_EDGE_ZONE) {
+    // Keep left handle usable near screen edge
+    startHandleX = Math.min(selection.startX + 20, selection.endX - 16);
+  }
+
+  const showMenu = !!(selection && menuReady && !draggingRef.current);
 
   return (
     <div style={{ position: 'absolute', inset: 0, visibility: isActive ? 'visible' : 'hidden' }}>
@@ -92,7 +174,6 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
         style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}
       />
 
-      {/* SELECTION OVERLAY */}
       {isActive && selection && (
         <div
           style={{
@@ -103,7 +184,7 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
             touchAction: 'none',
           }}
         >
-          {/* Start teardrop — bottom of first selected cell */}
+          {/* Start teardrop */}
           <div
             style={{
               position: 'absolute',
@@ -123,7 +204,7 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
             <StartDropSVG />
           </div>
 
-          {/* End teardrop — bottom of last selected cell */}
+          {/* End teardrop */}
           <div
             style={{
               position: 'absolute',
@@ -143,113 +224,95 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
             <EndDropSVG />
           </div>
 
-
-          {/* Android-style selection lens */}
+          {/* Rectangular magnifier lens with real terminal pixels */}
           {showLens && lens && (
             <div
               style={{
                 position: 'fixed',
                 left: 0,
                 top: 0,
-                width: 72,
-                height: 72,
-                borderRadius: '50%',
-                border: '2px solid rgba(255,255,255,0.5)',
-                boxShadow: '0 4px 16px rgba(0,0,0,0.45)',
+                width: LENS_W,
+                height: LENS_H,
+                borderRadius: 8,
+                border: '2px solid rgba(255,255,255,0.55)',
+                boxShadow: '0 6px 20px rgba(0,0,0,0.5)',
                 overflow: 'hidden',
                 pointerEvents: 'none',
-                zIndex: 4,
-                transform: `translate3d(${lens.x - 36}px, ${lens.y - 36}px, 0)`,
+                zIndex: 5,
+                transform: `translate3d(${lens.x - LENS_W / 2}px, ${lens.y - LENS_H / 2}px, 0)`,
                 background: 'var(--ms-bg-main, #1e1e1e)',
               }}
             >
-              <div
-                style={{
-                  position: 'absolute',
-                  left: '50%',
-                  top: '50%',
-                  width: 2,
-                  height: 16,
-                  marginLeft: -1,
-                  marginTop: -8,
-                  background: '#58a6ff',
-                  borderRadius: 1,
-                }}
-              />
-              <div
-                style={{
-                  position: 'absolute',
-                  left: '50%',
-                  top: '50%',
-                  width: 16,
-                  height: 2,
-                  marginLeft: -8,
-                  marginTop: -1,
-                  background: '#58a6ff',
-                  borderRadius: 1,
-                }}
+              <canvas
+                ref={lensCanvasRef}
+                width={LENS_W}
+                height={LENS_H}
+                style={{ width: LENS_W, height: LENS_H, display: 'block' }}
               />
             </div>
           )}
 
-          {/* Floating Copy / Paste menu */}
-          <div
-            style={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              transform: `translate3d(${menuX}px, ${menuY}px, 0)`,
-              background: 'var(--ms-bg-main)',
-              border: '1px solid var(--ms-border-light)',
-              display: 'flex',
-              borderRadius: '6px',
-              boxShadow: '0 4px 15px rgba(0,0,0,0.4)',
-              pointerEvents: 'auto',
-              zIndex: 3,
-            }}
-          >
-            <button
-              type="button"
-              onClick={handleCopy}
+          {/* Copy / Paste — only after selection is released */}
+          {showMenu && (
+            <div
               style={{
-                padding: '8px 16px',
-                border: 'none',
-                background: 'transparent',
-                color: 'white',
-                fontSize: '13px',
-                cursor: 'pointer',
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                transform: `translate3d(${menuX}px, ${menuY}px, 0)`,
+                background: 'var(--ms-bg-main)',
+                border: '1px solid var(--ms-border-light)',
+                display: 'flex',
+                borderRadius: 6,
+                boxShadow: '0 4px 15px rgba(0,0,0,0.4)',
+                pointerEvents: 'auto',
+                zIndex: 3,
               }}
             >
-              Copy
-            </button>
-            <div style={{ width: '1px', background: 'var(--ms-border-light)', margin: '4px 0' }} />
-            <button
-              type="button"
-              onClick={handlePaste}
-              style={{
-                padding: '8px 16px',
-                border: 'none',
-                background: 'transparent',
-                color: 'white',
-                fontSize: '13px',
-                cursor: 'pointer',
-              }}
-            >
-              Paste
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={handleCopy}
+                style={{
+                  padding: '8px 16px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'white',
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                Copy
+              </button>
+              <div
+                style={{
+                  width: 1,
+                  background: 'var(--ms-border-light)',
+                  margin: '4px 0',
+                }}
+              />
+              <button
+                type="button"
+                onClick={handlePaste}
+                style={{
+                  padding: '8px 16px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'white',
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                Paste
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 };
 
-/** Focus + fit when tab becomes active (keeps main component clean). */
-function useEffectFocus(
-  isActive: boolean,
-  fit: () => void,
-  focus: () => void
-) {
+function useEffectFocus(isActive: boolean, fit: () => void, focus: () => void) {
   React.useEffect(() => {
     if (isActive) {
       const t = setTimeout(() => {

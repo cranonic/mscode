@@ -285,6 +285,23 @@ export const SettingItem: React.FC<SettingItemProps> = memo(({ setting }) => {
           </div>
         );
       }
+      case 'button':
+        return (
+          <div style={{ marginTop: '8px' }}>
+            <Button
+              variant="type1"
+              onClick={() => {
+                const action = (setting as any).buttonAction || setting.id;
+                document.dispatchEvent(
+                  new CustomEvent('ms-settings-button', { detail: { id: setting.id, action } }),
+                );
+              }}
+            >
+              {(setting as any).buttonLabel || setting.title || 'Run'}
+            </Button>
+          </div>
+        );
+
       case 'number':
       case 'string':
         return (

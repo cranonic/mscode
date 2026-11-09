@@ -39,6 +39,9 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
   // Live buffer anchors — used while dragging handles
   const anchorRef = useRef<SelAnchor | null>(null);
   const dragWhichRef = useRef<'start' | 'end' | null>(null);
+  /** True while user is still adjusting selection (finger down / handle drag). */
+  const isSelectingRef = useRef(false);
+  const [menuReady, setMenuReady] = useState(false);
 
   const { instances, updateInstance } = useTerminalStore();
   const settings = useSettingsStore(s => s.settings);
@@ -79,12 +82,12 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
     const startRowVP = sr - viewportY;
     const endRowVP   = er - viewportY;
 
-    // Handles at the exact edges of the blue selection:
-    // start = left edge of first cell, end = left edge of end column (exclusive)
-    // + padX/padY so we align with xterm's screen canvas, not the outer container
-    const startX = padX + sc * cellW;
+    // Handles sit outside the blue selection edges (outward)
+    // start = left of first cell; end = right of last cell (end col is exclusive in xterm)
+    const OUT = Math.max(6, cellW * 0.35);
+    const startX = padX + sc * cellW - OUT;
     const startY = padY + (startRowVP + 1) * cellH;
-    const endX   = padX + ec * cellW;
+    const endX   = padX + ec * cellW + OUT;
     const endY   = padY + (endRowVP + 1) * cellH;
 
     const viewH = containerRef.current?.clientHeight ?? 0;
@@ -173,6 +176,8 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
 
   const beginHandleDrag = useCallback((_which: 'start' | 'end', _cx: number, _cy: number) => {
     dragWhichRef.current = _which;
+    isSelectingRef.current = true;
+    setMenuReady(false);
     if (!anchorRef.current && adapterRef.current) {
       const m = adapterRef.current.getSelectionMetrics();
       const xterm = adapterRef.current.xtermInstance;
@@ -202,7 +207,32 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
 
   const endHandleDrag = useCallback(() => {
     dragWhichRef.current = null;
+    isSelectingRef.current = false;
+    // Menu only after selection is released
+    setTimeout(() => setMenuReady(true), 40);
   }, []);
+
+  /** Recompute handle pixel positions from buffer anchors (e.g. after scroll). */
+  const refreshSelectionUI = useCallback(() => {
+    const anchor = anchorRef.current;
+    const adapter = adapterRef.current;
+    if (!anchor || !adapter) return;
+    const text = adapter.getSelection() || selection?.text || '';
+    if (!text) {
+      setSelection(null);
+      setMenuReady(false);
+      return;
+    }
+    const ui = metricsToUI(
+      text,
+      anchor.startCol,
+      anchor.startRow,
+      anchor.endCol,
+      anchor.endRow,
+    );
+    if (ui) setSelection(ui);
+    else setSelection(null);
+  }, [metricsToUI, selection?.text]);
 
   // ── Mount / Unmount ───────────────────────────────────────────────────────
 
@@ -212,6 +242,7 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
     let alive = true;
     let selTimeout: ReturnType<typeof setTimeout> | undefined;
     let selectionDisposable: { dispose(): void } | undefined;
+    let scrollDisposable: { dispose(): void } | undefined;
 
     const boot = async () => {
       const proc = new TerminalProcess({
@@ -268,7 +299,12 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
       const xterm = adapter.xtermInstance;
       if (xterm?.onSelectionChange) {
         selectionDisposable = xterm.onSelectionChange(() => {
+          // While dragging handles, applyBufferSelection already updates UI
           if (dragWhichRef.current) return;
+
+          // Selecting in progress — hide menu until finger lifts / selection settles
+          setMenuReady(false);
+          isSelectingRef.current = true;
 
           clearTimeout(selTimeout);
           selTimeout = setTimeout(() => {
@@ -276,45 +312,46 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
             if (!text || text.trim() === '') {
               anchorRef.current = null;
               setSelection(null);
+              isSelectingRef.current = false;
+              setMenuReady(false);
               return;
             }
 
             const m = adapter.getSelectionMetrics();
-            if (!m || m.cellW <= 0) {
-              setSelection({ text, startX: 16, startY: 24, endX: 80, endY: 40 });
-              return;
-            }
-
             const viewportY = xterm.buffer.active.viewportY;
-            anchorRef.current = {
-              startCol: m.startColumn,
-              startRow: m.startRow + viewportY,
-              endCol: m.endColumn,
-              endRow: m.endRow + viewportY,
-            };
-
-            // Handles at exact edges + render padding
-            const padX = (m as any).padX || 0;
-            const padY = (m as any).padY || 0;
-            const startX = padX + m.startColumn * m.cellW;
-            const startY = padY + (m.startRow + 1) * m.cellH;
-            const endX   = padX + m.endColumn * m.cellW;
-            const endY   = padY + (m.endRow + 1) * m.cellH;
-
-            const viewH = containerRef.current?.clientHeight ?? 0;
-            if (endY < 0 || startY - m.cellH > viewH) {
-              setSelection(null);
-              return;
+            if (m && m.cellW > 0) {
+              anchorRef.current = {
+                startCol: m.startColumn,
+                startRow: m.startRow + viewportY,
+                endCol: m.endColumn,
+                endRow: m.endRow + viewportY,
+              };
             }
 
-            setSelection({
-              text,
-              startX: Math.max(0, startX),
-              startY: Math.max(0, startY),
-              endX: Math.max(0, endX),
-              endY: Math.max(0, endY),
-            });
-          }, 50);
+            const a = anchorRef.current;
+            if (a) {
+              const ui = metricsToUI(text, a.startCol, a.startRow, a.endCol, a.endRow);
+              if (ui) setSelection(ui);
+              else setSelection(null);
+            }
+
+            // Treat selection as released after a short idle (no more changes)
+            isSelectingRef.current = false;
+            setMenuReady(true);
+          }, 180);
+        });
+      }
+
+      // Scroll: selection highlight moves with buffer; sync teardrops + menu
+      if (xterm?.onScroll) {
+        scrollDisposable = xterm.onScroll(() => {
+          if (!anchorRef.current) return;
+          const text = adapter.getSelection() || '';
+          if (!text) return;
+          const a = anchorRef.current;
+          const ui = metricsToUI(text, a.startCol, a.startRow, a.endCol, a.endRow);
+          if (ui) setSelection(ui);
+          else setSelection(null); // scrolled out of view
         });
       }
 
@@ -336,6 +373,7 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
       alive = false;
       clearTimeout(selTimeout);
       selectionDisposable?.dispose();
+      try { scrollDisposable?.dispose(); } catch {}
       terminalProcessRegistry.unregister(instance.id);
       processRef.current?.kill();
       processRef.current = null;
@@ -426,10 +464,12 @@ export function useTerminalInstance({ terminalId }: UseTerminalInstanceOptions) 
     findNext,
     findPrevious,
     selection,
+    menuReady,
     handleCopy,
     handlePaste,
     beginHandleDrag,
     moveHandleDrag,
     endHandleDrag,
+    refreshSelectionUI,
   };
 }

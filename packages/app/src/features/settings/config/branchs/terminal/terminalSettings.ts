@@ -248,6 +248,32 @@ export const terminalSection: IConfigurationSection = {
         '**ON (default):** only one backend type may have live sessions. Opening the other type closes existing sessions of the previous type (see Confirm Before Exclusive Kill).\n\n**OFF:** both native and proot may run side-by-side. The Termis `+` button then shows a picker (Android bionic / Linux proot) instead of spawning the default only.',
     },
 
+    'terminal.clearDataProot': {
+      title: 'Clear Linux (Alpine) Data',
+      type: 'button',
+      subCategory: 'Data',
+      defaultValue: null,
+      order: 60,
+      tags: ['terminal', 'clear', 'proot', 'alpine'],
+      buttonLabel: 'Clear Data…',
+      buttonAction: 'terminal.clearData.proot',
+      markdownDescription:
+        'Permanently wipe the **Linux Alpine (proot)** rootfs, or open a dialog to remove individual packages.\n\nThis is not a session clear — the next proot terminal will download/setup Alpine again.\n\nUse only when you want a full reset.',
+    },
+
+    'terminal.clearDataNative': {
+      title: 'Clear Native Terminal Data',
+      type: 'button',
+      subCategory: 'Data',
+      defaultValue: null,
+      order: 61,
+      tags: ['terminal', 'clear', 'native'],
+      buttonLabel: 'Clear Data…',
+      buttonAction: 'terminal.clearData.native',
+      markdownDescription:
+        'Permanently wipe the **Android bionic** `$PREFIX` bootstrap (installed packages), or remove selected packages.\n\nThe next native terminal will reinstall bootstrap as needed.\n\nUse only when you want a full reset.',
+    },
+
     'terminal.confirmBeforeKill': {
       title: 'Confirm Before Exclusive Kill',
       type: 'boolean',

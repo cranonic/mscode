@@ -15,6 +15,7 @@ export type SettingType =
   | 'textarea'     // Maps to multi-line text input fields
   | 'object'
   | 'array'
+  | 'button'       // Action button (does not store a value)
   | 'null';
 
 
@@ -44,6 +45,10 @@ export interface SettingDefinition {
   description?: string;
   /** Markdown documentation strings (takes precedence over plain text inside interactive components) */
   markdownDescription?: string;
+  /** Label on type:'button' controls */
+  buttonLabel?: string;
+  /** Payload for button actions (e.g. clear-data target) */
+  buttonAction?: string;
 
   // ─── Enum / Selection Schemas ───────────────────────────────
   /** Explicit array objects binding key indices directly into dynamic rendering selectors */
@@ -116,6 +121,10 @@ export interface SettingOption {
   description?: string;
   /** Rich documentation layout text leveraging internal markdown renderer nodes */
   markdownDescription?: string;
+  /** Label on type:'button' controls */
+  buttonLabel?: string;
+  /** Payload for button actions (e.g. clear-data target) */
+  buttonAction?: string;
 }
 
 // ─── Configuration Registry Subsystem ───────────────────────────────────────

@@ -10,7 +10,6 @@ import { useExplorerStore } from '@/features/explorer/store/exploreStore';
 import { OutputPanel } from './components/output/components/OutputPanel';
 import { ProblemsPanel } from './components/problems/ProblemsPanel';
 import { TerminalInstance } from './components/terminal/components/TerminalInstance';
-import { ClearDataModal } from './components/terminal/components/ClearDataModal';
 import { terminalProcessRegistry } from './components/terminal/core/TerminalRegistry';
 import { Icon } from '@/ui/components/Icon/IconRegistry';
 import { useMenuStore, type MenuItem } from '@/store/menuStore';
@@ -27,7 +26,6 @@ const STATUS_COLOR: Record<string, string> = {
 
 export const TermisPanel: React.FC<{ mode?: 'panel' | 'fullscreen' }> = ({ mode = 'panel' }) => {
   const { isOpen, panelHeight, activeView, setActiveView, closePanel } = useTermisStore();
-  const [clearDataTarget, setClearDataTarget] = useState<'native' | 'proot' | null>(null);
 
   const {
     instances,
@@ -174,20 +172,6 @@ export const TermisPanel: React.FC<{ mode?: 'panel' | 'fullscreen' }> = ({ mode 
         description: 'Alpine (network rootfs)',
         icon: 'server',
         onClick: () => { void openNewTerminal('proot'); },
-      },
-      {
-        id: 'termis.clear.proot',
-        label: 'Clear Data — Linux',
-        description: 'Wipe Alpine or remove packages',
-        icon: 'trash',
-        onClick: () => setClearDataTarget('proot'),
-      },
-      {
-        id: 'termis.clear.native',
-        label: 'Clear Data — Native',
-        description: 'Wipe $PREFIX or remove packages',
-        icon: 'trash',
-        onClick: () => setClearDataTarget('native'),
       },
     ];
 
@@ -414,13 +398,7 @@ export const TermisPanel: React.FC<{ mode?: 'panel' | 'fullscreen' }> = ({ mode 
           {confirmMsg}
         </p>
       </Modal>
-
-      <ClearDataModal
-        execType={clearDataTarget || 'proot'}
-        isOpen={!!clearDataTarget}
-        onClose={() => setClearDataTarget(null)}
-      />
-    </div>
+</div>
   );
 };
 
