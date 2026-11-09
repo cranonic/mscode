@@ -28,7 +28,7 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
   } = useTerminalInstance({ terminalId });
 
   const draggingRef = useRef<'start' | 'end' | null>(null);
-  const showLensSetting = !!useSettingsStore.getState().settings?.['terminal.integrated.showLens'];
+  // const showLensSetting = !!useSettingsStore.getState().settings?.['terminal.integrated.showLens'];
   // Default true if setting missing
   const showLens =
     useSettingsStore.getState().settings?.['terminal.integrated.showLens'] !== false;
