@@ -754,7 +754,7 @@ export const suggestionProperties: IConfigurationSection['properties'] = {
   'editor.lightbulb.enabled': {
     title: 'Light Bulb Enabled',
     type: 'select',
-    defaultValue: 'onCode',
+    defaultValue: 'off',
     order: 110,
     tags: ['display', 'quickfix'],
     markdownDescription:
