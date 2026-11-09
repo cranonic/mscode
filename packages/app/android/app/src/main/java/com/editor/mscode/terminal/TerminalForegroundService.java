@@ -146,6 +146,96 @@ public class TerminalForegroundService extends Service {
         return installer.listInstalled();
     }
 
+    /** Packages visible for Clear Data UI. */
+    public java.util.List<String> listTerminalPackages(String execType) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if ("native".equals(execType)) {
+            out.addAll(pkgListInstalled());
+            return out;
+        }
+        // Alpine: parse /lib/apk/db/installed for "P:pkgname" lines
+        java.io.File db = new java.io.File(rootfs.getRootfsPath(), "lib/apk/db/installed");
+        if (!db.isFile()) return out;
+        try (java.io.BufferedReader br = new java.io.BufferedReader(
+                new java.io.InputStreamReader(new java.io.FileInputStream(db), "UTF-8"))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.startsWith("P") && line.length() > 2) {
+                    out.add(line.substring(2).trim());
+                }
+            }
+        } catch (Exception e) {
+            emitLog("listTerminalPackages proot: " + e.getMessage());
+        }
+        java.util.Collections.sort(out);
+        return out;
+    }
+
+    /**
+     * packages empty → wipe whole backend data dir.
+     * packages set → remove package markers/files (native) or note apk del needed.
+     */
+    public String clearTerminalData(String execType, java.util.List<String> packages) throws Exception {
+        if (packages == null || packages.isEmpty()) {
+            // Full wipe — kill sessions of that type first
+            try { killAllSessionsOfType(execType); } catch (Exception ignored) {}
+            if ("native".equals(execType)) {
+                java.io.File prefix = new java.io.File(rootfs.getPrefixPath());
+                deleteRecursive(prefix);
+                prefix.mkdirs();
+                emitLog("Wiped native $PREFIX");
+                return "Native terminal data cleared. Re-open a terminal to reinstall bootstrap.";
+            } else {
+                java.io.File alpine = new java.io.File(rootfs.getRootfsPath());
+                deleteRecursive(alpine);
+                emitLog("Wiped Alpine rootfs");
+                return "Linux (Alpine) data cleared. Re-open a proot terminal to download rootfs again.";
+            }
+        }
+        // Selective package remove
+        if ("native".equals(execType)) {
+            int n = 0;
+            java.io.File infoDir = new java.io.File(rootfs.getPrefixPath(), "var/lib/dpkg/info");
+            for (String pkg : packages) {
+                java.io.File list = new java.io.File(infoDir, pkg + ".list");
+                if (list.isFile()) {
+                    try (java.io.BufferedReader br = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(new java.io.FileInputStream(list), "UTF-8"))) {
+                        String path;
+                        while ((path = br.readLine()) != null) {
+                            path = path.trim();
+                            if (path.isEmpty() || path.startsWith("#")) continue;
+                            // paths in list are relative to /data/data/.../files or absolute under PREFIX
+                            java.io.File f = path.startsWith("/") ? new java.io.File(path)
+                                : new java.io.File(rootfs.getPrefixPath(), path);
+                            if (f.isFile()) f.delete();
+                        }
+                    } catch (Exception e) {
+                        emitLog("remove " + pkg + ": " + e.getMessage());
+                    }
+                    list.delete();
+                    n++;
+                }
+            }
+            return "Removed " + n + " native package(s). If something remains, remove it from the terminal with pkg.";
+        }
+        // proot selective — try best-effort file removal is unsafe; ask shell
+        throw new Exception(
+            "Selective Alpine package removal failed from UI. Open the Linux terminal and run: apk del "
+                + String.join(" ", packages));
+    }
+
+    private void deleteRecursive(java.io.File f) {
+        if (f == null || !f.exists()) return;
+        if (f.isDirectory()) {
+            java.io.File[] kids = f.listFiles();
+            if (kids != null) for (java.io.File k : kids) deleteRecursive(k);
+        }
+        //noinspection ResultOfMethodCallIgnored
+        f.delete();
+    }
+
+
     // ─── State ────────────────────────────────────────────────────────────────
 
     private final ConcurrentHashMap<String, TerminalSession> sessions

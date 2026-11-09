@@ -2,6 +2,7 @@
 import React, { useCallback, useRef } from 'react';
 import { useTerminalInstance } from '../hooks/useTerminalInstance';
 import { StartDropSVG, EndDropSVG, DROP_W } from '@/features/editor/components/Teardrops/components/TeardropsShapes';
+import { useSettingsStore } from '@/features/settings/store/settingsStore';
 
 interface TerminalInstanceProps {
   terminalId: string;
@@ -22,6 +23,8 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
   } = useTerminalInstance({ terminalId });
 
   const draggingRef = useRef<'start' | 'end' | null>(null);
+  const showLens = !!useSettingsStore.getState().settings?.['terminal.integrated.showLens'];
+  const [lens, setLens] = React.useState<{ x: number; y: number } | null>(null);
 
   useEffectFocus(isActive, fit, focus);
 
@@ -43,7 +46,11 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
     e.preventDefault();
     e.stopPropagation();
     moveHandleDrag(draggingRef.current, e.clientX, e.clientY);
-  }, [moveHandleDrag]);
+    if (showLens) {
+      const above = e.clientY > 120;
+      setLens({ x: e.clientX, y: above ? e.clientY - 90 : e.clientY + 70 });
+    }
+  }, [moveHandleDrag, showLens]);
 
   const onHandlePointerUp = useCallback((e: React.PointerEvent) => {
     if (!draggingRef.current) return;
@@ -54,15 +61,28 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
     } catch {}
     endHandleDrag();
     draggingRef.current = null;
+    setLens(null);
   }, [endHandleDrag]);
 
-  // Menu sits above the selection start; clamp so it stays on-screen
+  // Menu follows the RIGHT (end) handle / cursor — not the left edge
+  const winW = typeof window !== 'undefined' ? window.innerWidth : 400;
+  const menuW = 140;
   const menuX = selection
-    ? Math.max(8, Math.min(selection.startX, (typeof window !== 'undefined' ? window.innerWidth : 400) - 140))
+    ? Math.max(8, Math.min(selection.endX - menuW / 2, winW - menuW - 8))
     : 0;
   const menuY = selection
-    ? Math.max(8, selection.startY - 48)
+    ? Math.max(8, Math.min(selection.endY, selection.startY) - 52)
     : 0;
+
+  // Teardrop offsets: push slightly outward from selection edges
+  const EDGE_INSET = 2; // px outward from cell edge
+  let startHandleX = selection ? selection.startX - EDGE_INSET : 0;
+  let endHandleX = selection ? selection.endX + EDGE_INSET : 0;
+  // Near left screen edge: shift left teardrop inward so it stays usable
+  const LEFT_EDGE_ZONE = 28;
+  if (selection && selection.startX < LEFT_EDGE_ZONE) {
+    startHandleX = Math.min(selection.startX + 18, selection.endX - 12);
+  }
 
   return (
     <div style={{ position: 'absolute', inset: 0, visibility: isActive ? 'visible' : 'hidden' }}>
@@ -89,7 +109,7 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
               position: 'absolute',
               left: 0,
               top: 0,
-              transform: `translate3d(${selection.startX - DROP_W / 2}px, ${selection.startY}px, 0)`,
+              transform: `translate3d(${startHandleX - DROP_W / 2}px, ${selection.startY}px, 0)`,
               pointerEvents: 'auto',
               touchAction: 'none',
               cursor: 'grab',
@@ -109,7 +129,7 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
               position: 'absolute',
               left: 0,
               top: 0,
-              transform: `translate3d(${selection.endX - DROP_W / 2}px, ${selection.endY}px, 0)`,
+              transform: `translate3d(${endHandleX - DROP_W / 2}px, ${selection.endY}px, 0)`,
               pointerEvents: 'auto',
               touchAction: 'none',
               cursor: 'grab',
@@ -122,6 +142,55 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
           >
             <EndDropSVG />
           </div>
+
+
+          {/* Android-style selection lens */}
+          {showLens && lens && (
+            <div
+              style={{
+                position: 'fixed',
+                left: 0,
+                top: 0,
+                width: 72,
+                height: 72,
+                borderRadius: '50%',
+                border: '2px solid rgba(255,255,255,0.5)',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.45)',
+                overflow: 'hidden',
+                pointerEvents: 'none',
+                zIndex: 4,
+                transform: `translate3d(${lens.x - 36}px, ${lens.y - 36}px, 0)`,
+                background: 'var(--ms-bg-main, #1e1e1e)',
+              }}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '50%',
+                  width: 2,
+                  height: 16,
+                  marginLeft: -1,
+                  marginTop: -8,
+                  background: '#58a6ff',
+                  borderRadius: 1,
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '50%',
+                  width: 16,
+                  height: 2,
+                  marginLeft: -8,
+                  marginTop: -1,
+                  background: '#58a6ff',
+                  borderRadius: 1,
+                }}
+              />
+            </div>
+          )}
 
           {/* Floating Copy / Paste menu */}
           <div

@@ -101,6 +101,17 @@ export const terminalSection: IConfigurationSection = {
       ],
     },
 
+    'terminal.integrated.showLens': {
+      title: 'Show Selection Lens',
+      type: 'boolean',
+      subCategory: 'Appearance',
+      defaultValue: true,
+      order: 16,
+      tags: ['terminal', 'selection'],
+      markdownDescription:
+        'When dragging terminal selection teardrops, show a magnifier-style lens (Android-like) above or below the finger for precise adjustment.',
+    },
+
     'terminal.integrated.fontLigatures': {
       title: 'Font Ligatures',
       type: 'boolean',

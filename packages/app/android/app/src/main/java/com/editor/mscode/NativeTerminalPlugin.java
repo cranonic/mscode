@@ -223,6 +223,61 @@ public class NativeTerminalPlugin extends Plugin {
         call.resolve(ret);
     }
 
+
+    /** List packages for backend: native → pkg dpkg list; proot → apk info -e style via rootfs. */
+    @PluginMethod
+    public void listTerminalPackages(PluginCall call) {
+        if (!checkService(call)) return;
+        String execType = call.getString("execType", "proot");
+        new Thread(() -> {
+            try {
+                java.util.List<String> list = terminalService.listTerminalPackages(execType);
+                JSObject ret = new JSObject();
+                JSArray arr = new JSArray();
+                for (String p : list) arr.put(p);
+                ret.put("packages", arr);
+                ret.put("execType", execType);
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("listTerminalPackages: " + e.getMessage());
+            }
+        }, "pkg-list").start();
+    }
+
+    /**
+     * Clear terminal data.
+     * packages empty → full wipe of that backend (usr or alpine_core).
+     * packages non-empty → best-effort remove those packages only.
+     */
+    @PluginMethod
+    public void clearTerminalData(PluginCall call) {
+        if (!checkService(call)) return;
+        String execType = call.getString("execType", "proot");
+        JSArray pkgs = call.getArray("packages");
+        java.util.List<String> list = new java.util.ArrayList<>();
+        if (pkgs != null) {
+            for (int i = 0; i < pkgs.length(); i++) {
+                try {
+                    String s = pkgs.getString(i);
+                    if (s != null && !s.isEmpty()) list.add(s);
+                } catch (Exception ignored) {}
+            }
+        }
+        final java.util.List<String> pkgList = list;
+        new Thread(() -> {
+            try {
+                String msg = terminalService.clearTerminalData(execType, pkgList);
+                JSObject ret = new JSObject();
+                ret.put("message", msg);
+                ret.put("execType", execType);
+                ret.put("removedCount", pkgList.size());
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("clearTerminalData: " + e.getMessage());
+            }
+        }, "term-clear").start();
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private String getArch() {
