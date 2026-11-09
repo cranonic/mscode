@@ -243,3 +243,50 @@
   --ms-code-bg:                 rgba(255, 255, 255, 0.1);
   --ms-code-fg:                 #ce9178;
 }
+
+
+
+
+
+
+
+
+
+
+
+/* Phase 1 SPCK — append to CodeEditor.css */
+
+/* Isolate editor paint from chrome reflows */
+.ms-code-editor-container {
+  contain: layout style;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.ms-code-editor-container .monaco-editor,
+.ms-code-editor-container .monaco-editor .overflow-guard {
+  contain: strict;
+}
+
+/* Handles: GPU layer, no layout */
+.ms-teardrop-handle {
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.ms-teardrop-handle__body {
+  pointer-events: none; /* events on outer handle only */
+}
+
+.ms-teardrop-caret {
+  will-change: opacity;
+}
+
+/* Native monaco scrollbars stay dead */
+.monaco-editor .monaco-scrollable-element > .scrollbar {
+  display: none !important;
+  pointer-events: none !important;
+}
