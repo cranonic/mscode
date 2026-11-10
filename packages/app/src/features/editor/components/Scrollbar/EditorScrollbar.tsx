@@ -1,7 +1,7 @@
 // src/features/editor/components/Scrollbar/EditorScrollbar.tsx
 // Continuous thumb drag: editor always follows thumb (no stop mid-drag).
 
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import './EditorScrollbar.css';
 
 export interface ScrollbarConfig {
@@ -28,7 +28,7 @@ export const DEFAULT_SCROLLBAR_CONFIG: ScrollbarConfig = {
   thumbFixedSize: 50,
   autoHideDelay: 1200,
   fadeOutDuration: 350,
-  showOnMount: true,
+  showOnMount: false,
   mountFlashDuration: 1000,
 };
 
@@ -41,7 +41,6 @@ function beginScrollApply() {
   try {
     (globalThis as any).__monacoScrollbarDragging = true;
     (globalThis as any).__monacoAllowScrollApply = true;
-    // Don't let touch-scroll block path win mid-drag
     (globalThis as any).__monacoTouchScrolling = false;
   } catch { /* ignore */ }
 }
@@ -54,7 +53,23 @@ function endScrollApply() {
 }
 
 export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config: cfgOverride }) => {
-  const cfg: ScrollbarConfig = { ...DEFAULT_SCROLLBAR_CONFIG, ...cfgOverride };
+  // Memoize config by primitive values so state updates never recreate cfg reference
+  const cfg: ScrollbarConfig = useMemo(
+    () => ({ ...DEFAULT_SCROLLBAR_CONFIG, ...cfgOverride }),
+    [
+      cfgOverride?.showVertical,
+      cfgOverride?.showHorizontal,
+      cfgOverride?.verticalVisibility,
+      cfgOverride?.horizontalVisibility,
+      cfgOverride?.thumbWidth,
+      cfgOverride?.trackWidth,
+      cfgOverride?.thumbFixedSize,
+      cfgOverride?.autoHideDelay,
+      cfgOverride?.fadeOutDuration,
+      cfgOverride?.showOnMount,
+      cfgOverride?.mountFlashDuration,
+    ],
+  );
 
   const [scrollTop, setScrollTop] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
@@ -70,6 +85,7 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
 
   const yTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const xTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const didFlashMountRef = useRef(false);
 
   const metricsRef = useRef({
     scrollTop: 0, scrollLeft: 0, contentH: 1, contentW: 1, viewH: 1, viewW: 1, maxST: 0, maxSL: 0,
@@ -82,22 +98,46 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
   const yDrag = useRef({ on: false, pointerId: -1, startClient: 0, startScroll: 0 });
   const xDrag = useRef({ on: false, pointerId: -1, startClient: 0, startScroll: 0 });
 
+  // Sync visibility immediately when user toggles between 'auto' and 'visible' in Settings
+  useEffect(() => {
+    clearTimeout(yTimer.current);
+    setYVis(yAlways ? 1 : 0);
+  }, [yAlways]);
+
+  useEffect(() => {
+    clearTimeout(xTimer.current);
+    setXVis(xAlways ? 1 : 0);
+  }, [xAlways]);
+
   const showY = useCallback((delay: number) => {
-    if (yAlways) return;
+    if (yAlways) {
+      setYVis(1);
+      return;
+    }
     setYVis(1);
     clearTimeout(yTimer.current);
     yTimer.current = setTimeout(() => setYVis(0), delay);
   }, [yAlways]);
 
   const showX = useCallback((delay: number) => {
-    if (xAlways) return;
+    if (xAlways) {
+      setXVis(1);
+      return;
+    }
     setXVis(1);
     clearTimeout(xTimer.current);
     xTimer.current = setTimeout(() => setXVis(0), delay);
   }, [xAlways]);
 
-  const keepYVisible = useCallback(() => { if (!yAlways) setYVis(1); }, [yAlways]);
-  const keepXVisible = useCallback(() => { if (!xAlways) setXVis(1); }, [xAlways]);
+  const keepYVisible = useCallback(() => {
+    clearTimeout(yTimer.current);
+    if (!yAlways) setYVis(1);
+  }, [yAlways]);
+
+  const keepXVisible = useCallback(() => {
+    clearTimeout(xTimer.current);
+    if (!xAlways) setXVis(1);
+  }, [xAlways]);
 
   /** Live metrics from editor — never trust stale maxST mid-drag */
   const refreshMetrics = useCallback(() => {
@@ -109,7 +149,6 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
     const li = editor.getLayoutInfo();
     const vh = li.height;
     const vw = li.width;
-    // Prefer scrollHeight - height for max (matches Monaco internal)
     const maxST = Math.max(0, ch - vh);
     const maxSL = Math.max(0, cw - vw);
     metricsRef.current = {
@@ -140,14 +179,12 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
     beginScrollApply();
     try {
       editor.setScrollTop(top);
-      // If Monaco still ignored, force via layout API
       const got = editor.getScrollTop();
       if (Math.abs(got - top) > 1) {
         editor.setScrollTop(top);
       }
       metricsRef.current.scrollTop = editor.getScrollTop();
     } finally {
-      // keep dragging flag true while finger is down — endScrollApply only on pointerup
       if (!yDrag.current.on && !xDrag.current.on) endScrollApply();
       else beginScrollApply();
     }
@@ -179,24 +216,29 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
       updateThumbDom();
     };
     sync();
-    if (cfg.showOnMount) {
+
+    if (cfg.showOnMount && !didFlashMountRef.current) {
+      didFlashMountRef.current = true;
       showY(cfg.mountFlashDuration);
       showX(cfg.mountFlashDuration);
     }
 
     const subs = [
       editor.onDidScrollChange((e: any) => {
+        const prevST = metricsRef.current.scrollTop;
+        const prevSL = metricsRef.current.scrollLeft;
         metricsRef.current.scrollTop = e.scrollTop;
         metricsRef.current.scrollLeft = e.scrollLeft;
+
         if (yDrag.current.on || xDrag.current.on) {
-          // During drag thumb is driven by finger math; still sync metrics
           return;
         }
-        if (e.scrollTopChanged) {
+        // Only show scrollbar when scroll position genuinely changed
+        if (e.scrollTopChanged && Math.abs(e.scrollTop - prevST) > 0.5) {
           setScrollTop(e.scrollTop);
           showY(cfg.autoHideDelay);
         }
-        if (e.scrollLeftChanged) {
+        if (e.scrollLeftChanged && Math.abs(e.scrollLeft - prevSL) > 0.5) {
           setScrollLeft(e.scrollLeft);
           showX(cfg.autoHideDelay);
         }
@@ -225,7 +267,6 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
         const ratio = m.maxST / maxYOffset;
         const delta = e.clientY - yDrag.current.startClient;
         const next = Math.max(0, Math.min(yDrag.current.startScroll + delta * ratio, m.maxST));
-        // Thumb tracks intended scroll (even if editor lags one frame)
         metricsRef.current.scrollTop = next;
         metricsRef.current.maxST = m.maxST;
         metricsRef.current.viewH = m.viewH;
@@ -366,6 +407,7 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
           className="ms-sb-track ms-sb-track--y"
           style={{
             opacity: yVis,
+            pointerEvents: yVis ? 'all' : 'none',
             width: cfg.trackWidth,
             height: hasBoth ? `calc(100% - ${cfg.trackWidth}px)` : '100%',
           }}
@@ -389,6 +431,7 @@ export const EditorScrollbar: React.FC<EditorScrollbarProps> = ({ editor, config
           className="ms-sb-track ms-sb-track--x"
           style={{
             opacity: xVis,
+            pointerEvents: xVis ? 'all' : 'none',
             height: cfg.trackWidth,
             width: hasBoth ? `calc(100% - ${cfg.trackWidth}px)` : '100%',
           }}

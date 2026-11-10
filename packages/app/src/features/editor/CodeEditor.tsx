@@ -223,8 +223,11 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tabId, filePath }) => {
 
   // ── Scrollbar Config Mapping ──────────────────────────────────────────────
   const scrollbarConfig: Partial<ScrollbarConfig> = useMemo(() => {
-    const v = settings['editor.scrollbar.vertical'];
-    const h = settings['editor.scrollbar.horizontal'];
+    const rawV = settings['editor.scrollbar.vertical'];
+    const rawH = settings['editor.scrollbar.horizontal'];
+
+    const v = typeof rawV === 'string' ? rawV.toLowerCase() : rawV;
+    const h = typeof rawH === 'string' ? rawH.toLowerCase() : rawH;
 
     const showVertical = v === 'hidden' || v === false ? false : true;
     const showHorizontal = h === 'hidden' || h === false ? false : true;
