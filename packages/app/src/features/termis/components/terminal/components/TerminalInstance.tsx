@@ -3,6 +3,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import { useTerminalInstance } from '../hooks/useTerminalInstance';
 import { StartDropSVG, EndDropSVG, DROP_W } from '@/features/editor/components/Teardrops/components/TeardropsShapes';
 import { useSettingsStore } from '@/features/settings/store/settingsStore';
+import { TerminalExtraKeys } from './TerminalExtraKeys';
 
 interface TerminalInstanceProps {
   terminalId: string;
@@ -166,12 +167,71 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
 
   const showMenu = !!(selection && menuReady && !draggingRef.current);
 
+  // Pinch-to-zoom (two-finger) — gated by settings
+  const pinchEnabled =
+    useSettingsStore.getState().settings?.['terminal.integrated.pinchZoom'] !== false;
+  const pinchRef = React.useRef<{ dist: number; font: number } | null>(null);
+
+  React.useEffect(() => {
+    if (!isActive || !pinchEnabled) return;
+    const el = containerRef.current;
+    if (!el) return;
+
+    const dist = (t: TouchList) => {
+      if (t.length < 2) return 0;
+      const dx = t[0].clientX - t[1].clientX;
+      const dy = t[0].clientY - t[1].clientY;
+      return Math.hypot(dx, dy);
+    };
+
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        const s = useSettingsStore.getState().settings;
+        const font =
+          Number(s?.['terminal.integrated.fontSize'] ?? s?.['editor.fontSize'] ?? 13) || 13;
+        pinchRef.current = { dist: dist(e.touches), font };
+      }
+    };
+    const onMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !pinchRef.current) return;
+      e.preventDefault();
+      const d = dist(e.touches);
+      if (d < 8) return;
+      const scale = d / Math.max(1, pinchRef.current.dist);
+      let next = Math.round(pinchRef.current.font * scale);
+      next = Math.max(8, Math.min(40, next));
+      useSettingsStore.getState().updateSetting?.('terminal.integrated.fontSize', next);
+    };
+    const onEnd = () => {
+      pinchRef.current = null;
+    };
+
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd);
+    el.addEventListener('touchcancel', onEnd);
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+    };
+  }, [isActive, pinchEnabled, containerRef]);
+
   return (
-    <div style={{ position: 'absolute', inset: 0, visibility: isActive ? 'visible' : 'hidden' }}>
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        visibility: isActive ? 'visible' : 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
       <div
         ref={containerRef}
         className="ms-terminal-container"
-        style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}
+        style={{ position: 'relative', flex: 1, overflow: 'hidden', minHeight: 0 }}
       />
 
       {isActive && selection && (
@@ -308,6 +368,8 @@ export const TerminalInstance: React.FC<TerminalInstanceProps> = ({ terminalId, 
           )}
         </div>
       )}
+
+      {isActive && <TerminalExtraKeys terminalId={terminalId} />}
     </div>
   );
 };

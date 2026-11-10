@@ -223,6 +223,40 @@ export const terminalSection: IConfigurationSection = {
       enumItemLabels: ['Alt', 'Ctrl', 'Shift'],
     },
 
+
+    'terminal.integrated.pinchZoom': {
+      title: 'Pinch to Zoom',
+      type: 'boolean',
+      subCategory: 'Interaction',
+      defaultValue: true,
+      order: 44,
+      tags: ['terminal', 'interaction', 'zoom'],
+      markdownDescription:
+        'Enable two-finger pinch-to-zoom on the terminal font size. Disable if it conflicts with scroll gestures.',
+    },
+
+    'terminal.integrated.extraKeys.enabled': {
+      title: 'Extra Keys Panel',
+      type: 'boolean',
+      subCategory: 'Keyboard',
+      defaultValue: true,
+      order: 45,
+      tags: ['terminal', 'keyboard'],
+      markdownDescription:
+        'Show the soft-key bar above the keyboard (ESC, CTRL, arrows, HOME/END, PGUP/PGDN, etc.). Turn off to hide the panel completely.',
+    },
+
+    'terminal.integrated.extraKeys.layout': {
+      title: 'Extra Keys Layout',
+      type: 'object',
+      subCategory: 'Keyboard',
+      defaultValue: null,
+      order: 46,
+      tags: ['terminal', 'keyboard'],
+      markdownDescription:
+        'Optional custom layout for the extra-keys panel.\n\nArray of rows; each key is `{ id, label, seq?, modifier? }`.\n\nLeave empty/null for the default Termux-style 2×7 grid matching the product UI.',
+    },
+
     // ── Backend / exclusive native ↔ proot ───────────────────────────────────
     'terminal.defaultExecMode': {
       title: 'Default Terminal Backend',
