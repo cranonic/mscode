@@ -545,8 +545,38 @@ index be17f49..eb25774 100644
      get altKey() { return this._altKey; }
      get ctrlKey() { return this._ctrlKey; }
      get metaKey() { return this._metaKey; }
+diff --git a/node_modules/monaco-editor/esm/vs/editor/browser/controller/mouseTarget.js b/node_modules/monaco-editor/esm/vs/editor/browser/controller/mouseTarget.js
+index 9093812..aa1688a 100644
+--- a/node_modules/monaco-editor/esm/vs/editor/browser/controller/mouseTarget.js
++++ b/node_modules/monaco-editor/esm/vs/editor/browser/controller/mouseTarget.js
+@@ -543,6 +543,17 @@ class MouseTargetFactory {
+                 lineNumbersWidth: ctx.layoutInfo.lineNumbersWidth,
+                 offsetX: offset
+             };
++
++            // If user directly tapped/clicked the folding chevron DOM node (.cldr / codicon-folding),
++            // always classify as GUTTER_LINE_DECORATIONS even when ms-folding-left reorders the gutter via CSS
++            const targetEl = request.target;
++            if (targetEl && targetEl.classList && (
++                targetEl.classList.contains('cldr') ||
++                (typeof targetEl.className === 'string' && targetEl.className.indexOf('codicon-folding') !== -1)
++            )) {
++                return request.fulfillMargin(4 /* MouseTargetType.GUTTER_LINE_DECORATIONS */, pos, res.range, detail);
++            }
++
+             offset -= ctx.layoutInfo.glyphMarginLeft;
+             if (offset <= ctx.layoutInfo.glyphMarginWidth) {
+                 // On the glyph margin
+@@ -562,6 +573,7 @@ class MouseTargetFactory {
+         }
+         return null;
+     }
++  
+     static _hitTestViewLines(ctx, request) {
+         if (!ElementPath.isChildOfViewLines(request.targetPath)) {
+             return null;
 diff --git a/node_modules/monaco-editor/esm/vs/editor/browser/controller/pointerHandler.js b/node_modules/monaco-editor/esm/vs/editor/browser/controller/pointerHandler.js
-index a900a6d..b7b8120 100644
+index a900a6d..4409864 100644
 --- a/node_modules/monaco-editor/esm/vs/editor/browser/controller/pointerHandler.js
 +++ b/node_modules/monaco-editor/esm/vs/editor/browser/controller/pointerHandler.js
 @@ -12,9 +12,6 @@ import { TextAreaSyntethicEvents } from './editContext/textArea/textAreaEditCont
@@ -588,7 +618,20 @@ index a900a6d..b7b8120 100644
          }
          if (this._lastPointerType === 'pen') {
              this._dispatchGesture(event, /*inSelectionMode*/ true);
-@@ -99,15 +104,18 @@ class TouchHandler extends MouseHandler {
+@@ -85,6 +90,12 @@ class PointerEventHandler extends MouseHandler {
+         }
+         super._onMouseDown(e, pointerId);
+     }
++    _onMouseUp(e) {
++        if (e.browserEvent.pointerType === 'touch') {
++            return;
++        }
++        super._onMouseUp(e);
++    }
+ }
+ class TouchHandler extends MouseHandler {
+     constructor(context, viewController, viewHelper) {
+@@ -99,15 +110,18 @@ class TouchHandler extends MouseHandler {
          this.viewHelper.focusTextArea();
          const target = this._createMouseTarget(new EditorMouseEvent(event, false, this.viewHelper.viewDomNode), false);
          if (target.position) {
@@ -876,3 +919,75 @@ index 6e2ea61..4bb3b1c 100644
          }
          const useShadowDOM = this._editor.getOption(144 /* EditorOption.useShadowDOM */) && !isIOS; // Do not use shadow dom on IOS #122035
          // Show menu
+diff --git a/node_modules/monaco-editor/esm/vs/editor/contrib/folding/browser/folding.js b/node_modules/monaco-editor/esm/vs/editor/contrib/folding/browser/folding.js
+index 49e374e..d89c259 100644
+--- a/node_modules/monaco-editor/esm/vs/editor/contrib/folding/browser/folding.js
++++ b/node_modules/monaco-editor/esm/vs/editor/contrib/folding/browser/folding.js
+@@ -311,12 +311,17 @@ let FoldingController = class FoldingController extends Disposable {
+         switch (e.target.type) {
+             case 4 /* MouseTargetType.GUTTER_LINE_DECORATIONS */: {
+                 const data = e.target.detail;
+-                const offsetLeftInGutter = e.target.element.offsetLeft;
+-                const gutterOffsetX = data.offsetX - offsetLeftInGutter;
+-                // const gutterOffsetX = data.offsetX - data.glyphMarginWidth - data.lineNumbersWidth - data.glyphMarginLeft;
+-                // TODO@joao TODO@alex TODO@martin this is such that we don't collide with dirty diff
+-                if (gutterOffsetX < 4) { // the whitespace between the border and the real folding icon border is 4px
+-                    return;
++                const el = e.target.element;
++                const isDirectFoldingIcon = el && el.classList && (
++                    el.classList.contains('cldr') ||
++                    el.className.indexOf('codicon-folding') !== -1
++                );
++                if (!isDirectFoldingIcon) {
++                    const offsetLeftInGutter = el.offsetLeft;
++                    const gutterOffsetX = data.offsetX - offsetLeftInGutter;
++                    if (gutterOffsetX < 4) {
++                        return;
++                    }
+                 }
+                 iconClicked = true;
+                 break;
+@@ -346,11 +351,14 @@ let FoldingController = class FoldingController extends Disposable {
+     }
+     onEditorMouseUp(e) {
+         const foldingModel = this.foldingModel;
+-        if (!foldingModel || !this.mouseDownInfo || !e.target) {
++        const mouseDownInfo = this.mouseDownInfo;
++        // Consume mouseDownInfo immediately so a stray pointerup/mouseup can never re-trigger it
++        this.mouseDownInfo = null;
++        if (!foldingModel || !mouseDownInfo || !e.target) {
+             return;
+         }
+-        const lineNumber = this.mouseDownInfo.lineNumber;
+-        const iconClicked = this.mouseDownInfo.iconClicked;
++        const lineNumber = mouseDownInfo.lineNumber;
++        const iconClicked = mouseDownInfo.iconClicked;
+         const range = e.target.range;
+         if (!range || range.startLineNumber !== lineNumber) {
+             return;
+@@ -366,10 +374,17 @@ let FoldingController = class FoldingController extends Disposable {
+                 return;
+             }
+         }
++        // Guard against duplicate synthetic mouse/pointer event pairs on mobile within 180ms
++        const now = Date.now();
++        if (this._lastFoldToggleLine === lineNumber && (now - (this._lastFoldToggleTime || 0)) < 180) {
++            return;
++        }
+         const region = foldingModel.getRegionAtLine(lineNumber);
+         if (region && region.startLineNumber === lineNumber) {
+             const isCollapsed = region.isCollapsed;
+             if (iconClicked || isCollapsed) {
++                this._lastFoldToggleLine = lineNumber;
++                this._lastFoldToggleTime = now;
+                 const surrounding = e.event.altKey;
+                 let toToggle = [];
+                 if (surrounding) {
+@@ -404,6 +419,7 @@ let FoldingController = class FoldingController extends Disposable {
+             }
+         }
+     }
++  
+     reveal(position) {
+         this.editor.revealPositionInCenterIfOutsideViewport(position, 0 /* ScrollType.Smooth */);
+     }
