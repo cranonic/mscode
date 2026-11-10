@@ -1,31 +1,35 @@
 diff --git a/node_modules/monaco-editor/esm/vs/base/browser/touch.js b/node_modules/monaco-editor/esm/vs/base/browser/touch.js
-index ca78b0b..885cd9a 100644
+index ca78b0b..9d8fba8 100644
 --- a/node_modules/monaco-editor/esm/vs/base/browser/touch.js
 +++ b/node_modules/monaco-editor/esm/vs/base/browser/touch.js
-@@ -24,9 +24,19 @@ var EventType;
+@@ -23,10 +23,23 @@ var EventType;
+     EventType.End = '-monaco-gesturesend';
      EventType.Contextmenu = '-monaco-gesturecontextmenu';
  })(EventType || (EventType = {}));
++
  class Gesture extends Disposable {
 -    static { this.SCROLL_FRICTION = -5e-3; }
 -    static { this.HOLD_DELAY = 700; }
 -    static { this.CLEAR_TAP_COUNT_TIME = 400; } // ms
-+    // Mono Studio: SPCK-like scroll physics (velocity ring + exponential decay)
-+    static { this.SCROLL_FRICTION = -2.4e-3; } // gentler linear base (fallback)
-+    static { this.HOLD_DELAY = 550; } // Phase-2: snappier long-press word select
++    // Android OverScroller-matched touch & fling constants
++    static { this.HOLD_DELAY = 550; }
 +    static { this.CLEAR_TAP_COUNT_TIME = 750; } // ms
-+    static { this.TAP_MOVE_THRESHOLD = 12; } // px
++    static { this.TAP_MOVE_THRESHOLD = 7; } // 7px Android touch slop
 +    static { this.DOUBLE_TAP_DISTANCE = 80; } // px
-+    static { this.ROLLING_SAMPLES = 6; }
-+    static { this.AXIS_LOCK_THRESHOLD = 8; } // px
-+    static { this.AXIS_LOCK_RATIO = 2.2; }
-+    static { this.MAX_VELOCITY = 5.5; } // px/ms
-+    static { this.INERTIA_MIN_VELOCITY = 0.05; } // px/ms stop threshold
-+    static { this.VELOCITY_SAMPLE_WINDOW_MS = 90; }
-+    static { this.MAX_FRAME_DT = 32; } // ms — avoid hitch jumps
++    static { this.ROLLING_SAMPLES = 20; } // Enough for 120Hz/240Hz touch screens (~100ms window)
++    static { this.AXIS_LOCK_THRESHOLD = 6; } // px
++    static { this.MAX_VELOCITY = 7.5; } // px/ms single flick max (7500 px/s)
++    static { this.MAX_FLYWHEEL_VELOCITY = 12.5; } // px/ms compounded flywheel max (12500 px/s)
++    static { this.INERTIA_MIN_VELOCITY = 0.04; } // px/ms stop threshold
++    static { this.VELOCITY_SAMPLE_WINDOW_MS = 85; } // ms lookback window
++    static { this.STOP_HOLD_PAUSE_MS = 50; } // ms stationary before lift = no fling
++    static { this.FLYWHEEL_WINDOW_MS = 280; } // max gesture duration to compound momentum
++    static { this.MAX_FRAME_DT = 32; } // ms cap for hitch protection
++
      constructor() {
          super();
          this.dispatched = false;
-@@ -35,6 +45,11 @@ class Gesture extends Disposable {
+@@ -35,12 +48,27 @@ class Gesture extends Disposable {
          this.activeTouches = {};
          this.handle = null;
          this._lastSetTapCountTime = 0;
@@ -33,38 +37,182 @@ index ca78b0b..885cd9a 100644
 +        this._lastTapY = 0;
 +        this._isInertiaScrolling = false;
 +        this._scrollFlagTimer = null;
-+        this._lockedAxis = null; // 'x' | 'y' | null for current gesture
++        this._lockedAxis = null; // 'x' | 'y' | null
++
++        // Live inertia velocity tracking for Android flywheel momentum compounding
++        this._liveInertiaVX = 0; // signed px/ms
++        this._liveInertiaVY = 0; // signed px/ms
++        this._interruptedVX = 0;
++        this._interruptedVY = 0;
++        this._interruptedTime = 0;
++
          this._register(Event.runAndSubscribe(onDidRegisterWindow, ({ window, disposables }) => {
              disposables.add(addDisposableListener(window.document, 'touchstart', (e) => this.onTouchStart(e), { passive: false }));
              disposables.add(addDisposableListener(window.document, 'touchend', (e) => this.onTouchEnd(window, e)));
-@@ -79,6 +94,9 @@ class Gesture extends Disposable {
++            disposables.add(addDisposableListener(window.document, 'touchcancel', (e) => this.onTouchEnd(window, e)));
+             disposables.add(addDisposableListener(window.document, 'touchmove', (e) => this.onTouchMove(e), { passive: false }));
+         }, { window: mainWindow, disposables: this._store }));
+     }
++
+     static addTarget(element) {
+         if (!Gesture.isTouchDevice()) {
+             return Disposable.None;
+@@ -51,6 +79,7 @@ class Gesture extends Disposable {
+         const remove = Gesture.INSTANCE.targets.push(element);
+         return toDisposable(remove);
+     }
++
+     static ignoreTarget(element) {
+         if (!Gesture.isTouchDevice()) {
+             return Disposable.None;
+@@ -61,11 +90,11 @@ class Gesture extends Disposable {
+         const remove = Gesture.INSTANCE.ignoreTargets.push(element);
+         return toDisposable(remove);
+     }
++
+     static isTouchDevice() {
+-        // `'ontouchstart' in window` always evaluates to true with typescript's modern typings. This causes `window` to be
+-        // `never` later in `window.navigator`. That's why we need the explicit `window as Window` cast
+         return 'ontouchstart' in mainWindow || navigator.maxTouchPoints > 0;
+     }
++
+     dispose() {
+         if (this.handle) {
+             this.handle.dispose();
+@@ -73,12 +102,32 @@ class Gesture extends Disposable {
+         }
+         super.dispose();
+     }
++
+     onTouchStart(e) {
+-        const timestamp = Date.now(); // use Date.now() because on FF e.timeStamp is not epoch based.
++        const timestamp = Date.now();
++
++        // Capture active inertia velocity before stopping it (for flywheel momentum addition)
++        if (this._isInertiaScrolling && (Math.abs(this._liveInertiaVX) > 0.25 || Math.abs(this._liveInertiaVY) > 0.25)) {
++            this._interruptedVX = this._liveInertiaVX;
++            this._interruptedVY = this._liveInertiaVY;
++            this._interruptedTime = timestamp;
++        } else {
++            this._interruptedVX = 0;
++            this._interruptedVY = 0;
++            this._interruptedTime = 0;
++        }
++
+         if (this.handle) {
              this.handle.dispose();
              this.handle = null;
          }
-+        // Mono Studio Phase-2: new gesture → unlock axis
++        this._isInertiaScrolling = false;
++        this._liveInertiaVX = 0;
++        this._liveInertiaVY = 0;
++
 +        this._lockedAxis = null;
 +        this._gestureDidMove = false;
++
          for (let i = 0, len = e.targetTouches.length; i < len; i++) {
              const touch = e.targetTouches.item(i);
              this.activeTouches[touch.identifier] = {
-@@ -112,17 +130,19 @@ class Gesture extends Disposable {
+@@ -87,6 +136,8 @@ class Gesture extends Disposable {
+                 initialTimeStamp: timestamp,
+                 initialPageX: touch.pageX,
+                 initialPageY: touch.pageY,
++                lastMovedSingleAxisX: touch.pageX,
++                lastMovedSingleAxisY: touch.pageY,
+                 rollingTimestamps: [timestamp],
+                 rollingPageX: [touch.pageX],
+                 rollingPageY: [touch.pageY]
+@@ -102,59 +153,150 @@ class Gesture extends Disposable {
+             this.dispatched = false;
+         }
+     }
++
++    /**
++     * Android VelocityTracker-style velocity calculation over the recent sample window.
++     */
++    _computeReleaseVelocity(data, releaseTimestamp) {
++        const times = data.rollingTimestamps;
++        const xs = data.rollingPageX;
++        const ys = data.rollingPageY;
++        const n = times.length;
++        if (n < 2) {
++            return { vx: 0, vy: 0 };
++        }
++
++        const lastMoveTs = times[n - 1];
++        // If user held their finger still on the screen before lifting, do NOT fling!
++        if (releaseTimestamp - lastMoveTs > Gesture.STOP_HOLD_PAUSE_MS) {
++            return { vx: 0, vy: 0 };
++        }
++
++        // Find earliest sample within VELOCITY_SAMPLE_WINDOW_MS of lastMoveTs
++        let firstIdx = n - 1;
++        while (firstIdx > 0 && (lastMoveTs - times[firstIdx - 1]) <= Gesture.VELOCITY_SAMPLE_WINDOW_MS) {
++            firstIdx--;
++        }
++        if (firstIdx === n - 1) {
++            firstIdx = n - 2;
++        }
++
++        // Combine overall window velocity (stable against 240Hz dt=1ms noise) with recent half-window velocity
++        const totalDt = Math.max(1, lastMoveTs - times[firstIdx]);
++        const windowVX = (xs[n - 1] - xs[firstIdx]) / totalDt;
++        const windowVY = (ys[n - 1] - ys[firstIdx]) / totalDt;
++
++        // Recent ~35ms sub-window for responsive flick acceleration
++        let recentIdx = n - 1;
++        while (recentIdx > firstIdx && (lastMoveTs - times[recentIdx - 1]) <= 35) {
++            recentIdx--;
++        }
++        if (recentIdx < n - 1 && (lastMoveTs - times[recentIdx]) >= 8) {
++            const recentDt = lastMoveTs - times[recentIdx];
++            const recentVX = (xs[n - 1] - xs[recentIdx]) / recentDt;
++            const recentVY = (ys[n - 1] - ys[recentIdx]) / recentDt;
++            return {
++                vx: windowVX * 0.4 + recentVX * 0.6,
++                vy: windowVY * 0.4 + recentVY * 0.6
++            };
++        }
++
++        return { vx: windowVX, vy: windowVY };
++    }
++
+     onTouchEnd(targetWindow, e) {
+-        const timestamp = Date.now(); // use Date.now() because on FF e.timeStamp is not epoch based.
++        const timestamp = Date.now();
+         const activeTouchCount = Object.keys(this.activeTouches).length;
++
+         for (let i = 0, len = e.changedTouches.length; i < len; i++) {
+             const touch = e.changedTouches.item(i);
+             if (!this.activeTouches.hasOwnProperty(String(touch.identifier))) {
+-                console.warn('move of an UNKNOWN touch', touch);
                  continue;
              }
-             const data = this.activeTouches[touch.identifier], holdTime = Date.now() - data.initialTimeStamp;
+-            const data = this.activeTouches[touch.identifier], holdTime = Date.now() - data.initialTimeStamp;
 -            if (holdTime < Gesture.HOLD_DELAY
 -                && Math.abs(data.initialPageX - data.rollingPageX.at(-1)) < 30
 -                && Math.abs(data.initialPageY - data.rollingPageY.at(-1)) < 30) {
+-                const evt = this.newGestureEvent(EventType.Tap, data.initialTarget);
+-                evt.pageX = data.rollingPageX.at(-1);
+-                evt.pageY = data.rollingPageY.at(-1);
+-                this.dispatchEvent(evt);
++            const data = this.activeTouches[touch.identifier];
++            const holdTime = timestamp - data.initialTimeStamp;
 +            const movedX = Math.abs(data.initialPageX - data.rollingPageX.at(-1));
 +            const movedY = Math.abs(data.initialPageY - data.rollingPageY.at(-1));
-+            // Tap only if finger never crossed scroll threshold (gestureDidMove set only after that)
++
 +            const stayedStill = !this._gestureDidMove
 +                && movedX < Gesture.TAP_MOVE_THRESHOLD
 +                && movedY < Gesture.TAP_MOVE_THRESHOLD;
++
 +            if (holdTime < Gesture.HOLD_DELAY && stayedStill) {
-                 const evt = this.newGestureEvent(EventType.Tap, data.initialTarget);
-                 evt.pageX = data.rollingPageX.at(-1);
-                 evt.pageY = data.rollingPageY.at(-1);
-                 this.dispatchEvent(evt);
++                // Only fire Tap if this touch didn't just catch/stop a fast-moving flywheel scroll
++                if (Math.hypot(this._interruptedVX, this._interruptedVY) < 0.8) {
++                    const evt = this.newGestureEvent(EventType.Tap, data.initialTarget);
++                    evt.pageX = data.rollingPageX.at(-1);
++                    evt.pageY = data.rollingPageY.at(-1);
++                    this.dispatchEvent(evt);
++                }
              }
 -            else if (holdTime >= Gesture.HOLD_DELAY
 -                && Math.abs(data.initialPageX - data.rollingPageX.at(-1)) < 30
@@ -73,37 +221,47 @@ index ca78b0b..885cd9a 100644
                  const evt = this.newGestureEvent(EventType.Contextmenu, data.initialTarget);
                  evt.pageX = data.rollingPageX.at(-1);
                  evt.pageY = data.rollingPageY.at(-1);
-@@ -131,19 +151,37 @@ class Gesture extends Disposable {
-             else if (activeTouchCount === 1) {
+                 this.dispatchEvent(evt);
+             }
+-            else if (activeTouchCount === 1) {
++            else if (activeTouchCount === 1 && this._gestureDidMove) {
                  const finalX = data.rollingPageX.at(-1);
                  const finalY = data.rollingPageY.at(-1);
 -                const deltaT = data.rollingTimestamps.at(-1) - data.rollingTimestamps[0];
 -                const deltaX = finalX - data.rollingPageX[0];
 -                const deltaY = finalY - data.rollingPageY[0];
 -                // We need to get all the dispatch targets on the start of the inertia event
-+                // Weighted recent-sample velocity (SPCK-like) — ignore stale early points
-+                const times = data.rollingTimestamps;
-+                const xs = data.rollingPageX;
-+                const ys = data.rollingPageY;
-+                const nowTs = times.at(-1);
-+                let sumWX = 0, sumWY = 0, sumW = 0;
-+                for (let i = 1; i < times.length; i++) {
-+                    const age = nowTs - times[i];
-+                    if (age > Gesture.VELOCITY_SAMPLE_WINDOW_MS) continue;
-+                    const dt = Math.max(times[i] - times[i - 1], 1);
-+                    const w = 1 - age / (Gesture.VELOCITY_SAMPLE_WINDOW_MS + 1);
-+                    sumWX += ((xs[i] - xs[i - 1]) / dt) * w;
-+                    sumWY += ((ys[i] - ys[i - 1]) / dt) * w;
-+                    sumW += w;
-+                }
-+                let velX = sumW > 0 ? sumWX / sumW : 0;
-+                let velY = sumW > 0 ? sumWY / sumW : 0;
-+                // clamp
-+                const maxV = Gesture.MAX_VELOCITY;
-+                if (velX > maxV) velX = maxV; else if (velX < -maxV) velX = -maxV;
-+                if (velY > maxV) velY = maxV; else if (velY < -maxV) velY = -maxV;
++
++                let { vx: velX, vy: velY } = this._computeReleaseVelocity(data, timestamp);
++
 +                if (this._lockedAxis === 'y') velX = 0;
 +                else if (this._lockedAxis === 'x') velY = 0;
++
++                // ── Android Flywheel Momentum Addition ──
++                // If user flicked quickly in the same direction while inertia was already running,
++                // add the interrupted momentum to the new flick!
++                const sinceInterrupt = timestamp - this._interruptedTime;
++                let maxAllowedV = Gesture.MAX_VELOCITY;
++
++                if (this._interruptedTime > 0 && sinceInterrupt < Gesture.FLYWHEEL_WINDOW_MS && holdTime < Gesture.FLYWHEEL_WINDOW_MS) {
++                    if (velY !== 0 && this._interruptedVY !== 0 && Math.sign(velY) === Math.sign(this._interruptedVY) && Math.abs(velY) > 0.4) {
++                        velY += this._interruptedVY * 0.88;
++                        maxAllowedV = Gesture.MAX_FLYWHEEL_VELOCITY;
++                    }
++                    if (velX !== 0 && this._interruptedVX !== 0 && Math.sign(velX) === Math.sign(this._interruptedVX) && Math.abs(velX) > 0.4) {
++                        velX += this._interruptedVX * 0.88;
++                        maxAllowedV = Gesture.MAX_FLYWHEEL_VELOCITY;
++                    }
++                }
++                this._interruptedVX = 0;
++                this._interruptedVY = 0;
++                this._interruptedTime = 0;
++
++                if (velX > maxAllowedV) velX = maxAllowedV;
++                else if (velX < -maxAllowedV) velX = -maxAllowedV;
++                if (velY > maxAllowedV) velY = maxAllowedV;
++                else if (velY < -maxAllowedV) velY = -maxAllowedV;
++
                  const dispatchTo = [...this.targets].filter(t => data.initialTarget instanceof Node && t.contains(data.initialTarget));
 -                this.inertia(targetWindow, dispatchTo, timestamp, // time now
 -                Math.abs(deltaX) / deltaT, // speed
@@ -114,16 +272,39 @@ index ca78b0b..885cd9a 100644
 -                finalY // y now
 -                );
 +                const speed = Math.hypot(velX, velY);
-+                if (speed > Gesture.INERTIA_MIN_VELOCITY * 1.6) {
++                if (speed > Gesture.INERTIA_MIN_VELOCITY * 1.5 && dispatchTo.length > 0) {
 +                    this._isInertiaScrolling = true;
-+                    this.inertia(targetWindow, dispatchTo, timestamp,
++                    const nowPerf = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
++                    this.inertia(
++                        targetWindow,
++                        dispatchTo,
++                        nowPerf,
 +                        Math.abs(velX), velX >= 0 ? 1 : -1, finalX,
-+                        Math.abs(velY), velY >= 0 ? 1 : -1, finalY);
++                        Math.abs(velY), velY >= 0 ? 1 : -1, finalY
++                    );
 +                }
              }
++
              this.dispatchEvent(this.newGestureEvent(EventType.End, data.initialTarget));
-             // forget about this touch
-@@ -165,20 +203,40 @@ class Gesture extends Disposable {
+-            // forget about this touch
+             delete this.activeTouches[touch.identifier];
+         }
++
+         if (this.dispatched) {
+             e.preventDefault();
+             e.stopPropagation();
+             this.dispatched = false;
+         }
+     }
++
+     newGestureEvent(type, initialTarget) {
+         const event = document.createEvent('CustomEvent');
+         event.initEvent(type, false, true);
+@@ -162,23 +304,41 @@ class Gesture extends Disposable {
+         event.tapCount = 0;
+         return event;
+     }
++
      dispatchEvent(event) {
          if (event.type === EventType.Tap) {
              const currentTime = (new Date()).getTime();
@@ -131,7 +312,6 @@ index ca78b0b..885cd9a 100644
 +            const dy = Math.abs(event.pageY - (this._lastTapY || 0));
              let setTapCount = 0;
 -            if (currentTime - this._lastSetTapCountTime > Gesture.CLEAR_TAP_COUNT_TIME) {
-+            // Mono Studio: proximity-aware double-tap; small drift no longer resets
 +            if (currentTime - this._lastSetTapCountTime > Gesture.CLEAR_TAP_COUNT_TIME
 +                || dx > Gesture.DOUBLE_TAP_DISTANCE
 +                || dy > Gesture.DOUBLE_TAP_DISTANCE) {
@@ -148,11 +328,9 @@ index ca78b0b..885cd9a 100644
 -        else if (event.type === EventType.Change || event.type === EventType.Contextmenu) {
 -            // tap is canceled by scrolling or context menu
 +        else if (event.type === EventType.Contextmenu) {
-+            // only context menu cancels pending double-tap (NOT scroll Change)
              this._lastSetTapCountTime = 0;
          }
 +        else if (event.type === EventType.Change) {
-+            // signal for teardrops / external layers
 +            try {
 +                mainWindow.__monacoTouchScrolling = true;
 +                if (this._scrollFlagTimer) {
@@ -167,59 +345,67 @@ index ca78b0b..885cd9a 100644
          if (event.initialTarget instanceof Node) {
              for (const ignoreTarget of this.ignoreTargets) {
                  if (ignoreTarget.contains(event.initialTarget)) {
-@@ -204,30 +262,53 @@ class Gesture extends Disposable {
+@@ -204,50 +364,136 @@ class Gesture extends Disposable {
              }
          }
      }
--    inertia(targetWindow, dispatchTo, t1, vX, dirX, x, vY, dirY, y) {
-+    inertia(targetWindow, dispatchTo, t1, vX, dirX, x, vY, dirY, y, residualX = 0, residualY = 0) {
++
+     inertia(targetWindow, dispatchTo, t1, vX, dirX, x, vY, dirY, y) {
          this.handle = scheduleAtNextAnimationFrame(targetWindow, () => {
-             const now = Date.now();
+-            const now = Date.now();
 -            // velocity: old speed + accel_over_time
 -            const deltaT = now - t1;
+-            let delta_pos_x = 0, delta_pos_y = 0;
++            const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 +            let deltaT = now - t1;
 +            if (deltaT < 1) deltaT = 1;
 +            if (deltaT > Gesture.MAX_FRAME_DT) deltaT = Gesture.MAX_FRAME_DT;
-+            // Exponential decay: smoother than linear friction (native-list feel)
-+            // base depends on speed — fast flicks decay a bit more, slow ones coast longer
++
++            // Android SplineOverScroller-like deceleration curve:
++            // High speed glides smoothly; low speed settles cleanly without endless 1px creeping
 +            const speed = Math.hypot(vX, vY);
 +            let base;
-+            if (speed < 0.4) base = 0.994;
-+            else if (speed < 1.5) base = 0.991;
-+            else if (speed < 3.5) base = 0.987;
-+            else base = 0.982;
++            if (speed > 4.0) base = 0.9945;
++            else if (speed > 1.2) base = 0.9935;
++            else if (speed > 0.35) base = 0.9915;
++            else base = 0.986;
++
 +            const decay = Math.pow(base, deltaT);
 +            vX *= decay;
 +            vY *= decay;
-             let delta_pos_x = 0, delta_pos_y = 0;
++
              let stopped = true;
 -            vX += Gesture.SCROLL_FRICTION * deltaT;
 -            vY += Gesture.SCROLL_FRICTION * deltaT;
 -            if (vX > 0) {
++            let delta_pos_x = 0;
++            let delta_pos_y = 0;
++
 +            if (vX > Gesture.INERTIA_MIN_VELOCITY) {
                  stopped = false;
--                delta_pos_x = dirX * vX * deltaT;
-+                delta_pos_x = dirX * vX * deltaT + residualX;
+                 delta_pos_x = dirX * vX * deltaT;
++                this._liveInertiaVX = dirX * vX;
 +            } else {
-+                residualX = 0;
++                vX = 0;
++                this._liveInertiaVX = 0;
              }
 -            if (vY > 0) {
++
 +            if (vY > Gesture.INERTIA_MIN_VELOCITY) {
                  stopped = false;
--                delta_pos_y = dirY * vY * deltaT;
-+                delta_pos_y = dirY * vY * deltaT + residualY;
+                 delta_pos_y = dirY * vY * deltaT;
++                this._liveInertiaVY = dirY * vY;
 +            } else {
-+                residualY = 0;
++                vY = 0;
++                this._liveInertiaVY = 0;
 +            }
-+            // Keep sub-pixel residual so slow coast stays continuous
-+            const applyX = delta_pos_x >= 0 ? Math.floor(delta_pos_x) : Math.ceil(delta_pos_x);
-+            const applyY = delta_pos_y >= 0 ? Math.floor(delta_pos_y) : Math.ceil(delta_pos_y);
-+            residualX = delta_pos_x - applyX;
-+            residualY = delta_pos_y - applyY;
-+            if (applyX !== 0 || applyY !== 0) {
++
++            // Pass exact float deltas; ViewLayout.deltaScrollNow handles sub-pixel accumulation
++            if (delta_pos_x !== 0 || delta_pos_y !== 0) {
 +                const evt = this.newGestureEvent(EventType.Change);
-+                evt.translationX = applyX;
-+                evt.translationY = applyY;
++                evt.translationX = delta_pos_x;
++                evt.translationY = delta_pos_y;
++                evt.isInertia = true;
 +                dispatchTo.forEach(d => d.dispatchEvent(evt));
              }
 -            // dispatch translation event
@@ -227,16 +413,25 @@ index ca78b0b..885cd9a 100644
 -            evt.translationX = delta_pos_x;
 -            evt.translationY = delta_pos_y;
 -            dispatchTo.forEach(d => d.dispatchEvent(evt));
++
              if (!stopped) {
--                this.inertia(targetWindow, dispatchTo, now, vX, dirX, x + delta_pos_x, vY, dirY, y + delta_pos_y);
-+                this.inertia(targetWindow, dispatchTo, now, vX, dirX, x + applyX, vY, dirY, y + applyY, residualX, residualY);
+                 this.inertia(targetWindow, dispatchTo, now, vX, dirX, x + delta_pos_x, vY, dirY, y + delta_pos_y);
 +            } else {
 +                this._isInertiaScrolling = false;
++                this._liveInertiaVX = 0;
++                this._liveInertiaVY = 0;
 +                try { mainWindow.__monacoTouchScrolling = false; } catch (_) { /* ignore */ }
              }
          });
      }
-@@ -240,14 +321,55 @@ class Gesture extends Disposable {
++
+     onTouchMove(e) {
+-        const timestamp = Date.now(); // use Date.now() because on FF e.timeStamp is not epoch based.
++        const timestamp = Date.now();
+         for (let i = 0, len = e.changedTouches.length; i < len; i++) {
+             const touch = e.changedTouches.item(i);
+             if (!this.activeTouches.hasOwnProperty(String(touch.identifier))) {
+-                console.warn('end of an UNKNOWN touch', touch);
                  continue;
              }
              const data = this.activeTouches[touch.identifier];
@@ -246,11 +441,18 @@ index ca78b0b..885cd9a 100644
 -            evt.pageX = touch.pageX;
 -            evt.pageY = touch.pageY;
 -            this.dispatchEvent(evt);
-+            // Only treat as "moved/scroll" after real travel — finger jitter must still allow double-tap
-+            const totalMovedX = Math.abs(touch.pageX - data.initialPageX);
-+            const totalMovedY = Math.abs(touch.pageY - data.initialPageY);
-+            if (totalMovedX >= Gesture.TAP_MOVE_THRESHOLD || totalMovedY >= Gesture.TAP_MOVE_THRESHOLD) {
+-            // only keep a few data points, to average the final speed
+-            if (data.rollingPageX.length > 3) {
++
++            const totalDX = touch.pageX - data.initialPageX;
++            const totalDY = touch.pageY - data.initialPageY;
++            const absTotalX = Math.abs(totalDX);
++            const absTotalY = Math.abs(totalDY);
++
++            const wasMoving = this._gestureDidMove;
++            if (!wasMoving && (absTotalX >= Gesture.TAP_MOVE_THRESHOLD || absTotalY >= Gesture.TAP_MOVE_THRESHOLD)) {
 +                this._gestureDidMove = true;
++                // Anchor from current point minus the current frame step so crossing threshold doesn't jump
 +                try {
 +                    mainWindow.__monacoTouchScrolling = true;
 +                    if (this._scrollFlagTimer) {
@@ -259,33 +461,38 @@ index ca78b0b..885cd9a 100644
 +                    }
 +                } catch (_) { /* ignore */ }
 +            }
++
 +            let tX = touch.pageX - data.rollingPageX.at(-1);
 +            let tY = touch.pageY - data.rollingPageY.at(-1);
-+            // Mono Studio Phase-2: axis lock (like native lists / previous useTouchScroll)
-+            const totalDX = touch.pageX - data.initialPageX;
-+            const totalDY = touch.pageY - data.initialPageY;
++            const absStepX = Math.abs(tX);
++            const absStepY = Math.abs(tY);
++
++            // Smart Axis Lock: strongly favors vertical scrolling and dynamically unlocks if user switches axis
 +            if (!this._lockedAxis) {
-+                const absX = Math.abs(totalDX);
-+                const absY = Math.abs(totalDY);
-+                if (absX > Gesture.AXIS_LOCK_THRESHOLD || absY > Gesture.AXIS_LOCK_THRESHOLD) {
-+                    if (absY >= absX * Gesture.AXIS_LOCK_RATIO) {
-+                        this._lockedAxis = 'y';
-+                    } else if (absX >= absY * Gesture.AXIS_LOCK_RATIO) {
-+                        this._lockedAxis = 'x';
-+                    } else if (absY > absX) {
-+                        this._lockedAxis = 'y';
-+                    } else {
-+                        this._lockedAxis = 'x';
-+                    }
++                if (absTotalY >= Gesture.AXIS_LOCK_THRESHOLD && absTotalY >= absTotalX * 1.1) {
++                    this._lockedAxis = 'y';
++                } else if (absTotalX >= Gesture.AXIS_LOCK_THRESHOLD + 3 && absTotalX >= absTotalY * 1.75) {
++                    this._lockedAxis = 'x';
++                }
++            } else if (this._lockedAxis === 'x') {
++                // If locked to X accidentally, switch to Y immediately when user drags vertically
++                if (absStepY > 2.5 && absStepY > absStepX * 1.8) {
++                    this._lockedAxis = 'y';
++                }
++            } else if (this._lockedAxis === 'y') {
++                // Allow switching to X only on deliberate strong horizontal swipe
++                if (absStepX > 5.0 && absStepX > absStepY * 2.5) {
++                    this._lockedAxis = 'x';
 +                }
 +            }
++
 +            if (this._lockedAxis === 'y') {
 +                tX = 0;
 +            } else if (this._lockedAxis === 'x') {
 +                tY = 0;
 +            }
-+            // Do not scroll (Change) until past tap threshold — protects double-tap
-+            if (this._gestureDidMove) {
++
++            if (this._gestureDidMove && (tX !== 0 || tY !== 0)) {
 +                const evt = this.newGestureEvent(EventType.Change, data.initialTarget);
 +                evt.translationX = tX;
 +                evt.translationY = tY;
@@ -293,12 +500,19 @@ index ca78b0b..885cd9a 100644
 +                evt.pageY = touch.pageY;
 +                this.dispatchEvent(evt);
 +            }
-             // only keep a few data points, to average the final speed
--            if (data.rollingPageX.length > 3) {
-+            if (data.rollingPageX.length > Gesture.ROLLING_SAMPLES) {
++
++            if (data.rollingPageX.length >= Gesture.ROLLING_SAMPLES) {
                  data.rollingPageX.shift();
                  data.rollingPageY.shift();
                  data.rollingTimestamps.shift();
+@@ -256,6 +502,7 @@ class Gesture extends Disposable {
+             data.rollingPageY.push(touch.pageY);
+             data.rollingTimestamps.push(timestamp);
+         }
++
+         if (this.dispatched) {
+             e.preventDefault();
+             e.stopPropagation();
 diff --git a/node_modules/monaco-editor/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.js b/node_modules/monaco-editor/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.js
 index d694d72..81d0ae7 100644
 --- a/node_modules/monaco-editor/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.js
@@ -332,25 +546,26 @@ index be17f49..eb25774 100644
      get ctrlKey() { return this._ctrlKey; }
      get metaKey() { return this._metaKey; }
 diff --git a/node_modules/monaco-editor/esm/vs/editor/browser/controller/pointerHandler.js b/node_modules/monaco-editor/esm/vs/editor/browser/controller/pointerHandler.js
-index a900a6d..4b0e56a 100644
+index a900a6d..b7b8120 100644
 --- a/node_modules/monaco-editor/esm/vs/editor/browser/controller/pointerHandler.js
 +++ b/node_modules/monaco-editor/esm/vs/editor/browser/controller/pointerHandler.js
-@@ -23,6 +23,9 @@ class PointerEventHandler extends MouseHandler {
-         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, EventType.Change, (e) => this.onChange(e)));
-         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, EventType.Contextmenu, (e) => this._onContextMenu(new EditorMouseEvent(e, false, this.viewHelper.viewDomNode), false)));
-         this._lastPointerType = 'mouse';
-+        this._pendingScrollX = 0;
-+        this._pendingScrollY = 0;
-+        this._scrollRafScheduled = false;
-         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, 'pointerdown', (e) => {
-             const pointerType = e.pointerType;
-             if (pointerType === 'mouse') {
-@@ -38,7 +41,13 @@ class PointerEventHandler extends MouseHandler {
+@@ -12,9 +12,6 @@ import { TextAreaSyntethicEvents } from './editContext/textArea/textAreaEditCont
+  *  Copyright (c) Microsoft Corporation. All rights reserved.
+  *  Licensed under the MIT License. See License.txt in the project root for license information.
+  *--------------------------------------------------------------------------------------------*/
+-/**
+- * Currently only tested on iOS 13/ iPadOS.
+- */
+ class PointerEventHandler extends MouseHandler {
+     constructor(context, viewController, viewHelper) {
+         super(context, viewController, viewHelper);
+@@ -36,9 +33,13 @@ class PointerEventHandler extends MouseHandler {
+                 this._lastPointerType = 'pen';
+             }
          }));
-         // PonterEvents
+-        // PonterEvents
          const pointerEvents = new EditorPointerEventFactory(this.viewHelper.viewDomNode);
 -        this._register(pointerEvents.onPointerMove(this.viewHelper.viewDomNode, (e) => this._onMouseMove(e)));
-+        // Mono Studio Phase-1: ignore pointermove for touch — Gesture Change drives scroll
 +        this._register(pointerEvents.onPointerMove(this.viewHelper.viewDomNode, (e) => {
 +            if (this._lastPointerType === 'touch') {
 +                return;
@@ -360,61 +575,39 @@ index a900a6d..4b0e56a 100644
          this._register(pointerEvents.onPointerUp(this.viewHelper.viewDomNode, (e) => this._onMouseUp(e)));
          this._register(pointerEvents.onPointerLeave(this.viewHelper.viewDomNode, (e) => this._onMouseLeave(e)));
          this._register(pointerEvents.onPointerDown(this.viewHelper.viewDomNode, (e, pointerId) => this._onMouseDown(e, pointerId)));
-@@ -53,7 +62,23 @@ class PointerEventHandler extends MouseHandler {
+@@ -53,7 +54,11 @@ class PointerEventHandler extends MouseHandler {
      }
      onChange(event) {
          if (this._lastPointerType === 'touch') {
 -            this._context.viewModel.viewLayout.deltaScrollNow(-event.translationX, -event.translationY);
-+            // Batch finger deltas to one deltaScrollNow per animation frame (smoother, less layout thrash)
-+            this._pendingScrollX = (this._pendingScrollX || 0) - event.translationX;
-+            this._pendingScrollY = (this._pendingScrollY || 0) - event.translationY;
-+            if (!this._scrollRafScheduled) {
-+                this._scrollRafScheduled = true;
-+                const win = this.viewHelper.viewDomNode.ownerDocument.defaultView || window;
-+                win.requestAnimationFrame(() => {
-+                    this._scrollRafScheduled = false;
-+                    const dx = this._pendingScrollX || 0;
-+                    const dy = this._pendingScrollY || 0;
-+                    this._pendingScrollX = 0;
-+                    this._pendingScrollY = 0;
-+                    if (dx !== 0 || dy !== 0) {
-+                        this._context.viewModel.viewLayout.deltaScrollNow(dx, dy);
-+                    }
-+                });
++            const dx = -event.translationX;
++            const dy = -event.translationY;
++            if (dx !== 0 || dy !== 0) {
++                this._context.viewModel.viewLayout.deltaScrollNow(dx, dy);
 +            }
          }
          if (this._lastPointerType === 'pen') {
              this._dispatchGesture(event, /*inSelectionMode*/ true);
-@@ -89,6 +114,9 @@ class PointerEventHandler extends MouseHandler {
- class TouchHandler extends MouseHandler {
-     constructor(context, viewController, viewHelper) {
-         super(context, viewController, viewHelper);
-+        this._pendingScrollX = 0;
-+        this._pendingScrollY = 0;
-+        this._scrollRafScheduled = false;
-         this._register(Gesture.addTarget(this.viewHelper.linesContentDomNode));
-         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, EventType.Tap, (e) => this.onTap(e)));
-         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, EventType.Change, (e) => this.onChange(e)));
-@@ -107,7 +135,22 @@ class TouchHandler extends MouseHandler {
+@@ -99,15 +104,18 @@ class TouchHandler extends MouseHandler {
+         this.viewHelper.focusTextArea();
+         const target = this._createMouseTarget(new EditorMouseEvent(event, false, this.viewHelper.viewDomNode), false);
+         if (target.position) {
+-            // Send the tap event also to the <textarea> (for input purposes)
+-            const event = document.createEvent('CustomEvent');
+-            event.initEvent(TextAreaSyntethicEvents.Tap, false, true);
+-            this.viewHelper.dispatchTextAreaEvent(event);
++            const tapEvt = document.createEvent('CustomEvent');
++            tapEvt.initEvent(TextAreaSyntethicEvents.Tap, false, true);
++            this.viewHelper.dispatchTextAreaEvent(tapEvt);
+             this.viewController.moveTo(target.position, 1 /* NavigationCommandRevealType.Minimal */);
          }
      }
      onChange(e) {
 -        this._context.viewModel.viewLayout.deltaScrollNow(-e.translationX, -e.translationY);
-+        this._pendingScrollX = (this._pendingScrollX || 0) - e.translationX;
-+        this._pendingScrollY = (this._pendingScrollY || 0) - e.translationY;
-+        if (!this._scrollRafScheduled) {
-+            this._scrollRafScheduled = true;
-+            const win = this.viewHelper.viewDomNode.ownerDocument.defaultView || window;
-+            win.requestAnimationFrame(() => {
-+                this._scrollRafScheduled = false;
-+                const dx = this._pendingScrollX || 0;
-+                const dy = this._pendingScrollY || 0;
-+                this._pendingScrollX = 0;
-+                this._pendingScrollY = 0;
-+                if (dx !== 0 || dy !== 0) {
-+                    this._context.viewModel.viewLayout.deltaScrollNow(dx, dy);
-+                }
-+            });
++        const dx = -e.translationX;
++        const dy = -e.translationY;
++        if (dx !== 0 || dy !== 0) {
++            this._context.viewModel.viewLayout.deltaScrollNow(dx, dy);
 +        }
      }
  }
@@ -508,15 +701,60 @@ index 4da52ba..516a9db 100644
              throw new Error('Invalid arguments');
          }
 diff --git a/node_modules/monaco-editor/esm/vs/editor/common/viewLayout/viewLayout.js b/node_modules/monaco-editor/esm/vs/editor/common/viewLayout/viewLayout.js
-index 326dec8..7f7d726 100644
+index 326dec8..9ce81bc 100644
 --- a/node_modules/monaco-editor/esm/vs/editor/common/viewLayout/viewLayout.js
 +++ b/node_modules/monaco-editor/esm/vs/editor/common/viewLayout/viewLayout.js
-@@ -346,6 +346,16 @@ class ViewLayout extends Disposable {
+@@ -111,6 +111,8 @@ class ViewLayout extends Disposable {
+         this._linesLayout = new LinesLayout(lineCount, options.get(75 /* EditorOption.lineHeight */), padding.top, padding.bottom, customLineHeightData);
+         this._maxLineWidth = 0;
+         this._overlayWidgetsMinWidth = 0;
++        this._subPixelScrollLeft = 0;
++        this._subPixelScrollTop = 0;
+         this._scrollable = this._register(new EditorScrollable(0, scheduleAtNextAnimationFrame));
+         this._configureSmoothScrollDuration();
+         this._scrollable.setScrollDimensions(new EditorScrollDimensions(layoutInfo.contentWidth, 0, layoutInfo.height, 0));
+@@ -169,11 +171,9 @@ class ViewLayout extends Disposable {
+         const options = this._configuration.options;
+         const scrollbar = options.get(117 /* EditorOption.scrollbar */);
+         if (scrollbar.horizontal === 2 /* ScrollbarVisibility.Hidden */) {
+-            // horizontal scrollbar not visible
+             return 0;
+         }
+         if (width >= scrollWidth) {
+-            // horizontal scrollbar not visible
+             return 0;
+         }
+         return scrollbar.horizontalScrollbarSize;
+@@ -216,9 +216,7 @@ class ViewLayout extends Disposable {
+         if (wrappingInfo.isViewportWrapping) {
+             const minimap = options.get(81 /* EditorOption.minimap */);
+             if (maxLineWidth > layoutInfo.contentWidth + fontInfo.typicalHalfwidthCharacterWidth) {
+-                // This is a case where viewport wrapping is on, but the line extends above the viewport
+                 if (minimap.enabled && minimap.side === 'right') {
+-                    // We need to accomodate the scrollbar width
+                     return maxLineWidth + layoutInfo.verticalScrollbarWidth;
+                 }
+             }
+@@ -241,7 +239,6 @@ class ViewLayout extends Disposable {
+     _updateContentWidth() {
+         const scrollDimensions = this._scrollable.getScrollDimensions();
+         this._scrollable.setScrollDimensions(new EditorScrollDimensions(scrollDimensions.width, this._computeContentWidth(), scrollDimensions.height, scrollDimensions.contentHeight));
+-        // The height might depend on the fact that there is a horizontal scrollbar or not
+         this._updateHeight();
+     }
+     // ---- view state
+@@ -300,7 +297,6 @@ class ViewLayout extends Disposable {
+         return this._linesLayout.getLinesViewportData(visibleBox.top, visibleBox.top + visibleBox.height);
+     }
+     getLinesViewportDataAtScrollTop(scrollTop) {
+-        // do some minimal validations on scrollTop
+         const scrollDimensions = this._scrollable.getScrollDimensions();
+         if (scrollTop + scrollDimensions.height > scrollDimensions.scrollHeight) {
+             scrollTop = scrollDimensions.scrollHeight - scrollDimensions.height;
+@@ -346,6 +342,16 @@ class ViewLayout extends Disposable {
          return this._scrollable.validateScrollPosition(scrollPosition);
      }
      setScrollPosition(position, type) {
-+        // Mono Studio: while user is touch-scrolling, ignore reveal/API scroll pulls
-+        // (finger path uses deltaScrollNow which sets __monacoAllowScrollApply)
 +        try {
 +            if (typeof globalThis !== 'undefined'
 +                && globalThis.__monacoTouchScrolling
@@ -525,10 +763,12 @@ index 326dec8..7f7d726 100644
 +                return;
 +            }
 +        } catch (_) { /* ignore */ }
++        this._subPixelScrollLeft = 0;
++        this._subPixelScrollTop = 0;
          if (type === 1 /* ScrollType.Immediate */) {
              this._scrollable.setScrollPositionNow(position);
          }
-@@ -358,10 +368,23 @@ class ViewLayout extends Disposable {
+@@ -358,10 +364,46 @@ class ViewLayout extends Disposable {
      }
      deltaScrollNow(deltaScrollLeft, deltaScrollTop) {
          const currentScrollPosition = this._scrollable.getCurrentScrollPosition();
@@ -536,6 +776,29 @@ index 326dec8..7f7d726 100644
 -            scrollLeft: currentScrollPosition.scrollLeft + deltaScrollLeft,
 -            scrollTop: currentScrollPosition.scrollTop + deltaScrollTop
 -        });
++
++        // Reset sub-pixel accumulator on direction reversal for instant response
++        if ((deltaScrollLeft > 0 && this._subPixelScrollLeft < 0) || (deltaScrollLeft < 0 && this._subPixelScrollLeft > 0)) {
++            this._subPixelScrollLeft = 0;
++        }
++        if ((deltaScrollTop > 0 && this._subPixelScrollTop < 0) || (deltaScrollTop < 0 && this._subPixelScrollTop > 0)) {
++            this._subPixelScrollTop = 0;
++        }
++
++        const totalDX = (this._subPixelScrollLeft || 0) + (deltaScrollLeft || 0);
++        const totalDY = (this._subPixelScrollTop || 0) + (deltaScrollTop || 0);
++
++        // Symmetric truncation (Math.trunc) prevents Math.floor bias on negative vs positive deltas
++        const intDX = totalDX >= 0 ? Math.floor(totalDX) : Math.ceil(totalDX);
++        const intDY = totalDY >= 0 ? Math.floor(totalDY) : Math.ceil(totalDY);
++
++        this._subPixelScrollLeft = totalDX - intDX;
++        this._subPixelScrollTop = totalDY - intDY;
++
++        if (intDX === 0 && intDY === 0) {
++            return;
++        }
++
 +        try {
 +            if (typeof globalThis !== 'undefined') {
 +                globalThis.__monacoAllowScrollApply = true;
@@ -543,8 +806,8 @@ index 326dec8..7f7d726 100644
 +        } catch (_) { /* ignore */ }
 +        try {
 +            this._scrollable.setScrollPositionNow({
-+                scrollLeft: currentScrollPosition.scrollLeft + deltaScrollLeft,
-+                scrollTop: currentScrollPosition.scrollTop + deltaScrollTop
++                scrollLeft: currentScrollPosition.scrollLeft + intDX,
++                scrollTop: currentScrollPosition.scrollTop + intDY
 +            });
 +        } finally {
 +            try {
