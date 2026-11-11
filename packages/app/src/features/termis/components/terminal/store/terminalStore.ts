@@ -90,7 +90,10 @@ function resolveMode(
   opts?: Partial<Pick<TerminalInstance, 'execMode' | 'runtime'>>,
 ): ExecMode {
   const m = opts?.execMode || opts?.runtime;
-  return m === 'proot' || m === ('linux' as string) ? 'proot' : 'native';
+  if (m === 'proot' || m === ('linux' as string)) return 'proot';
+  if (m === 'native') return 'native';
+  // No explicit mode → respect Settings default (proot). Never silently fall back to native.
+  return TERMINAL_CONFIG.DEFAULT_EXEC_MODE === 'native' ? 'native' : 'proot';
 }
 
 export const useTerminalStore = create<TerminalState>((set, get) => ({

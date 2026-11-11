@@ -59,7 +59,7 @@ export const TERMINAL_CONFIG: TerminalConfig = {
 
   IDLE_SUSPEND_MS: 5 * 60_000,
 
-  DEFAULT_EXEC_MODE: 'native',
+  DEFAULT_EXEC_MODE: 'proot',
 };
 
 /**
@@ -70,14 +70,17 @@ export function applyTerminalPolicy(
   settings?: Partial<TerminalSettingsSchema> | Record<string, unknown> | null,
 ): void {
   const p = policyFromSettings(settings ?? TERMINAL_SETTINGS_DEFAULTS);
-  TERMINAL_CONFIG.EXCLUSIVE_MODE = p.exclusiveMode;
+  // Developer lock: exclusive mode always ON (side-by-side native+proot causes lag).
+  // Re-enable user toggle only after dual-mode tests pass.
+  TERMINAL_CONFIG.EXCLUSIVE_MODE = true;
   TERMINAL_CONFIG.CONFIRM_BEFORE_KILL = p.confirmBeforeKill;
   TERMINAL_CONFIG.SKIP_CONFIRM_IF_IDLE = p.skipConfirmIfIdle;
   TERMINAL_CONFIG.MAX_TOTAL_TABS = p.maxTotalTabs;
   TERMINAL_CONFIG.MAX_CONCURRENT_NATIVE = p.maxConcurrentNative;
   TERMINAL_CONFIG.MAX_CONCURRENT_PROOT = p.maxConcurrentProot;
   TERMINAL_CONFIG.KILL_GRACE_MS = p.killGraceMs;
-  TERMINAL_CONFIG.DEFAULT_EXEC_MODE = p.defaultExecMode;
+  TERMINAL_CONFIG.DEFAULT_EXEC_MODE =
+    p.defaultExecMode === 'native' ? 'native' : 'proot';
 }
 
 /** Runtime backend for a session. */

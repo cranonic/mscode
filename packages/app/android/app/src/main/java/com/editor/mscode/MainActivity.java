@@ -12,7 +12,10 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.WebSettings;
@@ -76,10 +79,8 @@ public class MainActivity extends BridgeActivity {
         }
         // ─────────────────────────────
 
-        if (this.bridge != null && this.bridge.getWebView() != null) {
-            this.bridge.getWebView().getSettings()
-                .setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        }
+        // Phase 5: WebView shell — GPU layer + parent must not steal editor touches
+        configureEditorWebViewShell();
 
         // Custom splash (logo + shimmer) — no prior launcher icon flash
         showSplashDialog();
@@ -102,6 +103,75 @@ public class MainActivity extends BridgeActivity {
                     startActivity(fallbackIntent);
                 }
             }
+        }
+    }
+
+    // ─── Phase 5: WebView shell (SPCK-feel native) ────────────────────────────
+
+    /**
+     * - hardware layer on WebView (compositor-friendly scroll / teardrop)
+     * - requestDisallowInterceptTouchEvent while finger is down on WebView
+     *   so Drawer / NestedScroll / swipe-back cannot steal Monaco gestures
+     * - mixed content (existing)
+     */
+    private void configureEditorWebViewShell() {
+        if (this.bridge == null || this.bridge.getWebView() == null) {
+            // Bridge may finish slightly later on some devices
+            mainHandler.postDelayed(this::configureEditorWebViewShell, 200);
+            return;
+        }
+
+        final WebView webView = this.bridge.getWebView();
+
+        try {
+            webView.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        } catch (Exception e) {
+            android.util.Log.w("MsWebViewShell", "mixedContent", e);
+        }
+
+        // GPU layer for smoother CSS transform scroll / handles
+        try {
+            webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            android.util.Log.i("MsWebViewShell", "WebView LAYER_TYPE_HARDWARE");
+        } catch (Exception e) {
+            android.util.Log.w("MsWebViewShell", "setLayerType", e);
+        }
+
+        // Full-screen IDE WebView: while touching the WebView, parents must not intercept.
+        // return false → WebView still receives the event (scroll, teardrop, etc.).
+        webView.setOnTouchListener((v, event) -> {
+            final ViewParent parent = v.getParent();
+            if (parent == null) return false;
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                case MotionEvent.ACTION_MOVE:
+                    parent.requestDisallowInterceptTouchEvent(true);
+                    // Walk up a few levels (Capacitor may nest FrameLayouts)
+                    disallowInterceptUp(v, true);
+                    break;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    parent.requestDisallowInterceptTouchEvent(false);
+                    disallowInterceptUp(v, false);
+                    break;
+                default:
+                    break;
+            }
+            return false;
+        });
+
+        android.util.Log.i("MsWebViewShell", "touch disallow-intercept installed");
+    }
+
+    private void disallowInterceptUp(View child, boolean disallow) {
+        android.view.ViewParent p = child.getParent();
+        int guard = 0;
+        while (p != null && guard++ < 8) {
+            try {
+                p.requestDisallowInterceptTouchEvent(disallow);
+            } catch (Exception ignored) {
+            }
+            p = p.getParent();
         }
     }
 
@@ -292,7 +362,6 @@ public class MainActivity extends BridgeActivity {
         }
 
         WebView webView = this.bridge.getWebView();
-        final WebViewClient existing = null; // Bridge owns client; wrap via post-load check
 
         // Poll readiness: when page has progress ~100 or title set
         mainHandler.postDelayed(new Runnable() {
