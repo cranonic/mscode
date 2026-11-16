@@ -1,0 +1,126 @@
+Error: src/core/bootstrap/actions/getActiveMonacoEditor.ts(26,28): error TS7006: Parameter 'e' implicitly has an 'any' type.
+Error: src/core/bootstrap/actions/getActiveMonacoEditor.ts(34,28): error TS7006: Parameter 'e' implicitly has an 'any' type.
+Error: src/core/extensionAPI/modules/languages/formattersAPI.ts(40,46): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/extensionAPI/modules/languages/formattersAPI.ts(40,53): error TS7006: Parameter 'options' implicitly has an 'any' type.
+Error: src/core/extensionAPI/modules/languages/formattersAPI.ts(40,62): error TS7006: Parameter 'token' implicitly has an 'any' type.
+Error: src/core/extensionAPI/modules/window/editorAPI.ts(30,27): error TS7006: Parameter 'e' implicitly has an 'any' type.
+Error: src/core/extensionAPI/registry/snippetRegistry.ts(85,32): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/extensionAPI/registry/snippetRegistry.ts(85,39): error TS7006: Parameter 'position' implicitly has an 'any' type.
+Error: src/core/extensionAPI/registry/snippetRegistry.ts(195,50): error TS18046: 'w' is of type 'unknown'.
+Error: src/core/keybindings/monacoKeybindingBridge.ts(53,21): error TS7006: Parameter 'action' implicitly has an 'any' type.
+Error: src/core/keybindings/monacoKeybindingBridge.ts(96,40): error TS7006: Parameter 'e' implicitly has an 'any' type.
+Error: src/core/services/lsp/LspMockService.ts(45,32): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/LspMockService.ts(45,39): error TS7006: Parameter 'position' implicitly has an 'any' type.
+Error: src/core/services/lsp/LspProtocol.ts(270,49): error TS7006: Parameter 'm' implicitly has an 'any' type.
+Error: src/core/services/lsp/LspProtocol.ts(282,51): error TS7006: Parameter 'm' implicitly has an 'any' type.
+Error: src/core/services/lsp/LspProtocol.ts(306,36): error TS2749: 'monaco.MarkerSeverity' refers to a value, but is being used as a type here. Did you mean 'typeof monaco.MarkerSeverity'?
+Error: src/core/services/lsp/LspService.ts(151,47): error TS7006: Parameter 'l' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/codeAction.ts(10,34): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/codeAction.ts(10,41): error TS7006: Parameter 'range' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/codeAction.ts(10,48): error TS7006: Parameter 'context' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/codeLens.ts(10,33): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/codeLens.ts(35,31): error TS7006: Parameter '_model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/codeLens.ts(35,39): error TS7006: Parameter 'codeLens' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/completion.ts(40,38): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/completion.ts(40,45): error TS7006: Parameter 'position' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/completion.ts(40,55): error TS7006: Parameter 'context' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/completion.ts(204,37): error TS7006: Parameter 'item' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/completion.ts(204,43): error TS7006: Parameter 'token' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/definition.ts(17,15): error TS2749: 'monaco.Uri' refers to a value, but is being used as a type here. Did you mean 'typeof monaco.Uri'?
+Error: src/core/services/lsp/providers/definition.ts(42,33): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/definition.ts(42,40): error TS7006: Parameter 'position' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/definition.ts(42,50): error TS7006: Parameter 'token' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/documentHighlight.ts(10,41): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/documentHighlight.ts(10,48): error TS7006: Parameter 'position' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/documentHighlight.ts(19,58): error TS2724: '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member named 'DocumentHighlightKind'. Did you mean 'DocumentHighlight'?
+Error: src/core/services/lsp/providers/documentLink.ts(10,28): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/documentSymbol.ts(10,38): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/foldingRange.ts(9,36): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/formatting.ts(9,46): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/formatting.ts(9,53): error TS7006: Parameter 'options' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/formatting.ts(49,51): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/formatting.ts(49,58): error TS7006: Parameter 'range' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/formatting.ts(49,65): error TS7006: Parameter 'options' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/helpers.ts(32,33): error TS2724: '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member named 'IWorkspaceTextEdit'. Did you mean 'WorkspaceEdit'?
+Error: src/core/services/lsp/providers/helpers.ts(61,65): error TS2724: '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member named 'CompletionItemKind'. Did you mean 'CompletionItem'?
+Error: src/core/services/lsp/providers/helpers.ts(63,46): error TS2724: '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member named 'CompletionItemKind'. Did you mean 'CompletionItem'?
+Error: src/core/services/lsp/providers/helpers.ts(74,64): error TS2694: Namespace '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member 'SymbolKind'.
+Error: src/core/services/lsp/providers/helpers.ts(76,46): error TS2694: Namespace '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member 'SymbolKind'.
+Error: src/core/services/lsp/providers/hover.ts(36,28): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/hover.ts(36,35): error TS7006: Parameter 'position' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/hover.ts(36,45): error TS7006: Parameter 'token' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/inlayHints.ts(8,67): error TS2724: '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member named 'InlayHintKind'. Did you mean 'InlayHint'?
+Error: src/core/services/lsp/providers/inlayHints.ts(61,36): error TS2694: Namespace '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member 'LanguageSelector'.
+Error: src/core/services/lsp/providers/inlayHints.ts(73,33): error TS2724: '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member named 'InlayHintList'. Did you mean 'InlayHint'?
+Error: src/core/services/lsp/providers/modelTracking.ts(40,36): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/onTypeFormatting.ts(12,44): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/onTypeFormatting.ts(12,51): error TS7006: Parameter 'position' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/onTypeFormatting.ts(12,61): error TS7006: Parameter 'ch' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/onTypeFormatting.ts(12,65): error TS7006: Parameter 'options' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/references.ts(10,33): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/references.ts(10,40): error TS7006: Parameter 'position' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/references.ts(10,50): error TS7006: Parameter 'context' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/rename.ts(11,34): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/rename.ts(11,41): error TS7006: Parameter 'position' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/rename.ts(11,51): error TS7006: Parameter 'newName' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/rename.ts(11,60): error TS7006: Parameter 'token' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/rename.ts(32,37): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/rename.ts(32,44): error TS7006: Parameter 'position' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/rename.ts(32,54): error TS7006: Parameter 'token' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/selectionRange.ts(10,38): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/selectionRange.ts(10,45): error TS7006: Parameter 'positions' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/selectionRange.ts(19,58): error TS2694: Namespace '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member 'SelectionRange'.
+Error: src/core/services/lsp/providers/selectionRange.ts(20,41): error TS2694: Namespace '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member 'SelectionRange'.
+Error: src/core/services/lsp/providers/signatureHelp.ts(12,36): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/signatureHelp.ts(12,43): error TS7006: Parameter 'position' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/signatureHelp.ts(12,53): error TS7006: Parameter '_token' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/signatureHelp.ts(12,61): error TS7006: Parameter 'context' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/signatureHelp.ts(38,72): error TS7006: Parameter 's' implicitly has an 'any' type.
+Error: src/core/services/lsp/providers/signatureHelp.ts(41,53): error TS7006: Parameter 'p' implicitly has an 'any' type.
+Error: src/core/services/symbolService.ts(89,23): error TS7006: Parameter 'e' implicitly has an 'any' type.
+Error: src/core/symbols/SymbolManager.ts(24,39): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/symbols/index.ts(95,36): error TS7006: Parameter 'model' implicitly has an 'any' type.
+Error: src/core/symbols/index.ts(95,43): error TS7006: Parameter '_token' implicitly has an 'any' type.
+Error: src/core/symbols/utils/iconMap.ts(7,58): error TS2694: Namespace '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member 'SymbolKind'.
+Error: src/core/symbols/utils/iconMap.ts(40,62): error TS2694: Namespace '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member 'SymbolKind'.
+Error: src/core/theme/service/themeService.ts(187,32): error TS2694: Namespace '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".editor' has no exported member 'ITokenThemeRule'.
+Error: src/features/editor/components/DiffEditor/DiffEditor.tsx(5,10): error TS2614: Module '"@monaco-editor/react"' has no exported member 'DiffEditor'. Did you mean to use 'import DiffEditor from "@monaco-editor/react"' instead?
+Error: src/features/editor/components/DiffEditor/DiffEditor.tsx(14,10): error TS2724: '"../../monaco/monacoOptions"' has no exported member named 'buildMonacoOptions'. Did you mean 'MONACO_OPTIONS'?
+Error: src/features/editor/hooks/useDiagnosticPopup.ts(52,27): error TS2749: 'monaco.MarkerSeverity' refers to a value, but is being used as a type here. Did you mean 'typeof monaco.MarkerSeverity'?
+Error: src/features/editor/hooks/useDiagnosticPopup.ts(59,27): error TS2749: 'monaco.MarkerSeverity' refers to a value, but is being used as a type here. Did you mean 'typeof monaco.MarkerSeverity'?
+Error: src/features/editor/hooks/useDiagnosticPopup.ts(65,33): error TS2749: 'monaco.MarkerSeverity' refers to a value, but is being used as a type here. Did you mean 'typeof monaco.MarkerSeverity'?
+Error: src/features/editor/hooks/useDiagnosticPopup.ts(326,50): error TS7006: Parameter 'uris' implicitly has an 'any' type.
+Error: src/features/editor/hooks/useDiagnosticPopup.ts(329,30): error TS7006: Parameter 'u' implicitly has an 'any' type.
+Error: src/features/editor/hooks/useMonacoSetup.ts(7,10): error TS2305: Module '"@/features/editor/monaco/monacoBoot"' has no exported member 'ensureMsCodeCoreConfig'.
+Error: src/features/editor/hooks/useStickyHighlight.ts(62,66): error TS7006: Parameter 'el' implicitly has an 'any' type.
+Error: src/features/editor/hooks/useStickyHighlight.ts(63,71): error TS7006: Parameter 'el' implicitly has an 'any' type.
+Error: src/features/editor/hooks/useStickyHighlight.ts(74,87): error TS18046: 's' is of type 'unknown'.
+Error: src/features/editor/hooks/useStickyHighlight.ts(79,17): error TS2571: Object is of type 'unknown'.
+Error: src/features/editor/hooks/useStickyHighlight.ts(80,15): error TS2322: Type 'unknown' is not assignable to type 'HTMLElement | null'.
+Error: src/features/editor/hooks/useStickyHighlight.ts(88,19): error TS2571: Object is of type 'unknown'.
+Error: src/features/editor/hooks/useStickyHighlight.ts(89,17): error TS2322: Type 'unknown' is not assignable to type 'HTMLElement | null'.
+Error: src/features/editor/hooks/useStickyHighlight.ts(125,66): error TS7006: Parameter 'el' implicitly has an 'any' type.
+Error: src/features/editor/hooks/useStickyHighlight.ts(126,71): error TS7006: Parameter 'el' implicitly has an 'any' type.
+Error: src/features/statusbar/hooks/useStatusBarSync.ts(128,37): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+  Type 'null' is not assignable to type 'string'.
+Error: src/features/statusbar/hooks/useStatusBarSync.ts(132,58): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+  Type 'null' is not assignable to type 'string'.
+Error: src/features/statusbar/hooks/useStatusBarSync.ts(152,39): error TS7006: Parameter 'm' implicitly has an 'any' type.
+Error: src/features/statusbar/hooks/useStatusBarSync.ts(153,40): error TS7006: Parameter 'm' implicitly has an 'any' type.
+Error: src/features/termis/components/output/components/OutputPanel.tsx(42,32): error TS7006: Parameter 'e' implicitly has an 'any' type.
+Error: src/features/termis/components/output/components/OutputPanel.tsx(135,11): error TS2322: Type '{ instanceId: string; language: string; value: string; onChange: () => void; readOnly: true; menuEnabled: true; allowedMenuIds: string[]; teardrops: boolean; theme: string; options: { lineNumbers: string; ... 8 more ...; automaticLayout: boolean; }; onEditorMount: (editor: any) => void; }' is not assignable to type 'IntrinsicAttributes & MemoryCodeEditorProps'.
+  Property 'allowedMenuIds' does not exist on type 'IntrinsicAttributes & MemoryCodeEditorProps'.
+Error: src/features/termis/components/output/hooks/useOutputEditor.ts(27,39): error TS7006: Parameter 'l' implicitly has an 'any' type.
+Error: src/features/termis/components/output/hooks/useOutputEditor.ts(120,55): error TS7006: Parameter 'e' implicitly has an 'any' type.
+Error: src/features/termis/components/problems/ProblemsPanel.tsx(24,26): error TS2749: 'monaco.MarkerSeverity' refers to a value, but is being used as a type here. Did you mean 'typeof monaco.MarkerSeverity'?
+Error: src/store/languageStore.ts(19,31): error TS2694: Namespace '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member 'ILanguageExtensionPoint'.
+Error: src/store/languageStore.ts(25,49): error TS2694: Namespace '"/home/runner/work/***/***/packages/app/src/shims/monaco-editor".languages' has no exported member 'ILanguageExtensionPoint'.
+Error: src/ui/components/QuickKeyboard/QuickKeyboardBar.tsx(17,32): error TS7006: Parameter 'e' implicitly has an 'any' type.
+npm error Lifecycle script `build` failed with error:
+npm error code 2
+npm error path /home/runner/work/***/***/packages/app
+npm error workspace ***-app@1.0.0
+npm error location /home/runner/work/***/***/packages/app
+npm error command failed
+npm error command sh -c tsc -b && vite build
+Error: Process completed with exit code 2.

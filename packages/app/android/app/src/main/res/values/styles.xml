@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Base application theme — dark IDE chrome -->
+    <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="android:windowBackground">@color/ms_bg_main</item>
+        <item name="android:statusBarColor">@color/ms_status_bar</item>
+        <item name="android:navigationBarColor">@color/ms_status_bar</item>
+        <!-- Dark status bar → light/white icons -->
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:background">@null</item>
+        <item name="android:windowBackground">@color/ms_bg_main</item>
+        <item name="android:statusBarColor">@color/ms_status_bar</item>
+        <item name="android:navigationBarColor">@color/ms_status_bar</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <!-- Cold-start: solid dark only (no launcher icon). Custom dialog owns the logo+shimmer. -->
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/ms_bg_main</item>
+        <!-- Transparent 1px icon → no centered MSCode logo before dialog -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_transparent</item>
+        <item name="windowSplashScreenAnimationDuration">0</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+        <item name="android:windowBackground">@color/ms_bg_main</item>
+        <item name="android:statusBarColor">@color/ms_status_bar</item>
+        <item name="android:navigationBarColor">@color/ms_status_bar</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <!-- Custom loading dialog: transparent scrim outside the card -->
+    <style name="MsSplashDialog" parent="Theme.AppCompat.Dialog">
+        <item name="android:windowBackground">@color/ms_transparent</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:backgroundDimAmount">0.45</item>
+        <item name="android:windowCloseOnTouchOutside">false</item>
+    </style>
+</resources>

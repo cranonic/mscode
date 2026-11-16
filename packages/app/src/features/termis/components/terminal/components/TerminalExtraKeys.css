@@ -1,0 +1,36 @@
+.ms-term-extra-keys {
+  flex-shrink: 0;
+  background: #1a1a1a;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 4px 2px 6px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ms-term-extra-keys-row {
+  display: flex;
+  gap: 2px;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+.ms-term-extra-keys-row:last-child {
+  margin-bottom: 0;
+}
+.ms-term-extra-key {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.ms-term-extra-key:active,
+.ms-term-extra-key.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}

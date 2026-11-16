@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- IDE dark theme (matches MSCode UI) -->
+    <color name="ms_bg_main">#1E1E1E</color>
+    <color name="ms_bg_card">#1E1E1E</color>
+    <color name="ms_border">#3C3C3C</color>
+    <color name="ms_text_bright">#FFFFFF</color>
+    <color name="ms_text_main">#CCCCCC</color>
+    <color name="ms_text_faded">#858585</color>
+    <color name="ms_accent">#007ACC</color>
+    <color name="ms_status_bar">#1E1E1E</color>
+    <color name="ms_transparent">#00000000</color>
+
+    <!-- AppCompat fallbacks -->
+    <color name="colorPrimary">#1E1E1E</color>
+    <color name="colorPrimaryDark">#1E1E1E</color>
+    <color name="colorAccent">#007ACC</color>
+</resources>

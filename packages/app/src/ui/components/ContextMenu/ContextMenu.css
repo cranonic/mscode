@@ -1,0 +1,135 @@
+/* src/ui/components/ContextMenu/ContextMenu.css */
+
+:root {
+  /* Set > 0 (e.g. 120) to enable exit scale/fade. 0 = instant unmount. */
+  --ms-menu-exit-ms: 0.0;
+}
+
+.ms-context-menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: transparent;
+  z-index: 100009;
+  /* Ignore leftover events from the long-press that opened the menu */
+  pointer-events: none;
+}
+.ms-context-menu-overlay.ms-context-menu-overlay--armed {
+  pointer-events: auto;
+}
+
+/*
+ * Position-only wrapper. Carries whatever left/top (root) or translate()
+ * boundary-clamp offset (submenu) React computes, and NEVER carries the
+ * scale animation. Keeping it untransformed means:
+ *  - getBoundingClientRect() on this element (see ContextMenu.tsx's
+ *    useLayoutEffect) always reports the real, un-scaled box, even while
+ *    the inner .ms-context-menu panel is mid open/close animation.
+ *  - its own transform: translate(...) is never fought over by the CSS
+ *    keyframe animation below (which only ever touches the inner panel's
+ *    transform), so the boundary correction actually stays visible.
+ */
+.ms-context-menu-shell {
+  position: relative;
+  z-index: 100010;
+  pointer-events: auto;
+}
+
+.ms-context-menu {
+  background-color: var(--ms-bg-side);
+  border: 1px solid var(--ms-menu-border);
+  box-shadow: 0 4px 12px var(--ms-shadow);
+  color: var(--ms-text-main);
+  border-radius: 4px;
+  padding: 4px 0;
+  min-width: 220px;
+  font-size: 13px;
+  text-align: start;
+  
+  /* Android Material Design style origin - change to 'top right' if your menu opens on the right */
+  transform-origin: top right; 
+  
+  opacity: 1;
+  transform: scale(1);
+  will-change: opacity, transform;
+  /* Material Design entering easing curve */
+  animation: ms-menu-in 0.2s cubic-bezier(0.0, 0.0, 0.2, 1) forwards; 
+}
+
+.ms-context-menu.ms-context-menu--closing {
+  animation: ms-menu-out calc(var(--ms-menu-exit-ms, 0) * 1ms)
+    cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes ms-menu-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.8); /* Android menus typically scale up from 80% */
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes ms-menu-out {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
+
+.ms-context-menu-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ms-context-menu-item.disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ms-context-menu-item:hover:not(.disabled),
+.ms-context-menu-item.active-sub:not(.disabled) {
+  background-color: var(--ms-menu-hover-bg);
+  color: var(--ms-text-bright);
+}
+
+.ms-context-menu-item.disabled:hover {
+  background-color: transparent;
+  color: var(--ms-text-main);
+}
+
+.ms-menu-icon-slot {
+  width: 22px;
+  display: flex;
+  justify-content: center;
+}
+
+.ms-menu-label {
+  flex: 1;
+  margin-left: 5px;
+}
+
+.ms-menu-shortcut {
+  margin-left: 20px;
+  color: var(--ms-text-faded);
+  font-size: 11px;
+}
+
+.ms-menu-separator {
+  height: 1px;
+  background-color: var(--ms-separator);
+  margin: 4px 10px;
+}

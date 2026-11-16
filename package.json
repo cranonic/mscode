@@ -1,0 +1,24 @@
+{
+  "name": "mscode-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=mscode-app",
+    "build": "npm run build --workspace=mscode-app",
+    "build:android": "npm run build:android --workspace=mscode-app",
+    "cli": "npm run start --workspace=@mscode/msce",
+    "docs": "npm run docs:dev --workspace=mscode-app"
+  },
+  "devDependencies": {
+    "dts-bundle-generator": "^9.5.1",
+    "patch-package": "^8.0.1"
+  },
+  "dependencies": {
+    "@capacitor/status-bar": "^8.0.3",
+    "@capacitor/app": "^8.0.3",
+    "@monostudio/msce": "^1.0.1",
+    "rehype-raw": "^7.0.0"
+  }
+}

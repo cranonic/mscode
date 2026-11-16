@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No card/box/border — logo + text float on dimmed transparent scrim. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/ms_transparent">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
+
+        <com.editor.mscode.ShimmerImageView
+            android:id="@+id/splash_logo"
+            android:layout_width="112dp"
+            android:layout_height="112dp"
+            android:contentDescription="@string/app_name"
+            android:scaleType="fitCenter"
+            android:src="@drawable/splash_logo" />
+
+        <TextView
+            android:id="@+id/splash_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:letterSpacing="0.02"
+            android:text="@string/splash_title"
+            android:textColor="@color/ms_text_bright"
+            android:textSize="21sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/splash_subtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center"
+            android:text="@string/splash_subtitle"
+            android:textColor="@color/ms_text_faded"
+            android:textSize="13sp" />
+
+        <ProgressBar
+            android:id="@+id/splash_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="150dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:indeterminate="true"
+            android:indeterminateTint="@color/ms_accent" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/splash_version"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="30dp"
+        android:gravity="center"
+        android:textColor="@color/ms_text_faded"
+        android:textSize="11sp"
+        tools:text="v1.0.0  •  Android 14" />
+
+</FrameLayout>

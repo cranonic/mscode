@@ -1,0 +1,53 @@
+/** Public options for createMonoEditor */
+export type MonoLineNumbers = 'on' | 'off';
+
+export interface MonoEditorTheme {
+  background: string;
+  foreground: string;
+  gutterBackground: string;
+  gutterForeground: string;
+  caret: string;
+  selection: string;
+  lineHighlight: string;
+}
+
+export interface MonoEditorOptions {
+  value?: string;
+  language?: string;
+  readOnly?: boolean;
+  fontFamily?: string;
+  fontSize?: number;
+  lineHeight?: number;
+  tabSize?: number;
+  lineNumbers?: MonoLineNumbers;
+  theme?: Partial<MonoEditorTheme>;
+  overscan?: number;
+}
+
+export interface MonoContentChangeEvent {
+  value: string;
+}
+
+export type MonoDisposable = { dispose: () => void };
+
+export interface IMonoEditor {
+  getValue(): string;
+  setValue(value: string): void;
+  getLanguageId(): string;
+  setLanguageId(id: string): void;
+  focus(): void;
+  layout(): void;
+  getModelVersionId(): number;
+  onDidChangeModelContent(listener: (e: MonoContentChangeEvent) => void): MonoDisposable;
+  dispose(): void;
+}
+
+export const DEFAULT_THEME: MonoEditorTheme = {
+  background: '#1e1e1e',
+  foreground: '#d4d4d4',
+  gutterBackground: '#1e1e1e',
+  gutterForeground: '#858585',
+  caret: '#aeafad',
+  selection: '#264f78',
+  lineHighlight: '#2a2a2a',
+};
