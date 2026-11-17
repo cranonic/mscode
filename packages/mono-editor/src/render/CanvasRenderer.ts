@@ -20,6 +20,12 @@ export interface TeardropHit {
   h: number;
 }
 
+export interface FreeHandleVisual {
+  type: 'cursor' | 'start' | 'end';
+  x: number;
+  y: number;
+}
+
 function orderedSelection(sel: SelectionState): {
   startLine: number;
   startCol: number;
@@ -47,8 +53,10 @@ function orderedSelection(sel: SelectionState): {
   };
 }
 
-/** Classic mobile teardrop: pointy tip UP toward caret, round body below */
-export const TEARDROP = { w: 24, h: 30 };
+/** Smaller width; body hangs below tip (tip stays on baseline). */
+export const TEARDROP = { w: 26, h: 34 };
+const CARET_H = 18;
+const CARET_W = 2;
 
 export class CanvasRenderer {
   readonly canvas: HTMLCanvasElement;
@@ -89,10 +97,13 @@ export class CanvasRenderer {
     showLineNumbers: boolean;
     overscan: number;
     showTeardrops?: boolean;
+    freeHandle?: FreeHandleVisual | null;
   }): void {
     const {
       model, selection, scrollTop, scrollLeft, cssWidth, cssHeight,
-      metrics, theme, showLineNumbers, overscan, showTeardrops = true,
+      metrics, theme, showLineNumbers, overscan,
+      showTeardrops = true,
+      freeHandle = null,
     } = opts;
 
     const { ctx } = this;
@@ -184,12 +195,21 @@ export class CanvasRenderer {
 
     this.lastTeardrops = [];
     if (showTeardrops) {
-      const dropColor = theme.caret || '#4fc3f7';
+      const dropColor = theme.caret || '#007acc';
       if (hasSelection) {
-        this.paintTeardropAt(range.startLine, range.startCol, 'start', model, metrics, scrollTop, scrollLeft, showLineNumbers, dropColor);
-        this.paintTeardropAt(range.endLine, range.endCol, 'end', model, metrics, scrollTop, scrollLeft, showLineNumbers, dropColor);
+        this.paintTeardropAt(
+          range.startLine, range.startCol, 'start',
+          model, metrics, scrollTop, scrollLeft, showLineNumbers, dropColor, freeHandle,
+        );
+        this.paintTeardropAt(
+          range.endLine, range.endCol, 'end',
+          model, metrics, scrollTop, scrollLeft, showLineNumbers, dropColor, freeHandle,
+        );
       } else {
-        this.paintTeardropAt(caretLine, caretCol, 'cursor', model, metrics, scrollTop, scrollLeft, showLineNumbers, dropColor);
+        this.paintTeardropAt(
+          caretLine, caretCol, 'cursor',
+          model, metrics, scrollTop, scrollLeft, showLineNumbers, dropColor, freeHandle,
+        );
       }
     }
   }
@@ -198,74 +218,86 @@ export class CanvasRenderer {
     line: number, col: number, type: 'cursor' | 'start' | 'end',
     model: TextModel, metrics: RenderMetrics,
     scrollTop: number, scrollLeft: number, showLineNumbers: boolean, color: string,
+    freeHandle?: FreeHandleVisual | null,
   ): void {
-    const { lineHeight, paddingTop, paddingLeft, gutterWidth, charWidth } = metrics;
-    const content = model.getLineContent(line);
-    const prefix = content.slice(0, Math.max(0, col - 1));
-    const textX0 = (showLineNumbers ? gutterWidth : 0) + paddingLeft - scrollLeft;
-    const cx = textX0 + prefix.length * charWidth;
-    const y = paddingTop + (line - 1) * lineHeight - scrollTop;
-    const bottom = y + lineHeight;
+    const { lineHeight, paddingTop, paddingLeft, gutterWidth } = metrics;
     const { w, h } = TEARDROP;
-    let left = cx;
-    if (type === 'start') left = cx - w;
-    else if (type === 'cursor') left = cx - w / 2;
-    // tip touches line bottom, body hangs below
-    const top = bottom - 1;
-    this.drawTeardropShape(left, top, w, h, color, type);
-    this.lastTeardrops.push({ type, x: left, y: top, w, h: h + 10 });
+
+    let cx: number;
+    let tipY: number;
+    let lineTop: number;
+
+    if (freeHandle && freeHandle.type === type) {
+      cx = freeHandle.x;
+      tipY = freeHandle.y;
+      lineTop = tipY - lineHeight + 1;
+    } else {
+      const content = model.getLineContent(line);
+      const prefix = content.slice(0, Math.max(0, col - 1));
+      const textX0 = (showLineNumbers ? gutterWidth : 0) + paddingLeft - scrollLeft;
+      this.ctx.font = `${metrics.fontSize}px ${metrics.fontFamily}`;
+      cx = textX0 + this.ctx.measureText(prefix).width;
+      lineTop = paddingTop + (line - 1) * lineHeight - scrollTop;
+      tipY = lineTop + lineHeight - 1;
+    }
+
+    let left = cx - w / 2;
+    if (type === 'start') left = cx - w * 0.42;
+    else if (type === 'end') left = cx - w * 0.58;
+
+    this.drawTeardropShape(left, tipY, w, h, color, type);
+    this.drawTipCaret(left, tipY, w, type, lineTop, lineHeight);
+    this.lastTeardrops.push({ type, x: left, y: tipY, w, h: h + 12 });
   }
 
-  /**
-   * Orientation: TIP at top (toward caret), ROUND bulb at bottom.
-   * (180° from previous version)
-   */
   private drawTeardropShape(
     x: number, y: number, w: number, h: number, color: string,
     type: 'cursor' | 'start' | 'end',
   ): void {
     const ctx = this.ctx;
-    const r = w * 0.42;
-    const cx = x + w / 2;
-    // tip y, bulb center lower
-    const tipY = y;
-    const bulbCy = y + h - r - 2;
+    const sx = w / 24;
+    const sy = h / 32;
 
     ctx.save();
-    ctx.fillStyle = color;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.25;
-
-    // tip point + sides into circle
-    ctx.beginPath();
-    // tip
+    ctx.translate(x + w / 2, y);
     if (type === 'start') {
-      // tip aligned to right edge (selection start)
-      const tipX = x + w;
-      ctx.moveTo(tipX, tipY);
-      ctx.quadraticCurveTo(tipX, tipY + 8, cx + r * 0.3, bulbCy - r * 0.6);
-      ctx.arc(cx, bulbCy, r, -0.9, Math.PI + 0.9, false);
-      ctx.quadraticCurveTo(tipX - 4, tipY + 10, tipX, tipY);
+      ctx.rotate((28 * Math.PI) / 180);
     } else if (type === 'end') {
-      const tipX = x;
-      ctx.moveTo(tipX, tipY);
-      ctx.quadraticCurveTo(tipX + 4, tipY + 10, cx - r * 0.3, bulbCy - r * 0.6);
-      ctx.arc(cx, bulbCy, r, Math.PI - 0.9, 0.9, false);
-      ctx.quadraticCurveTo(tipX, tipY + 8, tipX, tipY);
-    } else {
-      ctx.moveTo(cx, tipY);
-      ctx.quadraticCurveTo(cx + 3, tipY + 10, cx + r * 0.85, bulbCy - r * 0.5);
-      ctx.arc(cx, bulbCy, r, -0.7, Math.PI + 0.7, false);
-      ctx.quadraticCurveTo(cx - 3, tipY + 10, cx, tipY);
+      ctx.rotate((-28 * Math.PI) / 180);
     }
+    ctx.scale(sx, sy);
+    ctx.translate(-12, 0);
+
+    ctx.beginPath();
+    ctx.moveTo(12, 0);
+    ctx.bezierCurveTo(18, 6, 24, 12, 24, 18);
+    ctx.arc(12, 18, 12, 0, Math.PI, false);
+    ctx.bezierCurveTo(0, 12, 6, 6, 12, 0);
     ctx.closePath();
+    ctx.fillStyle = color;
     ctx.fill();
 
-    // highlight on bulb
-    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
     ctx.beginPath();
-    ctx.arc(cx - r * 0.28, bulbCy - r * 0.25, r * 0.32, 0, Math.PI * 2);
+    ctx.arc(9, 16, 4, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+  }
+
+  private drawTipCaret(
+    x: number,
+    _tipY: number,
+    w: number,
+    type: 'cursor' | 'start' | 'end',
+    lineTop: number,
+    lineHeight: number,
+  ): void {
+    const ctx = this.ctx;
+    let cx = x + w / 2;
+    if (type === 'start') cx = x + w * 0.58 - 3;
+    else if (type === 'end') cx = x + w * 0.42 + 3;
+    const caretTop = lineTop + Math.max(0, (lineHeight - CARET_H) / 2 - 3);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(cx - CARET_W / 2, caretTop, CARET_W, CARET_H);
   }
 }

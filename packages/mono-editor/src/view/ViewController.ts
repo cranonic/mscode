@@ -1,6 +1,10 @@
 import type { TextModel } from '../core/TextModel';
 import type { SelectionState } from '../core/Selection';
-import type { CanvasRenderer, RenderMetrics } from '../render/CanvasRenderer';
+import type {
+  CanvasRenderer,
+  FreeHandleVisual,
+  RenderMetrics,
+} from '../render/CanvasRenderer';
 import type { MonoEditorTheme } from '../api/types';
 
 export class ViewController {
@@ -8,6 +12,7 @@ export class ViewController {
   scrollLeft = 0;
   cssWidth = 0;
   cssHeight = 0;
+  freeHandle: FreeHandleVisual | null = null;
 
   private model: TextModel;
   private selection: SelectionState;
@@ -35,6 +40,11 @@ export class ViewController {
     this.overscan = overscan;
   }
 
+  /** Effective gutter width (0 when line numbers are hidden). */
+  get contentLeft(): number {
+    return this.showLineNumbers() ? this.getMetrics().gutterWidth : 0;
+  }
+
   setSize(width: number, height: number): void {
     this.cssWidth = Math.max(0, width);
     this.cssHeight = Math.max(0, height);
@@ -57,10 +67,12 @@ export class ViewController {
   ensureCaretVisible(): void {
     const m = this.getMetrics();
     const line = this.selection.active.lineNumber;
-    const y = (line - 1) * m.lineHeight;
-    if (y < this.scrollTop) this.scrollTop = y;
-    if (y + m.lineHeight > this.scrollTop + this.cssHeight) {
-      this.scrollTop = y + m.lineHeight - this.cssHeight;
+    const topY = m.paddingTop + (line - 1) * m.lineHeight;
+    if (topY < this.scrollTop + m.paddingTop) {
+      this.scrollTop = Math.max(0, topY - m.paddingTop);
+    }
+    if (topY + m.lineHeight > this.scrollTop + this.cssHeight) {
+      this.scrollTop = topY + m.lineHeight - this.cssHeight;
     }
     this.clampScroll();
   }
@@ -72,9 +84,8 @@ export class ViewController {
     const col = this.selection.active.column;
     const content = this.model.getLineContent(line);
     const prefix = content.slice(0, Math.max(0, col - 1));
-    // measure via charWidth approx
     const textX =
-      (this.showLineNumbers() ? m.gutterWidth : 0) +
+      this.contentLeft +
       m.paddingLeft +
       prefix.length * m.charWidth -
       this.scrollLeft;
@@ -95,6 +106,7 @@ export class ViewController {
       theme: this.getTheme(),
       showLineNumbers: this.showLineNumbers(),
       overscan: this.overscan,
+      freeHandle: this.freeHandle,
     });
   }
 
