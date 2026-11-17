@@ -21,6 +21,7 @@ export class ViewController {
   private getTheme: () => MonoEditorTheme;
   private showLineNumbers: () => boolean;
   private overscan: number;
+  private paintRaf = 0;
 
   constructor(
     model: TextModel,
@@ -57,7 +58,7 @@ export class ViewController {
     this.scrollLeft = Math.max(0, this.scrollLeft + dx);
     this.scrollTop = Math.max(0, this.scrollTop + dy);
     this.clampScroll();
-    this.paint();
+    this.schedulePaint();
   }
 
   clampScrollPublic(): void {
@@ -93,13 +94,33 @@ export class ViewController {
     return { x: textX, y, h: m.lineHeight };
   }
 
+  /** Coalesces rapid pointermove/wheel updates into 1 paint per display frame. */
+  schedulePaint(): void {
+    if (this.paintRaf) return;
+    this.paintRaf = requestAnimationFrame(() => {
+      this.paintRaf = 0;
+      this.paint();
+    });
+  }
+
+  /** Immediate synchronous paint (used by resize, tap, and rAF loops). */
   paint(): void {
+    if (this.paintRaf) {
+      cancelAnimationFrame(this.paintRaf);
+      this.paintRaf = 0;
+    }
     if (this.cssWidth <= 0 || this.cssHeight <= 0) return;
+
+    // Snap scroll to physical pixel grid for rendering (keeps float physics smooth, kills text shimmer)
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const renderTop = Math.round(this.scrollTop * dpr) / dpr;
+    const renderLeft = Math.round(this.scrollLeft * dpr) / dpr;
+
     this.renderer.paint({
       model: this.model,
       selection: this.selection,
-      scrollTop: this.scrollTop,
-      scrollLeft: this.scrollLeft,
+      scrollTop: renderTop,
+      scrollLeft: renderLeft,
       cssWidth: this.cssWidth,
       cssHeight: this.cssHeight,
       metrics: this.getMetrics(),
@@ -108,6 +129,13 @@ export class ViewController {
       overscan: this.overscan,
       freeHandle: this.freeHandle,
     });
+  }
+
+  dispose(): void {
+    if (this.paintRaf) {
+      cancelAnimationFrame(this.paintRaf);
+      this.paintRaf = 0;
+    }
   }
 
   private clampScroll(): void {

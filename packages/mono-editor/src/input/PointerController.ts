@@ -6,9 +6,9 @@ import type { RenderMetrics, TeardropHit } from '../render/CanvasRenderer';
 /**
  * Touch + mouse for mono-editor canvas.
  *
- * - Directional teardrop hitbox (doesn't overlap text line above).
- * - Tap on teardrop without dragging falls through to normal single/double tap.
- * - Free teardrop visual under finger + sticky-line hysteresis + edge auto-scroll.
+ * - Smooth axis-locked touch scroll with zero-jump threshold anchoring + rAF coalesced painting.
+ * - Clean velocity sampling for jitter-free fling.
+ * - Directional teardrop hitbox + free teardrop drag with sticky-line hysteresis.
  */
 export class PointerController {
   private root: HTMLElement;
@@ -27,8 +27,11 @@ export class PointerController {
   private lastX = 0;
   private lastY = 0;
   private lastT = 0;
+  private scrollAnchorX = 0;
+  private scrollAnchorY = 0;
   private startScrollTop = 0;
   private startScrollLeft = 0;
+  private scrollAxis: 'none' | 'x' | 'y' = 'none';
   private maxDist = 0;
   private scrolling = false;
   private selecting = false;
@@ -60,17 +63,17 @@ export class PointerController {
   private pendingDouble = false;
   private singleTapTimer: ReturnType<typeof setTimeout> | null = null;
 
-  private static readonly TAP_SLOP = 30;
-  private static readonly SCROLL_THRESH = 16;
+  private static readonly TAP_SLOP = 14;
+  private static readonly SCROLL_THRESH = 10;
   private static readonly HANDLE_MOVE_THRESH = 3;
   private static readonly LONG_MS = 450;
   private static readonly DOUBLE_MS = 400;
   private static readonly DOUBLE_DIST = 36;
-  private static readonly FRICTION_PER_MS = 0.0032;
-  private static readonly MIN_FLING_START = 0.35;
-  private static readonly MIN_FLING_STOP = 0.04;
+  private static readonly FRICTION_PER_MS = 0.0028;
+  private static readonly MIN_FLING_START = 0.25;
+  private static readonly MIN_FLING_STOP = 0.03;
   private static readonly MAX_FLING = 6.5;
-  private static readonly AXIS_LOCK_RATIO = 1.35;
+  private static readonly AXIS_LOCK_RATIO = 1.25;
   private static readonly LINE_SWITCH_DOWN = 0.42;
   private static readonly LINE_SWITCH_UP = 0.51;
   private static readonly AUTO_SCROLL_EDGE = 56;
@@ -141,7 +144,6 @@ export class PointerController {
     const localX = clientX - rect.left;
     const localY = clientY - rect.top;
 
-    // Caret midpoint sits half a line above the teardrop tip
     const caretMidY = localY - this.handleLift - m.lineHeight * 0.45;
     const sticky = this.stickyLine ?? this.hitTest(clientX, clientY).lineNumber;
     const lineMidY =
@@ -165,7 +167,7 @@ export class PointerController {
     return { lineNumber: nextLine, column };
   }
 
-  private updateHandleDrag(clientX: number, clientY: number): void {
+  private updateHandleDrag(clientX: number, clientY: number, immediate = false): void {
     if (!this.handleDrag) return;
     const rect = this.root.getBoundingClientRect();
     const pos = this.posFromHandleFree(clientX, clientY);
@@ -180,7 +182,6 @@ export class PointerController {
         this.selection.anchor = { ...anchor };
         this.selection.active = pos;
       }
-      // Keep free visual attached to the dragged edge even if handles cross
       const posBeforeAnchor =
         pos.lineNumber < anchor.lineNumber ||
         (pos.lineNumber === anchor.lineNumber && pos.column <= anchor.column);
@@ -193,7 +194,8 @@ export class PointerController {
       y: clientY - rect.top - this.handleLift,
     };
 
-    this.view.paint();
+    if (immediate) this.view.paint();
+    else this.view.schedulePaint();
     this.onInteract('handle');
   }
 
@@ -206,7 +208,7 @@ export class PointerController {
       }
       this.view.scrollTop = Math.max(0, this.view.scrollTop + this.autoScrollDelta);
       this.view.clampScrollPublic();
-      this.updateHandleDrag(this.lastX, this.lastY);
+      this.updateHandleDrag(this.lastX, this.lastY, true);
       this.autoScrollRaf = requestAnimationFrame(loop);
     };
     this.autoScrollRaf = requestAnimationFrame(loop);
@@ -247,8 +249,8 @@ export class PointerController {
     const x = clientX - rect.left;
     const y = clientY - rect.top;
     const padX = 18;
-    const padTop = 4;      // Keep hitbox below the text line
-    const padBottom = 22;  // Generous touch area under bulb
+    const padTop = 4;
+    const padBottom = 22;
     let best: TeardropHit | null = null;
     let bestD = Infinity;
     for (const t of this.getTeardrops()) {
@@ -299,10 +301,10 @@ export class PointerController {
     this.flingVy = 0;
   }
 
-  private startFling(vx: number, vy: number): void {
+  private startFling(vx: number, vy: number, axis: 'none' | 'x' | 'y'): void {
     this.stopFling();
-    let sx = -vx;
-    let sy = -vy;
+    let sx = axis === 'y' ? 0 : -vx;
+    let sy = axis === 'x' ? 0 : -vy;
     const ax = Math.abs(sx);
     const ay = Math.abs(sy);
     if (ay > ax * PointerController.AXIS_LOCK_RATIO) sx = 0;
@@ -329,14 +331,20 @@ export class PointerController {
       const damp = Math.exp(-PointerController.FRICTION_PER_MS * dt);
       this.flingVx *= damp;
       this.flingVy *= damp;
+      const prevTop = this.view.scrollTop;
+      const prevLeft = this.view.scrollLeft;
       this.view.scrollLeft = Math.max(0, this.view.scrollLeft + this.flingVx * dt);
       this.view.scrollTop = Math.max(0, this.view.scrollTop + this.flingVy * dt);
       this.view.clampScrollPublic();
       this.view.paint();
       this.onInteract('scroll');
+      const moved =
+        Math.abs(this.view.scrollTop - prevTop) > 0.01 ||
+        Math.abs(this.view.scrollLeft - prevLeft) > 0.01;
       if (
-        Math.abs(this.flingVx) < PointerController.MIN_FLING_STOP &&
-        Math.abs(this.flingVy) < PointerController.MIN_FLING_STOP
+        !moved ||
+        (Math.abs(this.flingVx) < PointerController.MIN_FLING_STOP &&
+          Math.abs(this.flingVy) < PointerController.MIN_FLING_STOP)
       ) {
         this.flingRaf = 0;
         return;
@@ -347,27 +355,27 @@ export class PointerController {
   }
 
   private pushSample(x: number, y: number, t: number): void {
+    const prev = this.samples[this.samples.length - 1];
+    if (prev && t - prev.t < 2) return; // Skip coalesced duplicate timestamps
     this.samples.push({ t, x, y });
-    while (this.samples.length > 1 && t - this.samples[0]!.t > 80) {
+    while (this.samples.length > 2 && t - this.samples[0]!.t > 90) {
       this.samples.shift();
     }
   }
 
-  private computeVelocity(): { vx: number; vy: number } {
+  private computeVelocity(now: number): { vx: number; vy: number } {
     if (this.samples.length < 2) return { vx: 0, vy: 0 };
-    let wSum = 0;
-    let vx = 0;
-    let vy = 0;
-    for (let i = 1; i < this.samples.length; i++) {
-      const a = this.samples[i - 1]!;
-      const b = this.samples[i]!;
-      const dt = Math.max(1, b.t - a.t);
-      const w = i;
-      vx += w * ((b.x - a.x) / dt);
-      vy += w * ((b.y - a.y) / dt);
-      wSum += w;
-    }
-    return { vx: vx / wSum, vy: vy / wSum };
+    const last = this.samples[this.samples.length - 1]!;
+    // Finger paused before lift -> no fling
+    if (now - last.t > 60) return { vx: 0, vy: 0 };
+
+    const first = this.samples[0]!;
+    const dt = last.t - first.t;
+    if (dt < 8) return { vx: 0, vy: 0 };
+    return {
+      vx: (last.x - first.x) / dt,
+      vy: (last.y - first.y) / dt,
+    };
   }
 
   private isWithinDoubleWindow(x: number, y: number, t: number): boolean {
@@ -386,11 +394,12 @@ export class PointerController {
     const now = performance.now();
     this.active = true;
     this.pointerId = e.pointerId;
-    this.startX = this.lastX = e.clientX;
-    this.startY = this.lastY = e.clientY;
+    this.startX = this.lastX = this.scrollAnchorX = e.clientX;
+    this.startY = this.lastY = this.scrollAnchorY = e.clientY;
     this.lastT = now;
     this.startScrollTop = this.view.scrollTop;
     this.startScrollLeft = this.view.scrollLeft;
+    this.scrollAxis = 'none';
     this.maxDist = 0;
     this.scrolling = false;
     this.selecting = e.shiftKey;
@@ -457,16 +466,25 @@ export class PointerController {
     if (!this.active || e.pointerId !== this.pointerId) return;
     e.preventDefault();
     const now = performance.now();
-    const dx = e.clientX - this.startX;
-    const dy = e.clientY - this.startY;
-    const dist = Math.hypot(dx, dy);
+    const totalDx = e.clientX - this.startX;
+    const totalDy = e.clientY - this.startY;
+    const dist = Math.hypot(totalDx, totalDy);
     if (dist > this.maxDist) this.maxDist = dist;
 
-    if (!this.scrolling && dist > PointerController.SCROLL_THRESH) {
-      this.scrolling = true;
-      this.clearLongPress();
-      if (dist > PointerController.TAP_SLOP * 1.5) {
+    if (!this.scrolling && !this.handleDrag && !this.selecting && !this.longPressFired) {
+      if (dist > PointerController.SCROLL_THRESH) {
+        this.scrolling = true;
         this.pendingDouble = false;
+        this.clearLongPress();
+        // Anchor scroll to threshold crossing point (eliminates initial jump)
+        this.scrollAnchorX = e.clientX;
+        this.scrollAnchorY = e.clientY;
+        this.startScrollTop = this.view.scrollTop;
+        this.startScrollLeft = this.view.scrollLeft;
+        // Lock axis so vertical scrolling never wobbles horizontally
+        const ax = Math.abs(totalDx);
+        const ay = Math.abs(totalDy);
+        this.scrollAxis = ax > ay * PointerController.AXIS_LOCK_RATIO ? 'x' : 'y';
       }
     }
 
@@ -498,16 +516,22 @@ export class PointerController {
       const pos = this.hitTest(e.clientX, e.clientY);
       this.selection.moveActive(pos.lineNumber, pos.column, true);
       this.view.ensureCaretVisible();
-      this.view.paint();
+      this.view.schedulePaint();
       this.onInteract('select');
       return;
     }
 
-    if (this.scrolling && !this.pendingDouble) {
-      this.view.scrollTop = Math.max(0, this.startScrollTop - dy);
-      this.view.scrollLeft = Math.max(0, this.startScrollLeft - dx);
+    if (this.scrolling) {
+      const dx = e.clientX - this.scrollAnchorX;
+      const dy = e.clientY - this.scrollAnchorY;
+      if (this.scrollAxis !== 'x') {
+        this.view.scrollTop = Math.max(0, this.startScrollTop - dy);
+      }
+      if (this.scrollAxis !== 'y') {
+        this.view.scrollLeft = Math.max(0, this.startScrollLeft - dx);
+      }
       this.view.clampScrollPublic();
-      this.view.paint();
+      this.view.schedulePaint();
       this.onInteract('scroll');
     }
   };
@@ -519,8 +543,9 @@ export class PointerController {
 
     const wasHandleDrag = Boolean(this.handleDrag && this.handleMoved);
     const wasSelecting = (this.selecting && !this.handleDrag) || this.longPressFired;
-    const wasScrolling = this.scrolling && this.maxDist > PointerController.TAP_SLOP;
-    const wasTap = this.maxDist <= PointerController.TAP_SLOP;
+    const wasScrolling = this.scrolling;
+    const axis = this.scrollAxis;
+    const wasTap = !wasScrolling && this.maxDist <= PointerController.TAP_SLOP;
     const pendingDouble = this.pendingDouble;
 
     this.active = false;
@@ -530,6 +555,8 @@ export class PointerController {
     this.stickyLine = null;
     this.dragAnchor = null;
     this.pendingDouble = false;
+    this.scrolling = false;
+    this.scrollAxis = 'none';
 
     if (wasHandleDrag) {
       this.view.freeHandle = null;
@@ -540,9 +567,8 @@ export class PointerController {
     }
 
     if (wasScrolling && !wasSelecting) {
-      this.pushSample(e.clientX, e.clientY, performance.now());
-      const { vx, vy } = this.computeVelocity();
-      this.startFling(vx, vy);
+      const { vx, vy } = this.computeVelocity(performance.now());
+      this.startFling(vx, vy, axis);
       this.onInteract('scroll');
       this.lastTapT = 0;
       this.clearSingleTap();
