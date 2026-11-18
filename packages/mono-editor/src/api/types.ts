@@ -9,6 +9,8 @@ export interface MonoEditorTheme {
   caret: string;
   selection: string;
   lineHighlight: string;
+  /** Syntax token colors (VS Code style). Missing keys fall back to DEFAULT_TOKEN_COLORS. */
+  tokenColors?: import('../language/tokenTypes').MonoTokenTheme;
 }
 
 export interface MonoEditorOptions {

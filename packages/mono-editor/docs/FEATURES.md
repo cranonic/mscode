@@ -3,18 +3,54 @@
 ## Done
 - Canvas virtualized paint, line numbers, caret, selection highlight
 - Gutter clip: horizontal scroll never draws code over gutter
-- Touch pan scroll, wheel scroll
-- Tap → caret + sticky soft keyboard (refocus on transient blur)
-- Long-press + drag selection
-- Keyboard arrows / shift-select / Ctrl+A / Enter / Tab / Backspace / Delete
-- Canvas teardrops (cursor + selection start/end), draggable handles
+- Touch pan / wheel / Android-style fling scroll
+- Tap → caret + sticky soft keyboard
+- Long-press + drag selection; double-tap word select
+- Canvas teardrops (draggable)
+- **Syntax coloring (VS Code-style expandable API)**
+
+## Syntax API
+```ts
+import {
+  createMonoEditor,
+  languages,
+  createRegexTokensProvider,
+  registerDefaultLanguages,
+} from '@mono/editor';
+
+// Built-in: plaintext, javascript/js/jsx, typescript/tsx, json, css, html, python
+registerDefaultLanguages(); // also called inside createMonoEditor
+
+// Custom language
+languages.registerTokensProvider(
+  createRegexTokensProvider({
+    languageId: 'lua',
+    keywords: ['function', 'local', 'end', 'if', 'then', 'else'],
+    rules: [
+      { pattern: /--.*/, type: 'comment' },
+      { pattern: /"(?:\\.|[^"\\])*"/, type: 'string' },
+      { pattern: /\d+/, type: 'number' },
+    ],
+  }),
+);
+
+// Full custom provider (multiline state, tree-sitter later, etc.)
+languages.registerTokensProvider({
+  languageId: 'my-lang',
+  getInitialState: () => ({ inComment: false }),
+  tokenizeLine(line, state) { /* return { tokens, endState } */ },
+});
+
+editor.setLanguageId('javascript');
+```
 
 ## Structure
 ```
-api/MonoEditor.ts
-core/TextModel.ts, Selection.ts
-view/ViewController.ts
-render/CanvasRenderer.ts   ← gutter clip + teardrop paint
-input/InputController.ts   ← sticky keyboard
-input/PointerController.ts ← scroll / select / teardrop drag
+language/
+  tokenTypes.ts          — MonoTokenType, DEFAULT_TOKEN_COLORS
+  TokensProvider.ts      — languages.registerTokensProvider API
+  TokenizationSupport.ts — line cache + state
+  createRegexTokensProvider.ts — helper for apps
+  registerDefaults.ts
+  providers/*            — js/ts/json/css/html/python
 ```

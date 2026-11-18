@@ -12,6 +12,8 @@ import {
   type MonoEditorOptions,
   type MonoEditorTheme,
 } from './types';
+import { TokenizationSupport } from '../language/TokenizationSupport';
+import { registerDefaultLanguages } from '../language/registerDefaults';
 
 export class MonoEditor implements IMonoEditor {
   private host: HTMLElement;
@@ -32,8 +34,10 @@ export class MonoEditor implements IMonoEditor {
   private ro?: ResizeObserver;
   private disposed = false;
   private unsubModel: () => void;
+  private tokenization = new TokenizationSupport();
 
   constructor(host: HTMLElement, options: MonoEditorOptions = {}) {
+    registerDefaultLanguages();
     this.host = host;
     this.fontFamily =
       options.fontFamily ?? 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
@@ -76,6 +80,7 @@ export class MonoEditor implements IMonoEditor {
       () => this.theme,
       () => this.lineNumbers,
       this.overscan,
+      this.tokenization,
     );
 
     this.input = new InputController(this.root, this.model, this.selection, () => {
@@ -105,6 +110,7 @@ export class MonoEditor implements IMonoEditor {
     );
 
     this.unsubModel = this.model.onDidChange(() => {
+      this.tokenization.invalidate();
       this.view.paint();
     });
 
@@ -130,7 +136,11 @@ export class MonoEditor implements IMonoEditor {
     this.emitContent();
   }
   getLanguageId(): string { return this.model.getLanguageId(); }
-  setLanguageId(id: string): void { this.model.setLanguageId(id); }
+  setLanguageId(id: string): void {
+    this.model.setLanguageId(id);
+    this.tokenization.invalidate();
+    this.view.paint();
+  }
   getModelVersionId(): number { return this.model.getVersionId(); }
   focus(): void { this.syncTextarea(); this.input.focus(); }
   layout(): void {

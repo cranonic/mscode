@@ -6,6 +6,7 @@ import type {
   RenderMetrics,
 } from '../render/CanvasRenderer';
 import type { MonoEditorTheme } from '../api/types';
+import type { TokenizationSupport } from '../language/TokenizationSupport';
 
 export class ViewController {
   scrollTop = 0;
@@ -21,6 +22,7 @@ export class ViewController {
   private getTheme: () => MonoEditorTheme;
   private showLineNumbers: () => boolean;
   private overscan: number;
+  private tokenization: TokenizationSupport | null;
   private paintRaf = 0;
 
   constructor(
@@ -31,6 +33,7 @@ export class ViewController {
     getTheme: () => MonoEditorTheme,
     showLineNumbers: () => boolean,
     overscan: number,
+    tokenization: TokenizationSupport | null = null,
   ) {
     this.model = model;
     this.selection = selection;
@@ -39,6 +42,7 @@ export class ViewController {
     this.getTheme = getTheme;
     this.showLineNumbers = showLineNumbers;
     this.overscan = overscan;
+    this.tokenization = tokenization;
   }
 
   /** Effective gutter width (0 when line numbers are hidden). */
@@ -127,6 +131,9 @@ export class ViewController {
       theme: this.getTheme(),
       showLineNumbers: this.showLineNumbers(),
       overscan: this.overscan,
+      getLineTokens: this.tokenization
+        ? (ln) => this.tokenization!.getLineTokens(this.model, ln)
+        : undefined,
       freeHandle: this.freeHandle,
     });
   }

@@ -1,6 +1,8 @@
 import type { TextModel } from '../core/TextModel';
 import type { SelectionState } from '../core/Selection';
 import type { MonoEditorTheme } from '../api/types';
+import type { MonoToken } from '../language/tokenTypes';
+import { DEFAULT_TOKEN_COLORS } from '../language/tokenTypes';
 
 export interface RenderMetrics {
   fontFamily: string;
@@ -98,12 +100,15 @@ export class CanvasRenderer {
     overscan: number;
     showTeardrops?: boolean;
     freeHandle?: FreeHandleVisual | null;
+    /** Optional syntax tokens for a line (1-based). Empty → plain foreground. */
+    getLineTokens?: (lineNumber: number) => MonoToken[];
   }): void {
     const {
       model, selection, scrollTop, scrollLeft, cssWidth, cssHeight,
       metrics, theme, showLineNumbers, overscan,
       showTeardrops = true,
       freeHandle = null,
+      getLineTokens,
     } = opts;
 
     const { ctx } = this;
@@ -161,8 +166,33 @@ export class CanvasRenderer {
         ctx.fillRect(x1, y, w || 4, lineHeight);
       }
 
-      ctx.fillStyle = theme.foreground;
-      ctx.fillText(content, textX0, y + (lineHeight - fontSize) / 2);
+      {
+        const textY = y + (lineHeight - fontSize) / 2;
+        const tokens = getLineTokens?.(line) ?? [];
+        if (!tokens.length) {
+          ctx.fillStyle = theme.foreground;
+          ctx.fillText(content, textX0, textY);
+        } else {
+          const colors = { ...DEFAULT_TOKEN_COLORS, ...(theme.tokenColors ?? {}) };
+          // fill gaps with plain
+          let col = 1;
+          const emit = (from: number, to: number, type: string) => {
+            if (to <= from) return;
+            const slice = content.slice(from - 1, to - 1);
+            if (!slice) return;
+            const prefix = content.slice(0, from - 1);
+            const x = textX0 + ctx.measureText(prefix).width;
+            ctx.fillStyle = (colors as any)[type] ?? theme.foreground;
+            ctx.fillText(slice, x, textY);
+          };
+          for (const tok of tokens) {
+            if (tok.startColumn > col) emit(col, tok.startColumn, 'plain');
+            emit(tok.startColumn, tok.endColumn, tok.type);
+            col = Math.max(col, tok.endColumn);
+          }
+          if (col <= content.length) emit(col, content.length + 1, 'plain');
+        }
+      }
 
       if (line === caretLine && !hasSelection) {
         const prefix = content.slice(0, Math.max(0, caretCol - 1));
