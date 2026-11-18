@@ -293,7 +293,7 @@ export function layoutStickyLines(
 ): StickyRenderLine[] {
   const f = new IndentScopeFinder(
     // reconstruct is impossible without model — treat stickies as fixed slots
-    { getLineCount: () => 1, getLineContent: () => '' } as TextModel,
+    { getLineCount: () => 1, getLineContent: () => '' } as unknown as TextModel,
   );
   void f;
   void scrollTop;

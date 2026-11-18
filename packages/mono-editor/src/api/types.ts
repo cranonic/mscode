@@ -41,6 +41,11 @@ export interface IMonoEditor {
   setLanguageId(id: string): void;
   focus(): void;
   layout(): void;
+  setContextMenuItems?(items: import('../menu/types').MonoMenuItem[]): void;
+  addContextMenuItem?(item: import('../menu/types').MonoMenuItem): void;
+  removeContextMenuItem?(id: string): void;
+  setContextMenuStyle?(style: import('../menu/types').MonoMenuStyle): void;
+  hideContextMenu?(): void;
   setStickyScroll?(opts: import('../view/StickyScroll').MonoStickyScrollOptions): void;
   getModelVersionId(): number;
   onDidChangeModelContent(listener: (e: MonoContentChangeEvent) => void): MonoDisposable;

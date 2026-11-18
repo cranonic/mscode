@@ -14,6 +14,8 @@ import {
 } from './types';
 import { TokenizationSupport } from '../language/TokenizationSupport';
 import { registerDefaultLanguages } from '../language/registerDefaults';
+import { ContextMenuController } from '../menu/ContextMenuController';
+import type { MonoMenuItem, MonoMenuStyle } from '../menu/types';
 
 export class MonoEditor implements IMonoEditor {
   private host: HTMLElement;
@@ -35,6 +37,7 @@ export class MonoEditor implements IMonoEditor {
   private disposed = false;
   private unsubModel: () => void;
   private tokenization = new TokenizationSupport();
+  private menu!: ContextMenuController;
 
   constructor(host: HTMLElement, options: MonoEditorOptions = {}) {
     registerDefaultLanguages();
@@ -91,6 +94,20 @@ export class MonoEditor implements IMonoEditor {
       this.emitContent();
     });
 
+    this.menu = new ContextMenuController(
+      this.root,
+      this.model,
+      this.selection,
+      () => {
+        this.view.ensureCaretVisible();
+        this.syncTextarea();
+        this.view.paint();
+        this.emitContent();
+      },
+      () => this.focus(),
+    );
+
+
     this.pointer = new PointerController(
       this.root,
       this.model,
@@ -99,17 +116,24 @@ export class MonoEditor implements IMonoEditor {
       () => this.metrics(),
       () => this.renderer.lastTeardrops,
       (kind) => {
+        if (kind === 'scroll') {
+          this.menu?.hide();
+          return;
+        }
         if (kind === 'tap') {
+          this.menu?.hide();
           this.syncTextarea();
           this.input.focus();
           this.view.paint();
         } else if (kind === 'select' || kind === 'handle') {
           this.syncTextarea();
           this.view.paint();
+          if (kind === 'select' && !this.selection.isEmpty) {
+            this.showSelectionMenu();
+          }
         }
       },
     );
-
     this.unsubModel = this.model.onDidChange(() => {
       this.tokenization.invalidate();
       this.view.invalidateScopes();
@@ -145,6 +169,26 @@ export class MonoEditor implements IMonoEditor {
   }
   getModelVersionId(): number { return this.model.getVersionId(); }
   focus(): void { this.syncTextarea(); this.input.focus(); }
+  setContextMenuItems(items: MonoMenuItem[]): void {
+    this.menu.setItems(items);
+  }
+
+  addContextMenuItem(item: MonoMenuItem): void {
+    this.menu.addItem(item);
+  }
+
+  removeContextMenuItem(id: string): void {
+    this.menu.removeItem(id);
+  }
+
+  setContextMenuStyle(style: MonoMenuStyle): void {
+    this.menu.setStyle(style);
+  }
+
+  hideContextMenu(): void {
+    this.menu.hide();
+  }
+
   setStickyScroll(opts: import('../view/StickyScroll').MonoStickyScrollOptions): void {
     this.view.setStickyScroll(opts);
   }
@@ -166,6 +210,7 @@ export class MonoEditor implements IMonoEditor {
     this.ro?.disconnect();
     this.root.removeEventListener('wheel', this.onWheel);
     this.pointer.dispose();
+    this.menu.dispose();
     this.input.dispose();
     this.contentListeners.clear();
     this.root.remove();
@@ -186,6 +231,22 @@ export class MonoEditor implements IMonoEditor {
       paddingLeft: 8,
       paddingTop: 4,
     };
+  }
+
+  
+  private showSelectionMenu(): void {
+    if (!this.menu) return;
+    const m = this.metrics();
+    const line = this.selection.active.lineNumber;
+    const col = this.selection.active.column;
+    const x =
+      (this.lineNumbers ? m.gutterWidth : 0) +
+      m.paddingLeft +
+      Math.max(0, col - 1) * m.charWidth -
+      this.view.scrollLeft;
+    const y =
+      m.paddingTop + (line - 1) * m.lineHeight - this.view.scrollTop;
+    this.menu.showAt(Math.max(0, x), Math.max(0, y));
   }
 
   private syncTextarea(): void {

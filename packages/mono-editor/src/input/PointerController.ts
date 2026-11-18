@@ -424,7 +424,7 @@ export class PointerController {
       const stickyHit = this.view.hitTestSticky(localX, localY);
       if (stickyHit) {
         e.preventDefault();
-        this.view.revealStickyLine(stickyHit.lineNumber, stickyHit.index);
+        this.view.revealStickyLine(stickyHit.lineNumber, stickyHit.index, localX);
         this.onInteract('tap');
         this.active = false;
         this.pointerId = null;
@@ -557,7 +557,9 @@ export class PointerController {
     this.clearLongPress();
     this.stopAutoScroll();
 
+    const wasHandle = this.handleDrag != null;
     const wasHandleDrag = Boolean(this.handleDrag && this.handleMoved);
+    const wasHandleTap = Boolean(this.handleDrag && !this.handleMoved);
     const wasSelecting = (this.selecting && !this.handleDrag) || this.longPressFired;
     const wasScrolling = this.scrolling;
     const axis = this.scrollAxis;
@@ -577,6 +579,14 @@ export class PointerController {
     if (wasHandleDrag) {
       this.view.freeHandle = null;
       this.view.ensureCaretVisible();
+      this.view.schedulePaint();
+      this.onInteract('handle');
+      return;
+    }
+
+    // Tap on start/end teardrop without drag: keep selection (don't collapse to caret)
+    if (wasHandleTap) {
+      this.view.freeHandle = null;
       this.view.schedulePaint();
       this.onInteract('handle');
       return;

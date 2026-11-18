@@ -227,6 +227,26 @@ export class CanvasRenderer {
     }
 
 
+    this.lastTeardrops = [];
+    if (showTeardrops) {
+      const dropColor = theme.caret || '#007acc';
+      if (hasSelection) {
+        this.paintTeardropAt(
+          range.startLine, range.startCol, 'start',
+          model, metrics, scrollTop, scrollLeft, showLineNumbers, dropColor, freeHandle,
+        );
+        this.paintTeardropAt(
+          range.endLine, range.endCol, 'end',
+          model, metrics, scrollTop, scrollLeft, showLineNumbers, dropColor, freeHandle,
+        );
+      } else {
+        this.paintTeardropAt(
+          caretLine, caretCol, 'cursor',
+          model, metrics, scrollTop, scrollLeft, showLineNumbers, dropColor, freeHandle,
+        );
+      }
+    }
+
     // --- Sticky scroll overlay (outer stickies always paint on top) ---
     if (stickyLines.length) {
       const last = stickyLines[stickyLines.length - 1]!;
@@ -325,26 +345,6 @@ export class CanvasRenderer {
         }
       }
       ctx.restore();
-    }
-
-    this.lastTeardrops = [];
-    if (showTeardrops) {
-      const dropColor = theme.caret || '#007acc';
-      if (hasSelection) {
-        this.paintTeardropAt(
-          range.startLine, range.startCol, 'start',
-          model, metrics, scrollTop, scrollLeft, showLineNumbers, dropColor, freeHandle,
-        );
-        this.paintTeardropAt(
-          range.endLine, range.endCol, 'end',
-          model, metrics, scrollTop, scrollLeft, showLineNumbers, dropColor, freeHandle,
-        );
-      } else {
-        this.paintTeardropAt(
-          caretLine, caretCol, 'cursor',
-          model, metrics, scrollTop, scrollLeft, showLineNumbers, dropColor, freeHandle,
-        );
-      }
     }
   }
 

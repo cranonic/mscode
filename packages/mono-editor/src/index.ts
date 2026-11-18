@@ -27,3 +27,6 @@ export type {
 
 export type { MonoStickyScrollOptions, StickyLine, StickyRenderLine } from './view/StickyScroll';
 export { DEFAULT_STICKY_SCROLL } from './view/StickyScroll';
+
+export type { MonoMenuItem, MonoMenuItemId, MonoMenuStyle, MonoMenuContext } from './menu/types';
+export { MENU_ICONS, DEFAULT_MENU_STYLE } from './menu/types';

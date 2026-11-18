@@ -213,14 +213,25 @@ export class ViewController {
    * VS Code / Acode: scroll so `lineNumber` sits exactly in sticky slot `index`
    * (the sticky header appears to stay put) and place caret on that line.
    */
-  revealStickyLine(lineNumber: number, index: number): void {
+  /**
+   * Scroll so header stays in sticky slot `index`, caret at exact column from localX
+   * (click on `function te|st()` → cursor between e and s).
+   */
+  revealStickyLine(lineNumber: number, index: number, localX?: number): void {
     const m = this.getMetrics();
     const line = Math.max(1, Math.min(this.model.getLineCount(), lineNumber));
-    // docY - scrollTop = index * lineHeight  →  scrollTop = docY - index * lh
     const docY = m.paddingTop + (line - 1) * m.lineHeight;
     this.scrollTop = Math.max(0, docY - index * m.lineHeight);
     this.clampScroll();
-    this.selection.setCaret(line, 1);
+
+    let col = 1;
+    if (localX != null) {
+      const textX = localX - this.contentLeft - m.paddingLeft + this.scrollLeft;
+      const content = this.model.getLineContent(line);
+      col = Math.floor(textX / Math.max(1, m.charWidth)) + 1;
+      col = Math.max(1, Math.min(content.length + 1, col));
+    }
+    this.selection.setCaret(line, col);
     this.paint();
   }
 
