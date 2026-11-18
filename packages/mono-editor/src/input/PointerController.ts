@@ -416,6 +416,22 @@ export class PointerController {
       this.clearSingleTap();
     }
 
+    // Sticky header click → navigate (don't treat as editor body click)
+    {
+      const rect = this.root.getBoundingClientRect();
+      const localX = e.clientX - rect.left;
+      const localY = e.clientY - rect.top;
+      const stickyHit = this.view.hitTestSticky(localX, localY);
+      if (stickyHit) {
+        e.preventDefault();
+        this.view.revealStickyLine(stickyHit.lineNumber, stickyHit.index);
+        this.onInteract('tap');
+        this.active = false;
+        this.pointerId = null;
+        return;
+      }
+    }
+
     const hit = this.pendingDouble ? null : this.hitTeardrop(e.clientX, e.clientY);
     if (hit) {
       this.handleDrag = hit.type;

@@ -9,8 +9,8 @@ import type { MonoEditorTheme } from '../api/types';
 import type { TokenizationSupport } from '../language/TokenizationSupport';
 import {
   DEFAULT_STICKY_SCROLL,
-  computeIndentationStickyLines,
-  layoutStickyLines,
+  IndentScopeFinder,
+  layoutStickyForScroll,
   type MonoStickyScrollOptions,
   type StickyRenderLine,
 } from './StickyScroll';
@@ -31,6 +31,10 @@ export class ViewController {
   private overscan: number;
   private tokenization: TokenizationSupport | null;
   private stickyOpts: Required<MonoStickyScrollOptions>;
+  private scopeFinder: IndentScopeFinder;
+  /** Last laid-out sticky rows (for hit-test / click-to-navigate). */
+  lastSticky: StickyRenderLine[] = [];
+  lastStickyHeight = 0;
   private paintRaf = 0;
 
   constructor(
@@ -45,6 +49,7 @@ export class ViewController {
     stickyScroll?: MonoStickyScrollOptions,
   ) {
     this.stickyOpts = { ...DEFAULT_STICKY_SCROLL, ...stickyScroll };
+    this.scopeFinder = new IndentScopeFinder(model);
     this.model = model;
     this.selection = selection;
     this.renderer = renderer;
@@ -81,7 +86,12 @@ export class ViewController {
 
   setStickyScroll(opts: MonoStickyScrollOptions): void {
     this.stickyOpts = { ...DEFAULT_STICKY_SCROLL, ...opts };
+    this.scopeFinder.invalidate();
     this.schedulePaint();
+  }
+
+  invalidateScopes(): void {
+    this.scopeFinder.invalidate();
   }
 
   getStickyScrollOptions(): Required<MonoStickyScrollOptions> {
@@ -142,21 +152,20 @@ export class ViewController {
     const metrics = this.getMetrics();
     let stickyLines: StickyRenderLine[] = [];
     if (this.stickyOpts.enabled) {
-      const firstVisible = Math.max(
-        1,
-        Math.floor(renderTop / metrics.lineHeight) + 1,
-      );
-      const raw = computeIndentationStickyLines(
-        this.model,
-        firstVisible,
-        this.stickyOpts.maxLineCount,
-      );
-      stickyLines = layoutStickyLines(
-        raw,
+      this.scopeFinder.sync(this.model);
+      const layout = layoutStickyForScroll(
+        this.scopeFinder,
         renderTop,
         metrics,
+        this.stickyOpts.maxLineCount,
         this.stickyOpts.scrollWithEditor,
       );
+      stickyLines = layout.lines;
+      this.lastSticky = stickyLines;
+      this.lastStickyHeight = layout.height;
+    } else {
+      this.lastSticky = [];
+      this.lastStickyHeight = 0;
     }
 
     this.renderer.paint({
@@ -176,6 +185,43 @@ export class ViewController {
       freeHandle: this.freeHandle,
       stickyLines,
     });
+  }
+
+  /**
+   * Sticky overlay hit-test in root-local CSS coords.
+   * Returns sticky index + lineNumber or null.
+   */
+  hitTestSticky(localX: number, localY: number): { index: number; lineNumber: number } | null {
+    if (!this.lastSticky.length || localY < 0 || localY > this.lastStickyHeight + 2) return null;
+    // Top-most sticky under point wins (outer first in paint order)
+    for (let i = 0; i < this.lastSticky.length; i++) {
+      const s = this.lastSticky[i]!;
+      if (localY >= s.y && localY < s.y + this.getMetrics().lineHeight) {
+        return { index: i, lineNumber: s.lineNumber };
+      }
+    }
+    // Fallback: by slot index
+    const m = this.getMetrics();
+    const idx = Math.floor(localY / m.lineHeight);
+    if (idx >= 0 && idx < this.lastSticky.length) {
+      return { index: idx, lineNumber: this.lastSticky[idx]!.lineNumber };
+    }
+    return null;
+  }
+
+  /**
+   * VS Code / Acode: scroll so `lineNumber` sits exactly in sticky slot `index`
+   * (the sticky header appears to stay put) and place caret on that line.
+   */
+  revealStickyLine(lineNumber: number, index: number): void {
+    const m = this.getMetrics();
+    const line = Math.max(1, Math.min(this.model.getLineCount(), lineNumber));
+    // docY - scrollTop = index * lineHeight  →  scrollTop = docY - index * lh
+    const docY = m.paddingTop + (line - 1) * m.lineHeight;
+    this.scrollTop = Math.max(0, docY - index * m.lineHeight);
+    this.clampScroll();
+    this.selection.setCaret(line, 1);
+    this.paint();
   }
 
   dispose(): void {

@@ -112,6 +112,7 @@ export class MonoEditor implements IMonoEditor {
 
     this.unsubModel = this.model.onDidChange(() => {
       this.tokenization.invalidate();
+      this.view.invalidateScopes();
       this.view.paint();
     });
 

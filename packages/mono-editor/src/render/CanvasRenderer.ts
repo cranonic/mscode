@@ -227,49 +227,75 @@ export class CanvasRenderer {
     }
 
 
-    // --- Sticky scroll overlay (VS Code style) ---
+    // --- Sticky scroll overlay (outer stickies always paint on top) ---
     if (stickyLines.length) {
-      const stickyH = stickyLines.length * lineHeight;
-      // background panel
-      ctx.fillStyle = theme.background;
-      ctx.fillRect(0, 0, cssWidth, Math.min(cssHeight, stickyLines[stickyLines.length - 1]!.yOffset + lineHeight + 2));
-      // bottom shadow edge
-      const edgeY = stickyLines[stickyLines.length - 1]!.yOffset + lineHeight;
-      ctx.fillStyle = 'rgba(0,0,0,0.35)';
-      ctx.fillRect(0, edgeY, cssWidth, 2);
-      ctx.fillStyle = 'rgba(0,0,0,0.12)';
-      ctx.fillRect(0, edgeY + 2, cssWidth, 2);
+      const last = stickyLines[stickyLines.length - 1]!;
+      const stackBottom = Math.max(
+        ...stickyLines.map((s) => s.y + lineHeight),
+        stickyLines.length * lineHeight,
+      );
+      ctx.save();
+      // Entire sticky stack clip
+      ctx.beginPath();
+      ctx.rect(0, 0, cssWidth, Math.max(0, stackBottom + 4));
+      ctx.clip();
 
-      for (const s of stickyLines) {
+      // Innermost first → outermost last (z-order: upper sticky stays above)
+      for (let i = stickyLines.length - 1; i >= 0; i--) {
+        const s = stickyLines[i]!;
         const line = s.lineNumber;
-        const y = s.yOffset;
-        if (y + lineHeight < 0 || y > cssHeight) continue;
+        const y = s.y;
+        if (y + lineHeight < -2 || y > cssHeight) continue;
         const content = model.getLineContent(line);
         const textY = y + (lineHeight - fontSize) / 2;
-        // gutter
+        const alpha = s.visibility ?? 1;
+
+        // Each sticky row is clipped so a pushed lower row cannot overpaint
+        // rows above it (slot floor = i * lineHeight for unpushed geometry).
+        ctx.save();
+        const slotFloor = i * lineHeight;
+        const clipTop = Math.min(y, slotFloor);
+        // outer rows: hard floor at their slot; pushed row may go above its
+        // own slot but must stop under the previous sticky's bottom.
+        const minY = i === 0 ? y : Math.max(y, stickyLines[i - 1]!.y + lineHeight);
+        // Simpler accurate rule: never draw above previous sticky bottom when i>0
+        let topClip = y;
+        if (i > 0) {
+          const prevBottom = stickyLines[i - 1]!.y + lineHeight;
+          topClip = Math.max(y, prevBottom);
+        }
+        if (topClip >= y + lineHeight) {
+          ctx.restore();
+          continue; // fully covered by outer sticky
+        }
+        ctx.beginPath();
+        ctx.rect(0, topClip, cssWidth, y + lineHeight - topClip);
+        ctx.clip();
+
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = theme.background;
+        ctx.fillRect(0, y, cssWidth, lineHeight);
+
         if (showLineNumbers) {
           ctx.fillStyle = theme.gutterBackground;
           ctx.fillRect(0, y, gutterWidth, lineHeight);
+          ctx.globalAlpha = alpha;
           ctx.fillStyle = theme.gutterForeground;
           ctx.textAlign = 'right';
           ctx.fillText(String(line), gutterWidth - 8, textY);
           ctx.textAlign = 'left';
+          ctx.globalAlpha = 1;
         }
-        // line bg
-        ctx.fillStyle = theme.background;
-        ctx.fillRect(contentLeft, y, cssWidth - contentLeft, lineHeight);
-        // tokens / text
+
         const tokens = getLineTokens?.(line) ?? [];
         const textX0s = contentLeft + paddingLeft - scrollLeft;
         const cw = metrics.charWidth;
+        ctx.globalAlpha = alpha;
         if (!tokens.length) {
-          ctx.globalAlpha = s.visibility;
           ctx.fillStyle = theme.foreground;
           ctx.fillText(content, textX0s, textY);
-          ctx.globalAlpha = 1;
         } else {
           const colors = { ...DEFAULT_TOKEN_COLORS, ...(theme.tokenColors ?? {}) };
-          ctx.globalAlpha = s.visibility;
           let col = 1;
           const emit = (from: number, to: number, type: string) => {
             if (to <= from) return;
@@ -284,9 +310,21 @@ export class CanvasRenderer {
             col = Math.max(col, tok.endColumn);
           }
           if (col <= content.length) emit(col, content.length + 1, 'plain');
-          ctx.globalAlpha = 1;
+        }
+        ctx.globalAlpha = 1;
+        ctx.restore();
+      }
+
+      // Shadow under the visual stack bottom
+      const edgeY = Math.max(...stickyLines.map((s) => s.y + lineHeight));
+      if (edgeY > 0) {
+        const alphas = [0.55, 0.3, 0.14, 0.05];
+        for (let i = 0; i < alphas.length; i++) {
+          ctx.fillStyle = `rgba(0,0,0,${alphas[i]})`;
+          ctx.fillRect(0, edgeY + i, cssWidth, 1);
         }
       }
+      ctx.restore();
     }
 
     this.lastTeardrops = [];

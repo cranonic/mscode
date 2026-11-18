@@ -13,7 +13,6 @@ import { StartPage } from './components/StartPage/StartPage';
 import { Sidebar } from './components/SideBar/Sidebar';
 import { TopBar } from './components/TopBar/TopBar';
 
-import { Breadcrumbs } from '@/features/editor/components/BreadCrumb/Breadcrumbs';
 import { ContextMenu } from '@/ui/components/ContextMenu';
 import { CommandPalette } from '@/ui/components/CommandPalette';
 import { NotificationUI } from '@/ui/components/Notification/NotificationUI';
@@ -163,7 +162,6 @@ export const MainLayout: React.FC<{ children?: React.ReactNode }> = ({ children 
 
         <div className="content-area" style={{ position: 'relative', zIndex: 1 }} onClick={handleEditorClick}>
           <TopBar />
-          <Breadcrumbs />
           <article className="editor-view">
             {tabs.length > 0 ? (
               // Iterate in FIXED mount order (append-only). Tab-bar order / LRU
