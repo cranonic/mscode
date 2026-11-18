@@ -194,7 +194,7 @@ export class PointerController {
       y: clientY - rect.top - this.handleLift,
     };
 
-    if (immediate) this.view.paint();
+    if (immediate) this.view.schedulePaint();
     else this.view.schedulePaint();
     this.onInteract('handle');
   }
@@ -456,7 +456,7 @@ export class PointerController {
         } catch {
           /* */
         }
-        this.view.paint();
+        this.view.schedulePaint();
         this.onInteract('select');
       }, PointerController.LONG_MS);
     }
@@ -561,7 +561,7 @@ export class PointerController {
     if (wasHandleDrag) {
       this.view.freeHandle = null;
       this.view.ensureCaretVisible();
-      this.view.paint();
+      this.view.schedulePaint();
       this.onInteract('handle');
       return;
     }
@@ -594,7 +594,7 @@ export class PointerController {
       if (pendingDouble || nearLast) {
         this.clearSingleTap();
         this.selectWordAt(e.clientX, e.clientY);
-        this.view.paint();
+        this.view.schedulePaint();
         this.onInteract('select');
         this.onInteract('tap');
         this.lastTapT = 0;
@@ -609,7 +609,7 @@ export class PointerController {
       this.clearSingleTap();
       const pos = this.hitTest(e.clientX, e.clientY);
       this.selection.setCaret(pos.lineNumber, pos.column);
-      this.view.paint();
+      this.view.schedulePaint();
       this.onInteract('tap');
       this.lastTapT = now;
       this.lastTapX = e.clientX;

@@ -3,6 +3,7 @@ import type { SelectionState } from '../core/Selection';
 import type { MonoEditorTheme } from '../api/types';
 import type { MonoToken } from '../language/tokenTypes';
 import { DEFAULT_TOKEN_COLORS } from '../language/tokenTypes';
+import type { StickyRenderLine } from '../view/StickyScroll';
 
 export interface RenderMetrics {
   fontFamily: string;
@@ -102,6 +103,7 @@ export class CanvasRenderer {
     freeHandle?: FreeHandleVisual | null;
     /** Optional syntax tokens for a line (1-based). Empty → plain foreground. */
     getLineTokens?: (lineNumber: number) => MonoToken[];
+    stickyLines?: StickyRenderLine[];
   }): void {
     const {
       model, selection, scrollTop, scrollLeft, cssWidth, cssHeight,
@@ -109,6 +111,7 @@ export class CanvasRenderer {
       showTeardrops = true,
       freeHandle = null,
       getLineTokens,
+      stickyLines = [],
     } = opts;
 
     const { ctx } = this;
@@ -160,8 +163,8 @@ export class CanvasRenderer {
         if (line === range.endLine) toCol = range.endCol;
         const prefix = content.slice(0, Math.max(0, fromCol - 1));
         const mid = content.slice(Math.max(0, fromCol - 1), Math.max(0, toCol - 1));
-        const x1 = textX0 + ctx.measureText(prefix).width;
-        const w = Math.max(ctx.measureText(mid).width, line === range.endLine ? 2 : 0);
+        const x1 = textX0 + Math.max(0, fromCol - 1) * metrics.charWidth;
+        const w = Math.max((toCol - fromCol) * metrics.charWidth, line === range.endLine ? 2 : 0);
         ctx.fillStyle = theme.selection;
         ctx.fillRect(x1, y, w || 4, lineHeight);
       }
@@ -174,14 +177,14 @@ export class CanvasRenderer {
           ctx.fillText(content, textX0, textY);
         } else {
           const colors = { ...DEFAULT_TOKEN_COLORS, ...(theme.tokenColors ?? {}) };
-          // fill gaps with plain
+          const cw = metrics.charWidth;
           let col = 1;
           const emit = (from: number, to: number, type: string) => {
             if (to <= from) return;
             const slice = content.slice(from - 1, to - 1);
             if (!slice) return;
-            const prefix = content.slice(0, from - 1);
-            const x = textX0 + ctx.measureText(prefix).width;
+            // Monospace: use charWidth — avoids measureText jitter while scrolling
+            const x = textX0 + (from - 1) * cw;
             ctx.fillStyle = (colors as any)[type] ?? theme.foreground;
             ctx.fillText(slice, x, textY);
           };
@@ -196,7 +199,7 @@ export class CanvasRenderer {
 
       if (line === caretLine && !hasSelection) {
         const prefix = content.slice(0, Math.max(0, caretCol - 1));
-        const cx = textX0 + ctx.measureText(prefix).width;
+        const cx = textX0 + Math.max(0, caretCol - 1) * metrics.charWidth;
         ctx.fillStyle = theme.caret;
         ctx.fillRect(cx, y + 2, 2, lineHeight - 4);
       }
@@ -221,6 +224,69 @@ export class CanvasRenderer {
       ctx.lineTo(gutterWidth - 0.5, cssHeight);
       ctx.stroke();
       ctx.globalAlpha = 1;
+    }
+
+
+    // --- Sticky scroll overlay (VS Code style) ---
+    if (stickyLines.length) {
+      const stickyH = stickyLines.length * lineHeight;
+      // background panel
+      ctx.fillStyle = theme.background;
+      ctx.fillRect(0, 0, cssWidth, Math.min(cssHeight, stickyLines[stickyLines.length - 1]!.yOffset + lineHeight + 2));
+      // bottom shadow edge
+      const edgeY = stickyLines[stickyLines.length - 1]!.yOffset + lineHeight;
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(0, edgeY, cssWidth, 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.fillRect(0, edgeY + 2, cssWidth, 2);
+
+      for (const s of stickyLines) {
+        const line = s.lineNumber;
+        const y = s.yOffset;
+        if (y + lineHeight < 0 || y > cssHeight) continue;
+        const content = model.getLineContent(line);
+        const textY = y + (lineHeight - fontSize) / 2;
+        // gutter
+        if (showLineNumbers) {
+          ctx.fillStyle = theme.gutterBackground;
+          ctx.fillRect(0, y, gutterWidth, lineHeight);
+          ctx.fillStyle = theme.gutterForeground;
+          ctx.textAlign = 'right';
+          ctx.fillText(String(line), gutterWidth - 8, textY);
+          ctx.textAlign = 'left';
+        }
+        // line bg
+        ctx.fillStyle = theme.background;
+        ctx.fillRect(contentLeft, y, cssWidth - contentLeft, lineHeight);
+        // tokens / text
+        const tokens = getLineTokens?.(line) ?? [];
+        const textX0s = contentLeft + paddingLeft - scrollLeft;
+        const cw = metrics.charWidth;
+        if (!tokens.length) {
+          ctx.globalAlpha = s.visibility;
+          ctx.fillStyle = theme.foreground;
+          ctx.fillText(content, textX0s, textY);
+          ctx.globalAlpha = 1;
+        } else {
+          const colors = { ...DEFAULT_TOKEN_COLORS, ...(theme.tokenColors ?? {}) };
+          ctx.globalAlpha = s.visibility;
+          let col = 1;
+          const emit = (from: number, to: number, type: string) => {
+            if (to <= from) return;
+            const slice = content.slice(from - 1, to - 1);
+            if (!slice) return;
+            ctx.fillStyle = (colors as any)[type] ?? theme.foreground;
+            ctx.fillText(slice, textX0s + (from - 1) * cw, textY);
+          };
+          for (const tok of tokens) {
+            if (tok.startColumn > col) emit(col, tok.startColumn, 'plain');
+            emit(tok.startColumn, tok.endColumn, tok.type);
+            col = Math.max(col, tok.endColumn);
+          }
+          if (col <= content.length) emit(col, content.length + 1, 'plain');
+          ctx.globalAlpha = 1;
+        }
+      }
     }
 
     this.lastTeardrops = [];

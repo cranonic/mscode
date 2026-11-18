@@ -7,6 +7,13 @@ import type {
 } from '../render/CanvasRenderer';
 import type { MonoEditorTheme } from '../api/types';
 import type { TokenizationSupport } from '../language/TokenizationSupport';
+import {
+  DEFAULT_STICKY_SCROLL,
+  computeIndentationStickyLines,
+  layoutStickyLines,
+  type MonoStickyScrollOptions,
+  type StickyRenderLine,
+} from './StickyScroll';
 
 export class ViewController {
   scrollTop = 0;
@@ -23,6 +30,7 @@ export class ViewController {
   private showLineNumbers: () => boolean;
   private overscan: number;
   private tokenization: TokenizationSupport | null;
+  private stickyOpts: Required<MonoStickyScrollOptions>;
   private paintRaf = 0;
 
   constructor(
@@ -34,7 +42,9 @@ export class ViewController {
     showLineNumbers: () => boolean,
     overscan: number,
     tokenization: TokenizationSupport | null = null,
+    stickyScroll?: MonoStickyScrollOptions,
   ) {
+    this.stickyOpts = { ...DEFAULT_STICKY_SCROLL, ...stickyScroll };
     this.model = model;
     this.selection = selection;
     this.renderer = renderer;
@@ -67,6 +77,15 @@ export class ViewController {
 
   clampScrollPublic(): void {
     this.clampScroll();
+  }
+
+  setStickyScroll(opts: MonoStickyScrollOptions): void {
+    this.stickyOpts = { ...DEFAULT_STICKY_SCROLL, ...opts };
+    this.schedulePaint();
+  }
+
+  getStickyScrollOptions(): Required<MonoStickyScrollOptions> {
+    return this.stickyOpts;
   }
 
   ensureCaretVisible(): void {
@@ -120,6 +139,26 @@ export class ViewController {
     const renderTop = Math.round(this.scrollTop * dpr) / dpr;
     const renderLeft = Math.round(this.scrollLeft * dpr) / dpr;
 
+    const metrics = this.getMetrics();
+    let stickyLines: StickyRenderLine[] = [];
+    if (this.stickyOpts.enabled) {
+      const firstVisible = Math.max(
+        1,
+        Math.floor(renderTop / metrics.lineHeight) + 1,
+      );
+      const raw = computeIndentationStickyLines(
+        this.model,
+        firstVisible,
+        this.stickyOpts.maxLineCount,
+      );
+      stickyLines = layoutStickyLines(
+        raw,
+        renderTop,
+        metrics,
+        this.stickyOpts.scrollWithEditor,
+      );
+    }
+
     this.renderer.paint({
       model: this.model,
       selection: this.selection,
@@ -127,7 +166,7 @@ export class ViewController {
       scrollLeft: renderLeft,
       cssWidth: this.cssWidth,
       cssHeight: this.cssHeight,
-      metrics: this.getMetrics(),
+      metrics,
       theme: this.getTheme(),
       showLineNumbers: this.showLineNumbers(),
       overscan: this.overscan,
@@ -135,6 +174,7 @@ export class ViewController {
         ? (ln) => this.tokenization!.getLineTokens(this.model, ln)
         : undefined,
       freeHandle: this.freeHandle,
+      stickyLines,
     });
   }
 

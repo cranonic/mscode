@@ -24,3 +24,6 @@ export type {
   RegexRule,
   RegexProviderOptions,
 } from './language';
+
+export type { MonoStickyScrollOptions, StickyLine, StickyRenderLine } from './view/StickyScroll';
+export { DEFAULT_STICKY_SCROLL } from './view/StickyScroll';

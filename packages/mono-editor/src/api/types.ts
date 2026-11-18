@@ -24,6 +24,8 @@ export interface MonoEditorOptions {
   lineNumbers?: MonoLineNumbers;
   theme?: Partial<MonoEditorTheme>;
   overscan?: number;
+  /** VS Code / Monaco sticky scroll */
+  stickyScroll?: import('../view/StickyScroll').MonoStickyScrollOptions;
 }
 
 export interface MonoContentChangeEvent {
@@ -39,6 +41,7 @@ export interface IMonoEditor {
   setLanguageId(id: string): void;
   focus(): void;
   layout(): void;
+  setStickyScroll?(opts: import('../view/StickyScroll').MonoStickyScrollOptions): void;
   getModelVersionId(): number;
   onDidChangeModelContent(listener: (e: MonoContentChangeEvent) => void): MonoDisposable;
   dispose(): void;

@@ -81,6 +81,7 @@ export class MonoEditor implements IMonoEditor {
       () => this.lineNumbers,
       this.overscan,
       this.tokenization,
+      options.stickyScroll,
     );
 
     this.input = new InputController(this.root, this.model, this.selection, () => {
@@ -143,6 +144,10 @@ export class MonoEditor implements IMonoEditor {
   }
   getModelVersionId(): number { return this.model.getVersionId(); }
   focus(): void { this.syncTextarea(); this.input.focus(); }
+  setStickyScroll(opts: import('../view/StickyScroll').MonoStickyScrollOptions): void {
+    this.view.setStickyScroll(opts);
+  }
+
   layout(): void {
     if (this.disposed) return;
     const rect = this.root.getBoundingClientRect();

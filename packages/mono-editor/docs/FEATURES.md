@@ -54,3 +54,23 @@ language/
   registerDefaults.ts
   providers/*            — js/ts/json/css/html/python
 ```
+
+## Sticky scroll (VS Code / Monaco compatible)
+```ts
+createMonoEditor(host, {
+  stickyScroll: {
+    enabled: true,
+    maxLineCount: 5,
+    defaultModel: 'indentationModel',
+    scrollWithEditor: true, // push-away when source line meets sticky
+  },
+});
+editor.setStickyScroll({ enabled: false });
+```
+Indentation model mirrors VS Code fallback (no LSP required).
+Outline model hook reserved via same options field.
+
+## Scroll smoothness
+- rAF-coalesced paints during pointer move
+- DPR pixel-snapped scrollTop/Left for render
+- Monospace positions via charWidth (no measureText during scroll)
