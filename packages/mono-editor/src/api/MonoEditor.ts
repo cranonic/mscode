@@ -175,16 +175,32 @@ export class MonoEditor implements IMonoEditor {
           return;
         }
         if (kind === 'tap') {
+          // Plain caret placement — no menu (menu only on teardrop handleTap)
           this.menu?.hide();
           this.syncTextarea();
           this.input.focus();
           this.view.paint();
-        } else if (kind === 'select' || kind === 'handle') {
+        } else if (kind === 'handle') {
+          // Teardrop drag / cursor move — never show menu while moving
+          this.menu?.hide();
           this.syncTextarea();
           this.view.paint();
+        } else if (kind === 'handleTap') {
+          // Single tap on teardrop (cursor or selection handles)
+          this.syncTextarea();
+          this.input.focus();
+          this.view.paint();
+          this.commands?.setContext('editorHasSelection', !this.selection.isEmpty);
+          requestAnimationFrame(() => this.showEditorMenu());
+        } else if (kind === 'select') {
+          // Selection finished (long-press / double-tap / drag-end)
+          this.syncTextarea();
+          this.view.paint();
+          this.commands?.setContext('editorHasSelection', !this.selection.isEmpty);
           if (!this.selection.isEmpty) {
-            // Delay one frame so layout/selection paints first
-            requestAnimationFrame(() => this.showSelectionMenu());
+            requestAnimationFrame(() => this.showEditorMenu());
+          } else {
+            this.menu?.hide();
           }
         }
       },
@@ -580,8 +596,16 @@ export class MonoEditor implements IMonoEditor {
     return this.keybindings.list();
   }
 
-  private showSelectionMenu(): void {
-    if (!this.menu) return;
+  showContextMenu(): void {
+    this.showEditorMenu();
+  }
+
+  /**
+   * Prefer above caret; if flipped below, start under lowest teardrop.
+   * Shown only on teardrop handleTap (or selection complete).
+   */
+  private showEditorMenu(): void {
+    if (!this.menu || this.disposed) return;
     const m = this.metrics();
     const line = this.selection.active.lineNumber;
     const col = this.selection.active.column;
@@ -592,7 +616,19 @@ export class MonoEditor implements IMonoEditor {
       this.view.scrollLeft;
     const y =
       m.paddingTop + (line - 1) * m.lineHeight - this.view.scrollTop;
-    this.menu.showAt(Math.max(0, x), Math.max(0, y));
+
+    let avoidBelowY = y + m.lineHeight + 36;
+    const drops = this.renderer.lastTeardrops;
+    if (drops && drops.length) {
+      for (const d of drops) {
+        avoidBelowY = Math.max(avoidBelowY, d.y + d.h);
+      }
+    }
+
+    this.menu.showAt(Math.max(0, x), Math.max(0, y), {
+      avoidBelowY,
+      gap: 8,
+    });
   }
 
   private syncTextarea(): void {
