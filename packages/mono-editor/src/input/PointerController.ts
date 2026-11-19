@@ -17,7 +17,7 @@ export class PointerController {
   private view: ViewController;
   private getMetrics: () => RenderMetrics;
   private getTeardrops: () => TeardropHit[];
-  private onInteract: (kind: 'tap' | 'scroll' | 'select' | 'handle') => void;
+  private onInteract: (kind: 'tap' | 'scroll' | 'select' | 'handle' | 'handleTap') => void;
   private disposed = false;
 
   private active = false;
@@ -86,7 +86,7 @@ export class PointerController {
     view: ViewController,
     getMetrics: () => RenderMetrics,
     getTeardrops: () => TeardropHit[],
-    onInteract: (kind: 'tap' | 'scroll' | 'select' | 'handle') => void,
+    onInteract: (kind: 'tap' | 'scroll' | 'select' | 'handle' | 'handleTap') => void,
   ) {
     this.root = root;
     this.model = model;
@@ -533,7 +533,7 @@ export class PointerController {
       this.selection.moveActive(pos.lineNumber, pos.column, true);
       this.view.ensureCaretVisible();
       this.view.schedulePaint();
-      this.onInteract('select');
+      // no onInteract while dragging — menu only on gesture end / handleTap
       return;
     }
 
@@ -584,11 +584,11 @@ export class PointerController {
       return;
     }
 
-    // Tap on start/end teardrop without drag: keep selection (don't collapse to caret)
+    // Pure tap on teardrop (no drag) → handleTap → show menu (Paste/Select all or full)
     if (wasHandleTap) {
       this.view.freeHandle = null;
       this.view.schedulePaint();
-      this.onInteract('handle');
+      this.onInteract('handleTap');
       return;
     }
 
@@ -603,7 +603,6 @@ export class PointerController {
 
     if (this.longPressFired) {
       this.onInteract('select');
-      this.onInteract('tap');
       this.lastTapT = 0;
       this.clearSingleTap();
       return;
@@ -622,7 +621,6 @@ export class PointerController {
         this.selectWordAt(e.clientX, e.clientY);
         this.view.schedulePaint();
         this.onInteract('select');
-        this.onInteract('tap');
         this.lastTapT = 0;
         try {
           navigator.vibrate?.(8);
@@ -645,7 +643,6 @@ export class PointerController {
 
     if (wasSelecting) {
       this.onInteract('select');
-      this.onInteract('tap');
     }
   };
 

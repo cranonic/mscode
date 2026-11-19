@@ -18,6 +18,9 @@ import { ContextMenuController } from '../menu/ContextMenuController';
 import type { MonoMenuItem, MonoMenuStyle } from '../menu/types';
 import { KeybindingService, MonoCommands } from '../keybindings/KeybindingService';
 import type { MonoKeybinding } from '../keybindings/KeybindingService';
+import { CommandService } from '../commands/CommandService';
+import { PaletteService } from '../palette/PaletteService';
+import type { MonoAction, MonoCommandHandler, MonoRegisteredCommand } from '../commands/types';
 
 export class MonoEditor implements IMonoEditor {
   private host: HTMLElement;
@@ -41,6 +44,8 @@ export class MonoEditor implements IMonoEditor {
   private tokenization = new TokenizationSupport();
   private menu!: ContextMenuController;
   private keybindings = new KeybindingService();
+  private commands!: CommandService;
+  private palette!: PaletteService;
   private onDocPointerDown: ((e: PointerEvent) => void) | null = null;
   private onRootKeyDown: ((e: KeyboardEvent) => void) | null = null;
 
@@ -123,7 +128,11 @@ export class MonoEditor implements IMonoEditor {
     );
 
     this.input.setKeybindingService(this.keybindings);
+    this.commands = new CommandService(this.keybindings);
+    this.palette = new PaletteService(this.commands);
+    this.commands.setContext('editorReadonly', !!options.readOnly);
     this.registerDefaultKeybindings();
+    this.registerDefaultActions();
 
     // Single capture listener: only when focus is in this editor
     this.onRootKeyDown = (e: KeyboardEvent) => {
@@ -235,6 +244,37 @@ export class MonoEditor implements IMonoEditor {
     this.menu.hide();
   }
 
+  // ── Commands / palette engine (Monaco-level) ──────────────────────────
+  addAction(action: MonoAction): { dispose(): void } {
+    return this.commands.addAction(action);
+  }
+
+  registerCommand(
+    id: string,
+    handler: MonoCommandHandler,
+    meta?: Omit<MonoRegisteredCommand, 'id' | 'handler'>,
+  ): { dispose(): void } {
+    return this.commands.registerCommand(id, handler, meta);
+  }
+
+  executeCommand(id: string, ...args: unknown[]): Promise<unknown> {
+    return this.commands.executeCommand(id, ...args);
+  }
+
+  getCommandsForPalette(filter?: string) {
+    return this.commands.getCommandsForPalette(filter);
+  }
+
+  getPaletteService(): PaletteService {
+    return this.palette;
+  }
+
+  setContext(key: string, value: boolean | string | number): void {
+    this.commands.setContext(key, value);
+  }
+
+
+
   setStickyScroll(opts: import('../view/StickyScroll').MonoStickyScrollOptions): void {
     this.view.setStickyScroll(opts);
   }
@@ -257,6 +297,7 @@ export class MonoEditor implements IMonoEditor {
     this.root.removeEventListener('wheel', this.onWheel);
     this.pointer.dispose();
     this.menu.dispose();
+    this.commands?.dispose();
     if (this.onDocPointerDown) {
       document.removeEventListener('pointerdown', this.onDocPointerDown, true);
       this.onDocPointerDown = null;
@@ -339,6 +380,40 @@ export class MonoEditor implements IMonoEditor {
       entry.forward.startOffset + entry.forward.text.length;
     const pos = this.model.getPositionAt(endOff);
     this.selection.setCaret(pos.lineNumber, pos.column);
+  }
+
+
+  private registerDefaultActions(): void {
+    const titles: Record<string, { title: string; category: string; precondition?: string }> = {
+      undo: { title: 'Undo', category: 'Edit' },
+      redo: { title: 'Redo', category: 'Edit' },
+      'editor.action.clipboardCopyAction': {
+        title: 'Copy',
+        category: 'Edit',
+        precondition: 'editorHasSelection',
+      },
+      'editor.action.clipboardCutAction': {
+        title: 'Cut',
+        category: 'Edit',
+        precondition: 'editorHasSelection',
+      },
+      'editor.action.clipboardPasteAction': { title: 'Paste', category: 'Edit' },
+      'editor.action.selectAll': { title: 'Select All', category: 'Edit' },
+    };
+    for (const [id, meta] of Object.entries(titles)) {
+      this.commands.registerCommand(
+        id,
+        () => {
+          const kb = this.keybindings.list().find((b) => b.id === id);
+          kb?.handler(new KeyboardEvent('keydown'));
+        },
+        {
+          title: meta.title,
+          category: meta.category,
+          precondition: meta.precondition,
+        },
+      );
+    }
   }
 
   private registerDefaultKeybindings(): void {

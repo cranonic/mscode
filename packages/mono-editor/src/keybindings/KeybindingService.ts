@@ -1,25 +1,19 @@
 /**
  * Monaco-inspired keybinding layer.
- *
- * Chord strings: "ctrl+z", "ctrl+shift+z", "ctrl+y", "ctrl+c", ...
- * Matches both `event.key` and `event.code` (KeyZ) so hardware keyboards
- * work consistently in Capacitor / Android WebView.
+ * Chord strings: "ctrl+z", "ctrl+shift+z", "ctrl+y", ...
  */
 
 export type KeybindingWhen = () => boolean;
 
 export interface MonoKeybinding {
   id: string;
-  /** e.g. "ctrl+z" | "ctrl+shift+z" | "ctrl+y" | "ctrl+x" */
   primary: string;
   handler: (e: KeyboardEvent) => void;
   when?: KeybindingWhen;
-  /** Lower = higher priority when same key */
   weight?: number;
 }
 
 function keyTokenFromEvent(e: KeyboardEvent): string {
-  // Prefer event.code for letters (KeyZ → z) — stable across layouts
   const code = e.code || '';
   if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase();
   if (/^Digit[0-9]$/.test(code)) return code.slice(5);
@@ -50,12 +44,25 @@ function keyTokenFromEvent(e: KeyboardEvent): string {
 
 function normalizeKey(e: KeyboardEvent): string {
   const parts: string[] = [];
-  // Treat meta (Cmd) same as ctrl for cross-platform bindings
   if (e.ctrlKey || e.metaKey) parts.push('ctrl');
   if (e.shiftKey) parts.push('shift');
   if (e.altKey) parts.push('alt');
   parts.push(keyTokenFromEvent(e));
   return parts.join('+');
+}
+
+function prettyChord(chord: string): string {
+  return chord
+    .split('+')
+    .map((p) => {
+      const x = p.toLowerCase();
+      if (x === 'ctrl') return 'Ctrl';
+      if (x === 'shift') return 'Shift';
+      if (x === 'alt') return 'Alt';
+      if (x === 'space') return 'Space';
+      return x.length === 1 ? x.toUpperCase() : x[0]!.toUpperCase() + x.slice(1);
+    })
+    .join('+');
 }
 
 export class KeybindingService {
@@ -86,14 +93,16 @@ export class KeybindingService {
     return this.bindings.map((b) => ({ ...b }));
   }
 
-  /** Resolve chord for debugging / tests */
+  /** First primary chord label for command id (palette shortcut column). */
+  getShortcutLabel(commandId: string): string | undefined {
+    const b = this.bindings.find((x) => x.id === commandId);
+    return b ? prettyChord(b.primary) : undefined;
+  }
+
   chordOf(e: KeyboardEvent): string {
     return normalizeKey(e);
   }
 
-  /**
-   * Resolve and run. Returns true if handled (caller should preventDefault).
-   */
   dispatch(e: KeyboardEvent): boolean {
     const chord = normalizeKey(e);
     for (const b of this.bindings) {
@@ -106,7 +115,6 @@ export class KeybindingService {
   }
 }
 
-/** Built-in command ids (Monaco-compatible names where practical) */
 export const MonoCommands = {
   Undo: 'undo',
   Redo: 'redo',
@@ -114,4 +122,5 @@ export const MonoCommands = {
   Cut: 'editor.action.clipboardCutAction',
   Paste: 'editor.action.clipboardPasteAction',
   SelectAll: 'editor.action.selectAll',
+  CommandPalette: 'workbench.action.showCommands',
 } as const;

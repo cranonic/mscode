@@ -33,3 +33,22 @@ export { MENU_ICONS, DEFAULT_MENU_STYLE } from './menu/types';
 
 export { KeybindingService, MonoCommands } from './keybindings/KeybindingService';
 export type { MonoKeybinding } from './keybindings/KeybindingService';
+
+
+// Commands + palette engine (UI stays in app)
+export {
+  CommandService,
+  CommandsRegistry,
+  ContextKeyService,
+} from './commands';
+export type {
+  MonoAction,
+  MonoCommand,
+  MonoCommandHandler,
+  MonoPaletteCommandItem,
+  MonoPaletteItem,
+  MonoPaletteProvider,
+  MonoPaletteProvideContext,
+  MonoRegisteredCommand,
+} from './commands';
+export { PaletteService } from './palette';

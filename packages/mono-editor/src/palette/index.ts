@@ -1,0 +1,1 @@
+export { PaletteService } from './PaletteService';

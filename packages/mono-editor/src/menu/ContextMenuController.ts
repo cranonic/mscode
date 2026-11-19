@@ -5,9 +5,15 @@ import {
   MENU_ICONS,
   type MonoMenuContext,
   type MonoMenuItem,
+  type MonoMenuShowOptions,
   type MonoMenuStyle,
 } from './types';
 
+/**
+ * Default contribution set — Monaco-style:
+ * copy/cut only when there is a selection; paste + selectAll always.
+ * Apps can replace via setItems / addItem / removeItem.
+ */
 function defaultItems(): MonoMenuItem[] {
   return [
     {
@@ -15,6 +21,7 @@ function defaultItems(): MonoMenuItem[] {
       icon: MENU_ICONS.copy,
       label: 'Copy',
       order: 10,
+      visible: (ctx) => ctx.hasSelection(),
       enabled: (ctx) => ctx.hasSelection(),
       action: (ctx) => ctx.copy(),
     },
@@ -23,6 +30,7 @@ function defaultItems(): MonoMenuItem[] {
       icon: MENU_ICONS.cut,
       label: 'Cut',
       order: 20,
+      visible: (ctx) => ctx.hasSelection(),
       enabled: (ctx) => ctx.hasSelection(),
       action: (ctx) => ctx.cut(),
     },
@@ -46,6 +54,7 @@ function defaultItems(): MonoMenuItem[] {
 /**
  * Android-style floating icon toolbar.
  * Expandable: setItems / addItem / removeItem / setStyle.
+ * Placement avoids teardrop handles when avoidBelowY is provided.
  */
 export class ContextMenuController {
   private host: HTMLElement;
@@ -110,7 +119,12 @@ export class ContextMenuController {
     this.open = false;
   }
 
-  showAt(localX: number, localY: number): void {
+  /**
+   * @param localX host-local X (usually caret/selection edge)
+   * @param localY host-local Y of line top (or caret top)
+   * @param opts.avoidBelowY bottom of teardrop cluster — menu starts below this when flipped
+   */
+  showAt(localX: number, localY: number, opts?: MonoMenuShowOptions): void {
     this.hide();
     this.open = true;
     this.el = document.createElement('div');
@@ -119,15 +133,36 @@ export class ContextMenuController {
     this.host.appendChild(this.el);
     this.render();
 
-    // Position after measure
+    // If nothing visible, don't leave an empty bar
+    if (!this.el.childElementCount) {
+      this.hide();
+      return;
+    }
+
     const pad = 8;
+    const gap = opts?.gap ?? 8;
     const rect = this.host.getBoundingClientRect();
     const menu = this.el.getBoundingClientRect();
     let left = localX - menu.width / 2;
-    let top = localY - menu.height - 12;
     left = Math.max(pad, Math.min(left, rect.width - menu.width - pad));
-    if (top < pad) top = localY + 24;
-    top = Math.max(pad, Math.min(top, rect.height - menu.height - pad));
+
+    // Prefer above the caret/line
+    let top = localY - menu.height - gap;
+    if (top < pad) {
+      // Flip below — start AFTER teardrop ends so handles stay tappable
+      const belowFrom =
+        opts?.avoidBelowY != null
+          ? opts.avoidBelowY + gap
+          : localY + 28 + gap; // fallback ~ line + drop
+      top = belowFrom;
+      // If still overflows bottom, clamp but keep as low-overlap as possible
+      if (top + menu.height > rect.height - pad) {
+        top = Math.max(pad, rect.height - menu.height - pad);
+      }
+    } else {
+      top = Math.max(pad, top);
+    }
+
     this.el.style.left = `${left}px`;
     this.el.style.top = `${top}px`;
   }
@@ -188,7 +223,6 @@ export class ContextMenuController {
     try {
       await navigator.clipboard.writeText(text);
     } catch {
-      /* fallback */
       const ta = document.createElement('textarea');
       ta.value = text;
       document.body.appendChild(ta);
@@ -309,7 +343,6 @@ export class ContextMenuController {
           else if (item.id === 'paste') await ctx.paste();
           else if (item.id === 'selectAll') ctx.selectAll();
         } finally {
-          // keep menu after selectAll/copy; hide after cut/paste
           if (item.id === 'cut' || item.id === 'paste') this.hide();
           else this.render();
           this.focusEditor();

@@ -12,6 +12,11 @@ export interface MonoMenuContext {
   focus(): void;
 }
 
+/**
+ * Monaco-style contribution item.
+ * - `visible` / `enabled` can be predicates → dynamic menus
+ * - `addItem` / `removeItem` / `setItems` on the editor API
+ */
 export interface MonoMenuItem {
   id: MonoMenuItemId;
   /** Inline SVG markup (icon only — no text label in default skin) */
@@ -19,6 +24,7 @@ export interface MonoMenuItem {
   /** Optional accessibility label */
   label?: string;
   enabled?: boolean | ((ctx: MonoMenuContext) => boolean);
+  /** Hide entirely (preferred over disabled for copy/cut when empty) */
   visible?: boolean | ((ctx: MonoMenuContext) => boolean);
   /** Custom handler; built-ins have defaults if omitted */
   action?: (ctx: MonoMenuContext) => void | Promise<void>;
@@ -37,7 +43,6 @@ export interface MonoMenuStyle {
   iconColor?: string;
   disabledOpacity?: number;
   zIndex?: number;
-  /** Extra CSS for the root container */
   className?: string;
 }
 
@@ -64,3 +69,14 @@ export const MENU_ICONS = {
   paste: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19 2h-4.18C14.4.84 13.3 0 12 0c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z"/></svg>',
   selectAll: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" fill="currentColor"><path d="M5 3C3.909 3 3 3.909 3 5V6H5V5H6V3H5ZM8 3V5H10V3H8ZM12 3V5H14V3H12ZM16 3V5H18V3H16ZM20 3V5H22V3H20ZM24 3V5H25V6H27V5C27 3.909 26.091 3 25 3H24ZM3 8V10H5V8H3ZM25 8V10H27V8H25ZM11 9C9.909 9 9 9.909 9 11V19C9 20.091 9.909 21 11 21H19C20.091 21 21 20.091 21 19V11C21 9.909 20.091 9 19 9H11ZM11 11H19V19H11V11ZM3 12V14H5V12H3ZM25 12V14H27V12H25ZM3 16V18H5V16H3ZM25 16V18H27V16H25ZM3 20V22H5V20H3ZM25 20V22H27V20H25ZM3 24V25C3 26.091 3.909 27 5 27H6V25H5V24H3ZM25 24V25H24V27H25C26.091 27 27 26.091 27 25V24H25ZM8 25V27H10V25H8ZM12 25V27H14V25H12ZM16 25V27H18V25H16ZM20 25V27H22V25H20Z"/></svg>',
 };
+
+/** Options when placing the floating toolbar */
+export interface MonoMenuShowOptions {
+  /**
+   * Y (host-local) below which the menu must start when flipped under the caret.
+   * Pass the bottom of the lowest teardrop so the toolbar never covers handles.
+   */
+  avoidBelowY?: number;
+  /** Extra gap between teardrop/caret and menu (default 8) */
+  gap?: number;
+}
