@@ -1,11 +1,14 @@
 import type { TextModel } from '../core/TextModel';
 import type { SelectionState } from '../core/Selection';
+import type { KeybindingService } from '../keybindings/KeybindingService';
 
 export class InputController {
   readonly textarea: HTMLTextAreaElement;
   private model: TextModel;
   private selection: SelectionState;
   private onChange: () => void;
+  private host: HTMLElement;
+  private keybindings: KeybindingService | null = null;
   private disposed = false;
   private wantFocus = false;
   private refocusTimer: ReturnType<typeof setTimeout> | null = null;
@@ -19,6 +22,7 @@ export class InputController {
     this.model = model;
     this.selection = selection;
     this.onChange = onChange;
+    this.host = host;
 
     const ta = document.createElement('textarea');
     ta.setAttribute('aria-label', 'Mono Editor input');
@@ -77,6 +81,10 @@ export class InputController {
     this.textarea.blur();
   }
 
+  setKeybindingService(kb: KeybindingService | null): void {
+    this.keybindings = kb;
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -95,11 +103,44 @@ export class InputController {
     try { ta.focus({ preventScroll: true }); } catch { ta.focus(); }
   }
 
-  private onBlur = (): void => {
-    if (this.wantFocus && !this.disposed) {
-      if (this.refocusTimer) clearTimeout(this.refocusTimer);
-      this.refocusTimer = setTimeout(() => this.applyFocus(), 16);
+  /**
+   * Soft re-focus only when focus briefly drops (Android WebView keyboard)
+   * while the user is still interacting with THIS editor.
+   * Never steal focus from sidebar / search / statusbar / other inputs.
+   */
+  private onBlur = (e: FocusEvent): void => {
+    if (!this.wantFocus || this.disposed) return;
+
+    const next = e.relatedTarget as Node | null;
+    // Focus moved explicitly to another element outside the editor host → release
+    if (next && !this.host.contains(next)) {
+      this.wantFocus = false;
+      return;
     }
+
+    if (this.refocusTimer) clearTimeout(this.refocusTimer);
+    this.refocusTimer = setTimeout(() => {
+      if (!this.wantFocus || this.disposed) return;
+      const active = document.activeElement;
+      // Another control (input/textarea/contenteditable/button) owns focus → release
+      if (
+        active &&
+        active !== this.textarea &&
+        active !== document.body &&
+        active !== document.documentElement &&
+        !this.host.contains(active)
+      ) {
+        this.wantFocus = false;
+        return;
+      }
+      // Focus still inside host or on body (transient) → soft re-focus
+      if (!active || active === document.body || active === document.documentElement || this.host.contains(active)) {
+        // Only reclaim if nothing meaningful outside took it
+        if (!active || active === document.body || active === document.documentElement || active === this.textarea) {
+          this.applyFocus();
+        }
+      }
+    }, 0);
   };
 
   private onInput = (): void => {

@@ -30,3 +30,6 @@ export { DEFAULT_STICKY_SCROLL } from './view/StickyScroll';
 
 export type { MonoMenuItem, MonoMenuItemId, MonoMenuStyle, MonoMenuContext } from './menu/types';
 export { MENU_ICONS, DEFAULT_MENU_STYLE } from './menu/types';
+
+export { KeybindingService, MonoCommands } from './keybindings/KeybindingService';
+export type { MonoKeybinding } from './keybindings/KeybindingService';

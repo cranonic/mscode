@@ -16,6 +16,8 @@ import { TokenizationSupport } from '../language/TokenizationSupport';
 import { registerDefaultLanguages } from '../language/registerDefaults';
 import { ContextMenuController } from '../menu/ContextMenuController';
 import type { MonoMenuItem, MonoMenuStyle } from '../menu/types';
+import { KeybindingService, MonoCommands } from '../keybindings/KeybindingService';
+import type { MonoKeybinding } from '../keybindings/KeybindingService';
 
 export class MonoEditor implements IMonoEditor {
   private host: HTMLElement;
@@ -38,6 +40,8 @@ export class MonoEditor implements IMonoEditor {
   private unsubModel: () => void;
   private tokenization = new TokenizationSupport();
   private menu!: ContextMenuController;
+  private keybindings = new KeybindingService();
+  private onDocPointerDown: ((e: PointerEvent) => void) | null = null;
 
   constructor(host: HTMLElement, options: MonoEditorOptions = {}) {
     registerDefaultLanguages();
@@ -107,6 +111,19 @@ export class MonoEditor implements IMonoEditor {
       () => this.focus(),
     );
 
+    this.input.setKeybindingService(this.keybindings);
+    this.registerDefaultKeybindings();
+
+    this.onDocPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (target && !this.root.contains(target)) {
+        this.input.blur();
+        this.menu.hide();
+      }
+    };
+    document.addEventListener('pointerdown', this.onDocPointerDown, true);
+
+
 
     this.pointer = new PointerController(
       this.root,
@@ -128,8 +145,9 @@ export class MonoEditor implements IMonoEditor {
         } else if (kind === 'select' || kind === 'handle') {
           this.syncTextarea();
           this.view.paint();
-          if (kind === 'select' && !this.selection.isEmpty) {
-            this.showSelectionMenu();
+          if (!this.selection.isEmpty) {
+            // Delay one frame so layout/selection paints first
+            requestAnimationFrame(() => this.showSelectionMenu());
           }
         }
       },
@@ -211,6 +229,10 @@ export class MonoEditor implements IMonoEditor {
     this.root.removeEventListener('wheel', this.onWheel);
     this.pointer.dispose();
     this.menu.dispose();
+    if (this.onDocPointerDown) {
+      document.removeEventListener('pointerdown', this.onDocPointerDown, true);
+      this.onDocPointerDown = null;
+    }
     this.input.dispose();
     this.contentListeners.clear();
     this.root.remove();
@@ -234,6 +256,66 @@ export class MonoEditor implements IMonoEditor {
   }
 
   
+
+  private registerDefaultKeybindings(): void {
+    const runAfter = () => {
+      this.view.ensureCaretVisible();
+      this.syncTextarea();
+      this.view.paint();
+      this.emitContent();
+    };
+    this.keybindings.addMany([
+      {
+        id: MonoCommands.Undo,
+        primary: 'ctrl+z',
+        weight: 10,
+        handler: () => {
+          if (this.model.undo()) runAfter();
+        },
+      },
+      {
+        id: MonoCommands.Redo,
+        primary: 'ctrl+shift+z',
+        weight: 10,
+        handler: () => {
+          if (this.model.redo()) runAfter();
+        },
+      },
+      {
+        id: MonoCommands.Redo + '.y',
+        primary: 'ctrl+y',
+        weight: 10,
+        handler: () => {
+          if (this.model.redo()) runAfter();
+        },
+      },
+      {
+        id: MonoCommands.SelectAll,
+        primary: 'ctrl+a',
+        weight: 10,
+        handler: () => {
+          const last = this.model.getLineCount();
+          const lastCol = this.model.getLineContent(last).length + 1;
+          this.selection.anchor = { lineNumber: 1, column: 1 };
+          this.selection.active = { lineNumber: last, column: lastCol };
+          this.view.paint();
+        },
+      },
+    ]);
+  }
+
+  addKeybinding(binding: MonoKeybinding): () => void {
+    return this.keybindings.add(binding);
+  }
+
+  removeKeybinding(id: string): void {
+    this.keybindings.remove(id);
+  }
+
+  listKeybindings(): MonoKeybinding[] {
+    return this.keybindings.list();
+  }
+
   private showSelectionMenu(): void {
     if (!this.menu) return;
     const m = this.metrics();

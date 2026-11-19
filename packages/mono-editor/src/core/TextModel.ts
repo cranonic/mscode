@@ -1,3 +1,5 @@
+import { EditStack } from './EditStack';
+
 export type ModelEdit = {
   startOffset: number;
   endOffset: number;
@@ -9,6 +11,7 @@ export class TextModel {
   private versionId = 1;
   private languageId = 'plaintext';
   private listeners = new Set<(versionId: number) => void>();
+  readonly editStack = new EditStack();
 
   constructor(value = '', languageId = 'plaintext') {
     this.setValue(value);
@@ -39,8 +42,9 @@ export class TextModel {
     return this.lines.join('\n');
   }
 
-  setValue(value: string): void {
+  setValue(value: string, clearHistory = true): void {
     this.lines = value.length === 0 ? [''] : value.split('\n');
+    if (clearHistory) this.editStack.clear();
     this.bump();
   }
 
@@ -73,10 +77,29 @@ export class TextModel {
     };
   }
 
-  applyEdit(edit: ModelEdit): void {
-    const before = this.getValue().slice(0, edit.startOffset);
-    const after = this.getValue().slice(edit.endOffset);
-    this.setValue(before + edit.text + after);
+  applyEdit(edit: ModelEdit, record = true): void {
+    const value = this.getValue();
+    const replaced = value.slice(edit.startOffset, edit.endOffset);
+    if (record) {
+      this.editStack.push(edit.startOffset, edit.endOffset, replaced, edit.text);
+    }
+    const before = value.slice(0, edit.startOffset);
+    const after = value.slice(edit.endOffset);
+    // setValue bumps version — but avoid nested stack clear
+    this.lines = (before + edit.text + after).length === 0
+      ? ['']
+      : (before + edit.text + after).split('\n');
+    this.bump();
+  }
+
+  undo(): boolean {
+    const entry = this.editStack.undo(this);
+    return entry != null;
+  }
+
+  redo(): boolean {
+    const entry = this.editStack.redo(this);
+    return entry != null;
   }
 
   insert(offset: number, text: string): void {

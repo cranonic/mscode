@@ -46,6 +46,9 @@ export interface IMonoEditor {
   removeContextMenuItem?(id: string): void;
   setContextMenuStyle?(style: import('../menu/types').MonoMenuStyle): void;
   hideContextMenu?(): void;
+  addKeybinding?(binding: import('../keybindings/KeybindingService').MonoKeybinding): () => void;
+  removeKeybinding?(id: string): void;
+  listKeybindings?(): import('../keybindings/KeybindingService').MonoKeybinding[];
   setStickyScroll?(opts: import('../view/StickyScroll').MonoStickyScrollOptions): void;
   getModelVersionId(): number;
   onDidChangeModelContent(listener: (e: MonoContentChangeEvent) => void): MonoDisposable;
