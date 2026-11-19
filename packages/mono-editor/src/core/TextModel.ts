@@ -12,6 +12,10 @@ export class TextModel {
   private languageId = 'plaintext';
   private listeners = new Set<(versionId: number) => void>();
   readonly editStack = new EditStack();
+  /** Optional: snapshot selection before each recorded edit */
+  private selCapture: (() => {
+    aLine: number; aCol: number; bLine: number; bCol: number;
+  } | null) | null = null;
 
   constructor(value = '', languageId = 'plaintext') {
     this.setValue(value);
@@ -80,26 +84,58 @@ export class TextModel {
   applyEdit(edit: ModelEdit, record = true): void {
     const value = this.getValue();
     const replaced = value.slice(edit.startOffset, edit.endOffset);
-    if (record) {
-      this.editStack.push(edit.startOffset, edit.endOffset, replaced, edit.text);
-    }
+    const beforeSel = record ? this.selCapture?.() ?? undefined : undefined;
     const before = value.slice(0, edit.startOffset);
     const after = value.slice(edit.endOffset);
-    // setValue bumps version — but avoid nested stack clear
     this.lines = (before + edit.text + after).length === 0
       ? ['']
       : (before + edit.text + after).split('\n');
     this.bump();
+    if (record) {
+      const endPos = this.getPositionAt(edit.startOffset + edit.text.length);
+      const afterSel = {
+        aLine: endPos.lineNumber,
+        aCol: endPos.column,
+        bLine: endPos.lineNumber,
+        bCol: endPos.column,
+      };
+      this.editStack.push(
+        edit.startOffset,
+        edit.endOffset,
+        replaced,
+        edit.text,
+        beforeSel ?? undefined,
+        afterSel,
+      );
+    }
+  }
+
+  setSelectionCapture(
+    fn: (() => {
+      aLine: number;
+      aCol: number;
+      bLine: number;
+      bCol: number;
+    } | null) | null,
+  ): void {
+    this.selCapture = fn;
+  }
+
+  /** Undo and return stack entry (for selection restore). */
+  undoEntry() {
+    return this.editStack.undo(this);
+  }
+
+  redoEntry() {
+    return this.editStack.redo(this);
   }
 
   undo(): boolean {
-    const entry = this.editStack.undo(this);
-    return entry != null;
+    return this.undoEntry() != null;
   }
 
   redo(): boolean {
-    const entry = this.editStack.redo(this);
-    return entry != null;
+    return this.redoEntry() != null;
   }
 
   insert(offset: number, text: string): void {

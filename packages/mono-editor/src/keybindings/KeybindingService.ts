@@ -1,8 +1,9 @@
 /**
  * Monaco-inspired keybinding layer.
  *
- * Chord strings: "ctrl+z", "ctrl+shift+z", "ctrl+y", "ctrl+a", ...
- * Handlers registered by command id; primary binding resolves on keydown.
+ * Chord strings: "ctrl+z", "ctrl+shift+z", "ctrl+y", "ctrl+c", ...
+ * Matches both `event.key` and `event.code` (KeyZ) so hardware keyboards
+ * work consistently in Capacitor / Android WebView.
  */
 
 export type KeybindingWhen = () => boolean;
@@ -17,17 +18,43 @@ export interface MonoKeybinding {
   weight?: number;
 }
 
+function keyTokenFromEvent(e: KeyboardEvent): string {
+  // Prefer event.code for letters (KeyZ → z) — stable across layouts
+  const code = e.code || '';
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase();
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  switch (code) {
+    case 'Space':
+      return 'space';
+    case 'ArrowUp':
+    case 'ArrowDown':
+    case 'ArrowLeft':
+    case 'ArrowRight':
+      return code.replace('Arrow', '').toLowerCase();
+    case 'Enter':
+    case 'Tab':
+    case 'Backspace':
+    case 'Delete':
+    case 'Escape':
+    case 'Home':
+    case 'End':
+      return code.toLowerCase();
+    default:
+      break;
+  }
+  let k = e.key || '';
+  if (k === ' ') return 'space';
+  if (k.length === 1) return k.toLowerCase();
+  return k.toLowerCase();
+}
+
 function normalizeKey(e: KeyboardEvent): string {
   const parts: string[] = [];
+  // Treat meta (Cmd) same as ctrl for cross-platform bindings
   if (e.ctrlKey || e.metaKey) parts.push('ctrl');
   if (e.shiftKey) parts.push('shift');
   if (e.altKey) parts.push('alt');
-  let k = e.key;
-  if (k === ' ') k = 'space';
-  if (k.length === 1) k = k.toLowerCase();
-  else k = k.toLowerCase();
-  // Arrow keys etc.
-  parts.push(k);
+  parts.push(keyTokenFromEvent(e));
   return parts.join('+');
 }
 
@@ -57,6 +84,11 @@ export class KeybindingService {
 
   list(): MonoKeybinding[] {
     return this.bindings.map((b) => ({ ...b }));
+  }
+
+  /** Resolve chord for debugging / tests */
+  chordOf(e: KeyboardEvent): string {
+    return normalizeKey(e);
   }
 
   /**

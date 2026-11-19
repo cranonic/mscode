@@ -42,6 +42,7 @@ export class MonoEditor implements IMonoEditor {
   private menu!: ContextMenuController;
   private keybindings = new KeybindingService();
   private onDocPointerDown: ((e: PointerEvent) => void) | null = null;
+  private onRootKeyDown: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(host: HTMLElement, options: MonoEditorOptions = {}) {
     registerDefaultLanguages();
@@ -54,6 +55,16 @@ export class MonoEditor implements IMonoEditor {
     this.overscan = options.overscan ?? 3;
     this.theme = { ...DEFAULT_THEME, ...options.theme };
     this.model = new TextModel(options.value ?? '', options.language ?? 'plaintext');
+    this.model.setSelectionCapture(() => {
+      const a = this.selection.anchor;
+      const b = this.selection.active;
+      return {
+        aLine: a.lineNumber,
+        aCol: a.column,
+        bLine: b.lineNumber,
+        bCol: b.column,
+      };
+    });
 
     this.root = document.createElement('div');
     Object.assign(this.root.style, {
@@ -113,6 +124,23 @@ export class MonoEditor implements IMonoEditor {
 
     this.input.setKeybindingService(this.keybindings);
     this.registerDefaultKeybindings();
+
+    // Single capture listener: only when focus is in this editor
+    this.onRootKeyDown = (e: KeyboardEvent) => {
+      if (this.disposed) return;
+      const active = document.activeElement;
+      const inEditor =
+        active === this.input.textarea ||
+        (active != null && this.root.contains(active));
+      if (!inEditor) return;
+      if (this.keybindings.dispatch(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener('keydown', this.onRootKeyDown, true);
+
+
 
     this.onDocPointerDown = (e: PointerEvent) => {
       const target = e.target as Node | null;
@@ -233,6 +261,10 @@ export class MonoEditor implements IMonoEditor {
       document.removeEventListener('pointerdown', this.onDocPointerDown, true);
       this.onDocPointerDown = null;
     }
+    if (this.onRootKeyDown) {
+      window.removeEventListener('keydown', this.onRootKeyDown, true);
+      this.onRootKeyDown = null;
+    }
     this.input.dispose();
     this.contentListeners.clear();
     this.root.remove();
@@ -257,6 +289,58 @@ export class MonoEditor implements IMonoEditor {
 
   
 
+
+  /**
+   * After undo: if text was restored (cut/del/replace), re-select that range.
+   * After redo: restore post-edit caret/selection when known.
+   */
+  private applyStackSelection(
+    entry: {
+      inverse: { startOffset: number; endOffset: number; text: string };
+      forward: { startOffset: number; endOffset: number; text: string };
+      beforeSel?: { aLine: number; aCol: number; bLine: number; bCol: number };
+      afterSel?: { aLine: number; aCol: number; bLine: number; bCol: number };
+    } | null,
+    mode: 'undo' | 'redo',
+  ): void {
+    if (!entry) return;
+    if (mode === 'undo') {
+      // Prefer explicit beforeSel (exact selection user had)
+      if (entry.beforeSel) {
+        const s = entry.beforeSel;
+        this.selection.anchor = { lineNumber: s.aLine, column: s.aCol };
+        this.selection.active = { lineNumber: s.bLine, column: s.bCol };
+        return;
+      }
+      // Fallback: select restored text range (inverse inserts replaced text)
+      const restored = entry.inverse.text;
+      if (restored.length > 0) {
+        const start = entry.inverse.startOffset;
+        const end = start + restored.length;
+        const p1 = this.model.getPositionAt(start);
+        const p2 = this.model.getPositionAt(end);
+        this.selection.anchor = { lineNumber: p1.lineNumber, column: p1.column };
+        this.selection.active = { lineNumber: p2.lineNumber, column: p2.column };
+        return;
+      }
+      const pos = this.model.getPositionAt(entry.inverse.startOffset);
+      this.selection.setCaret(pos.lineNumber, pos.column);
+      return;
+    }
+    // redo
+    if (entry.afterSel) {
+      const s = entry.afterSel;
+      this.selection.anchor = { lineNumber: s.aLine, column: s.aCol };
+      this.selection.active = { lineNumber: s.bLine, column: s.bCol };
+      return;
+    }
+    // Caret at end of forward insert (or start if pure delete)
+    const endOff =
+      entry.forward.startOffset + entry.forward.text.length;
+    const pos = this.model.getPositionAt(endOff);
+    this.selection.setCaret(pos.lineNumber, pos.column);
+  }
+
   private registerDefaultKeybindings(): void {
     const runAfter = () => {
       this.view.ensureCaretVisible();
@@ -264,35 +348,140 @@ export class MonoEditor implements IMonoEditor {
       this.view.paint();
       this.emitContent();
     };
+
+    const selectionText = (): string => {
+      if (this.selection.isEmpty) return '';
+      const a = this.selection.anchor;
+      const b = this.selection.active;
+      const aOff = this.model.getOffsetAt(a.lineNumber, a.column);
+      const bOff = this.model.getOffsetAt(b.lineNumber, b.column);
+      const start = Math.min(aOff, bOff);
+      const end = Math.max(aOff, bOff);
+      return this.model.getValue().slice(start, end);
+    };
+
+    const writeClipboard = async (text: string) => {
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+    };
+
+    const doCopy = () => { void writeClipboard(selectionText()); };
+
+    const doCut = () => {
+      const text = selectionText();
+      if (!text) return;
+      void writeClipboard(text);
+      const a = this.selection.anchor;
+      const b = this.selection.active;
+      const aOff = this.model.getOffsetAt(a.lineNumber, a.column);
+      const bOff = this.model.getOffsetAt(b.lineNumber, b.column);
+      const start = Math.min(aOff, bOff);
+      const end = Math.max(aOff, bOff);
+      this.model.delete(start, end);
+      const pos = this.model.getPositionAt(start);
+      this.selection.setCaret(pos.lineNumber, pos.column);
+      runAfter();
+    };
+
+    const doPaste = async () => {
+      let text = '';
+      try {
+        text = await navigator.clipboard.readText();
+      } catch {
+        return;
+      }
+      if (!text) return;
+      if (!this.selection.isEmpty) {
+        const a = this.selection.anchor;
+        const b = this.selection.active;
+        const aOff = this.model.getOffsetAt(a.lineNumber, a.column);
+        const bOff = this.model.getOffsetAt(b.lineNumber, b.column);
+        const start = Math.min(aOff, bOff);
+        const end = Math.max(aOff, bOff);
+        this.model.delete(start, end);
+        this.model.insert(start, text);
+        const pos = this.model.getPositionAt(start + text.length);
+        this.selection.setCaret(pos.lineNumber, pos.column);
+      } else {
+        const off = this.model.getOffsetAt(
+          this.selection.active.lineNumber,
+          this.selection.active.column,
+        );
+        this.model.insert(off, text);
+        const pos = this.model.getPositionAt(off + text.length);
+        this.selection.setCaret(pos.lineNumber, pos.column);
+      }
+      runAfter();
+    };
+
     this.keybindings.addMany([
       {
         id: MonoCommands.Undo,
         primary: 'ctrl+z',
-        weight: 10,
+        weight: 5,
         handler: () => {
-          if (this.model.undo()) runAfter();
+          const entry = this.model.undoEntry();
+          if (entry) {
+            this.applyStackSelection(entry, 'undo');
+            runAfter();
+          }
         },
       },
       {
         id: MonoCommands.Redo,
         primary: 'ctrl+shift+z',
-        weight: 10,
+        weight: 5,
         handler: () => {
-          if (this.model.redo()) runAfter();
+          const entry = this.model.redoEntry();
+          if (entry) {
+            this.applyStackSelection(entry, 'redo');
+            runAfter();
+          }
         },
       },
       {
         id: MonoCommands.Redo + '.y',
         primary: 'ctrl+y',
-        weight: 10,
+        weight: 5,
         handler: () => {
-          if (this.model.redo()) runAfter();
+          const entry = this.model.redoEntry();
+          if (entry) {
+            this.applyStackSelection(entry, 'redo');
+            runAfter();
+          }
         },
+      },
+      {
+        id: MonoCommands.Copy,
+        primary: 'ctrl+c',
+        weight: 5,
+        handler: () => doCopy(),
+      },
+      {
+        id: MonoCommands.Cut,
+        primary: 'ctrl+x',
+        weight: 5,
+        handler: () => doCut(),
+      },
+      {
+        id: MonoCommands.Paste,
+        primary: 'ctrl+v',
+        weight: 5,
+        handler: () => { void doPaste(); },
       },
       {
         id: MonoCommands.SelectAll,
         primary: 'ctrl+a',
-        weight: 10,
+        weight: 5,
         handler: () => {
           const last = this.model.getLineCount();
           const lastCol = this.model.getLineContent(last).length + 1;

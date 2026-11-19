@@ -247,20 +247,18 @@ export class CanvasRenderer {
       }
     }
 
-    // --- Sticky scroll overlay (outer stickies always paint on top) ---
+    // --- Sticky scroll overlay (outer on top; gutter above sticky text) ---
     if (stickyLines.length) {
-      const last = stickyLines[stickyLines.length - 1]!;
       const stackBottom = Math.max(
         ...stickyLines.map((s) => s.y + lineHeight),
         stickyLines.length * lineHeight,
       );
       ctx.save();
-      // Entire sticky stack clip
       ctx.beginPath();
       ctx.rect(0, 0, cssWidth, Math.max(0, stackBottom + 4));
       ctx.clip();
 
-      // Innermost first → outermost last (z-order: upper sticky stays above)
+      // Innermost first → outermost last
       for (let i = stickyLines.length - 1; i >= 0; i--) {
         const s = stickyLines[i]!;
         const line = s.lineNumber;
@@ -270,15 +268,7 @@ export class CanvasRenderer {
         const textY = y + (lineHeight - fontSize) / 2;
         const alpha = s.visibility ?? 1;
 
-        // Each sticky row is clipped so a pushed lower row cannot overpaint
-        // rows above it (slot floor = i * lineHeight for unpushed geometry).
         ctx.save();
-        const slotFloor = i * lineHeight;
-        const clipTop = Math.min(y, slotFloor);
-        // outer rows: hard floor at their slot; pushed row may go above its
-        // own slot but must stop under the previous sticky's bottom.
-        const minY = i === 0 ? y : Math.max(y, stickyLines[i - 1]!.y + lineHeight);
-        // Simpler accurate rule: never draw above previous sticky bottom when i>0
         let topClip = y;
         if (i > 0) {
           const prevBottom = stickyLines[i - 1]!.y + lineHeight;
@@ -286,26 +276,22 @@ export class CanvasRenderer {
         }
         if (topClip >= y + lineHeight) {
           ctx.restore();
-          continue; // fully covered by outer sticky
+          continue;
         }
         ctx.beginPath();
         ctx.rect(0, topClip, cssWidth, y + lineHeight - topClip);
         ctx.clip();
 
+        // Full-row background
         ctx.globalAlpha = 1;
         ctx.fillStyle = theme.background;
         ctx.fillRect(0, y, cssWidth, lineHeight);
 
-        if (showLineNumbers) {
-          ctx.fillStyle = theme.gutterBackground;
-          ctx.fillRect(0, y, gutterWidth, lineHeight);
-          ctx.globalAlpha = alpha;
-          ctx.fillStyle = theme.gutterForeground;
-          ctx.textAlign = 'right';
-          ctx.fillText(String(line), gutterWidth - 8, textY);
-          ctx.textAlign = 'left';
-          ctx.globalAlpha = 1;
-        }
+        // Text only in content area — never over gutter (horizontal scroll safe)
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(contentLeft, y, Math.max(0, cssWidth - contentLeft), lineHeight);
+        ctx.clip();
 
         const tokens = getLineTokens?.(line) ?? [];
         const textX0s = contentLeft + paddingLeft - scrollLeft;
@@ -332,10 +318,31 @@ export class CanvasRenderer {
           if (col <= content.length) emit(col, content.length + 1, 'plain');
         }
         ctx.globalAlpha = 1;
-        ctx.restore();
+        ctx.restore(); // end content clip
+
+        // Gutter ON TOP of any scrolled text that tried to enter left strip
+        if (showLineNumbers) {
+          ctx.fillStyle = theme.gutterBackground;
+          ctx.fillRect(0, y, gutterWidth, lineHeight);
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = theme.gutterForeground;
+          ctx.textAlign = 'right';
+          ctx.fillText(String(line), gutterWidth - 8, textY);
+          ctx.textAlign = 'left';
+          ctx.globalAlpha = 1;
+          // separator
+          ctx.strokeStyle = theme.gutterForeground;
+          ctx.globalAlpha = 0.25;
+          ctx.beginPath();
+          ctx.moveTo(gutterWidth - 0.5, y);
+          ctx.lineTo(gutterWidth - 0.5, y + lineHeight);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+
+        ctx.restore(); // end row clip
       }
 
-      // Shadow under the visual stack bottom
       const edgeY = Math.max(...stickyLines.map((s) => s.y + lineHeight));
       if (edgeY > 0) {
         const alphas = [0.55, 0.3, 0.14, 0.05];
