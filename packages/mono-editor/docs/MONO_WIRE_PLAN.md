@@ -59,22 +59,22 @@ Multi-cursor, folding, word wrap, minimap, decorations/markers, suggest/hover/si
 
 | API | Status | Notes |
 |-----|--------|-------|
-| `getPosition` / `setPosition` | ❌ | |
-| `getSelection` / `setSelection` | ❌ | map to SelectionState |
-| `revealLine` / `revealPosition` / `revealRange` | ❌ | |
-| `getScrollTop` / `setScrollTop` / `getScrollLeft` / `setScrollLeft` | ❌ | ViewController already has fields |
-| `onDidChangeCursorPosition` | ❌ | |
-| `onDidChangeCursorSelection` | ❌ | |
-| `onDidScrollChange` | ❌ | |
-| `onDidFocusEditorText` / `onDidBlurEditorText` | ❌ | |
-| `hasTextFocus` | ❌ | |
-| `getModel()` | ❌ | return thin ITextModel-like adapter |
-| `executeEdits` | ❌ | |
+| `getPosition` / `setPosition` | ✅ | |
+| `getSelection` / `setSelection` | ✅ | map to SelectionState |
+| `revealLine` / `revealPosition` / `revealRange` | ✅ | + InCenter variants |
+| `getScrollTop` / `setScrollTop` / `getScrollLeft` / `setScrollLeft` | ✅ | + onDidScrollChange |
+| `onDidChangeCursorPosition` | ✅ | |
+| `onDidChangeCursorSelection` | ✅ | |
+| `onDidScrollChange` | ✅ | |
+| `onDidFocusEditorText` / `onDidBlurEditorText` | ✅ | |
+| `hasTextFocus` | ✅ | |
+| `getModel()` | ✅ | thin IMonoTextModel adapter |
+| `executeEdits` | ✅ | |
 | `deltaDecorations` | ❌ | can no-op until PART 4 |
 | `setModelMarkers` / `getModelMarkers` | ❌ | until decorations |
-| `updateOptions` | ❌ | font, lineNumbers, readOnly, tabSize, sticky… |
-| `setTheme` / theme id map | ❌ | |
-| `getAction(id).run()` | ❌ | bridge to CommandService |
+| `updateOptions` | ✅ | font, lineNumbers, readOnly, tabSize, sticky… |
+| `setTheme` / theme id map | 🟡 | Partial MonoEditorTheme + vs/vs-dark names |
+| `getAction(id).run()` | ✅ | bridges CommandService.executeCommand |
 | `addAction` | ✅ | package level |
 | `layout` | ✅ | |
 | `focus` / `dispose` | ✅ | |
@@ -279,3 +279,5 @@ Week-shaped slices (adjust to capacity):
 | `packages/app/src/features/editor/hooks/*` | Per-feature Monaco consumers |
 
 ---
+
+*Generated from latest GitHub `check.md` for Mono-for-Monaco migration tracking.*

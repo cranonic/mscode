@@ -6,7 +6,15 @@ import { PointerController } from '../input/PointerController';
 import { ViewController } from '../view/ViewController';
 import {
   DEFAULT_THEME,
+  type ICursorPositionChangedEvent,
+  type ICursorSelectionChangedEvent,
+  type IIdentifiedSingleEditOperation,
   type IMonoEditor,
+  type IMonoEditorAction,
+  type IMonoTextModel,
+  type IPosition,
+  type IScrollEvent,
+  type ISelection,
   type MonoContentChangeEvent,
   type MonoDisposable,
   type MonoEditorOptions,
@@ -39,6 +47,14 @@ export class MonoEditor implements IMonoEditor {
   private lineNumbers: boolean;
   private overscan: number;
   private contentListeners = new Set<(e: MonoContentChangeEvent) => void>();
+  private cursorPosListeners = new Set<(e: ICursorPositionChangedEvent) => void>();
+  private cursorSelListeners = new Set<(e: ICursorSelectionChangedEvent) => void>();
+  private scrollListeners = new Set<(e: IScrollEvent) => void>();
+  private focusListeners = new Set<() => void>();
+  private blurListeners = new Set<() => void>();
+  private tabSize = 2;
+  private readOnly = false;
+  private altVersionId = 1;
   private ro?: ResizeObserver;
   private disposed = false;
   private unsubModel: () => void;
@@ -60,6 +76,8 @@ export class MonoEditor implements IMonoEditor {
     this.lineHeight = options.lineHeight ?? Math.round(this.fontSize * 1.45);
     this.lineNumbers = (options.lineNumbers ?? 'on') === 'on';
     this.overscan = options.overscan ?? 3;
+    this.tabSize = options.tabSize ?? 2;
+    this.readOnly = !!options.readOnly;
     this.theme = { ...DEFAULT_THEME, ...options.theme };
     this.model = new TextModel(options.value ?? '', options.language ?? 'plaintext');
     this.model.setSelectionCapture(() => {
@@ -114,6 +132,7 @@ export class MonoEditor implements IMonoEditor {
       this.syncTextarea();
       this.view.paint();
       this.emitContent();
+      this.emitCursorEvents('keyboard');
     });
 
     this.menu = new ContextMenuController(
@@ -193,6 +212,7 @@ export class MonoEditor implements IMonoEditor {
       (kind) => {
         if (kind === 'scroll') {
           this.menu?.hide();
+          this.emitScrollEvent(true, true);
           return;
         }
         if (kind === 'tap') {
@@ -260,7 +280,7 @@ export class MonoEditor implements IMonoEditor {
     this.view.paint();
   }
   getModelVersionId(): number { return this.model.getVersionId(); }
-  focus(): void { this.syncTextarea(); this.input.focus(); }
+  focus(): void { this.syncTextarea(); this.input.focus(); this.emitFocus(); }
   setContextMenuItems(items: MonoMenuItem[]): void {
     this.menu.setItems(items);
   }
@@ -324,6 +344,405 @@ export class MonoEditor implements IMonoEditor {
     this.view.setStickyScroll(opts);
   }
 
+
+  // ═══════════════════════════════════════════════════════════
+  // PART 1 — Monaco-parity bridge API
+  // ═══════════════════════════════════════════════════════════
+
+  getPosition(): IPosition {
+    const p = this.selection.active;
+    return { lineNumber: p.lineNumber, column: p.column };
+  }
+
+  setPosition(position: IPosition): void {
+    const line = Math.max(1, Math.min(this.model.getLineCount(), position.lineNumber | 0));
+    const maxCol = this.model.getLineContent(line).length + 1;
+    const col = Math.max(1, Math.min(maxCol, position.column | 0));
+    this.selection.setCaret(line, col);
+    this.view.ensureCaretVisible();
+    this.syncTextarea();
+    this.view.paint();
+    this.emitCursorEvents('api');
+  }
+
+  getSelection(): ISelection {
+    return this.toISelection();
+  }
+
+  setSelection(sel: ISelection): void {
+    const clamp = (ln: number, col: number): IPosition => {
+      const line = Math.max(1, Math.min(this.model.getLineCount(), ln | 0));
+      const maxCol = this.model.getLineContent(line).length + 1;
+      return { lineNumber: line, column: Math.max(1, Math.min(maxCol, col | 0)) };
+    };
+    // Prefer explicit selectionStart/position (Monaco Selection shape)
+    const a = clamp(
+      sel.selectionStartLineNumber ?? sel.startLineNumber,
+      sel.selectionStartColumn ?? sel.startColumn,
+    );
+    const b = clamp(
+      sel.positionLineNumber ?? sel.endLineNumber,
+      sel.positionColumn ?? sel.endColumn,
+    );
+    this.selection.anchor = a;
+    this.selection.active = b;
+    this.view.ensureCaretVisible();
+    this.syncTextarea();
+    this.view.paint();
+    this.emitCursorEvents('api');
+  }
+
+  getSelections(): ISelection[] {
+    return [this.getSelection()];
+  }
+
+  revealLine(lineNumber: number, _scrollType?: number): void {
+    this.revealPosition({ lineNumber, column: 1 }, _scrollType);
+  }
+
+  revealLineInCenter(lineNumber: number): void {
+    const m = this.metrics();
+    const line = Math.max(1, Math.min(this.model.getLineCount(), lineNumber));
+    const docY = m.paddingTop + (line - 1) * m.lineHeight;
+    this.view.scrollTop = Math.max(0, docY - this.view.cssHeight / 2 + m.lineHeight / 2);
+    this.view.clampScrollPublic();
+    this.emitScrollEvent(true, false);
+    this.view.paint();
+  }
+
+  revealPosition(position: IPosition, _scrollType?: number): void {
+    const m = this.metrics();
+    const line = Math.max(1, Math.min(this.model.getLineCount(), position.lineNumber));
+    const maxCol = this.model.getLineContent(line).length + 1;
+    const col = Math.max(1, Math.min(maxCol, position.column));
+    const docY = m.paddingTop + (line - 1) * m.lineHeight;
+    // Vertical: ensure line visible
+    if (docY < this.view.scrollTop + m.paddingTop) {
+      this.view.scrollTop = Math.max(0, docY - m.paddingTop);
+    } else if (docY + m.lineHeight > this.view.scrollTop + this.view.cssHeight) {
+      this.view.scrollTop = docY + m.lineHeight - this.view.cssHeight;
+    }
+    // Horizontal: ensure column visible
+    const contentLeft = this.lineNumbers ? m.gutterWidth : 0;
+    const x = contentLeft + m.paddingLeft + (col - 1) * m.charWidth;
+    const viewW = this.view.cssWidth;
+    if (x - this.view.scrollLeft < contentLeft + m.paddingLeft) {
+      this.view.scrollLeft = Math.max(0, x - contentLeft - m.paddingLeft - 40);
+    } else if (x - this.view.scrollLeft > viewW - 40) {
+      this.view.scrollLeft = Math.max(0, x - viewW + 80);
+    }
+    this.view.clampScrollPublic();
+    this.emitScrollEvent(true, true);
+    this.view.paint();
+  }
+
+  revealPositionInCenter(position: IPosition): void {
+    this.revealLineInCenter(position.lineNumber);
+    this.revealPosition(position);
+  }
+
+  revealRange(range: {
+    startLineNumber: number;
+    startColumn: number;
+    endLineNumber: number;
+    endColumn: number;
+  }): void {
+    this.revealPosition({
+      lineNumber: range.startLineNumber,
+      column: range.startColumn,
+    });
+  }
+
+  getScrollTop(): number {
+    return this.view.scrollTop;
+  }
+
+  setScrollTop(scrollTop: number): void {
+    const prev = this.view.scrollTop;
+    this.view.scrollTop = Math.max(0, scrollTop);
+    this.view.clampScrollPublic();
+    if (this.view.scrollTop !== prev) {
+      this.emitScrollEvent(true, false);
+      this.view.schedulePaint();
+    }
+  }
+
+  getScrollLeft(): number {
+    return this.view.scrollLeft;
+  }
+
+  setScrollLeft(scrollLeft: number): void {
+    const prev = this.view.scrollLeft;
+    this.view.scrollLeft = Math.max(0, scrollLeft);
+    this.view.clampScrollPublic();
+    if (this.view.scrollLeft !== prev) {
+      this.emitScrollEvent(false, true);
+      this.view.schedulePaint();
+    }
+  }
+
+  hasTextFocus(): boolean {
+    return document.activeElement === this.input.textarea;
+  }
+
+  blur(): void {
+    this.input.blur();
+    this.emitBlur();
+  }
+
+  getAlternativeVersionId(): number {
+    return this.altVersionId;
+  }
+
+  getModel(): IMonoTextModel {
+    const model = this.model;
+    return {
+      getValue: () => model.getValue(),
+      setValue: (v: string) => {
+        model.setValue(v);
+        this.view.paint();
+        this.emitContent();
+      },
+      getLineCount: () => model.getLineCount(),
+      getLineContent: (ln: number) => model.getLineContent(ln),
+      getOffsetAt: (pos: IPosition) => model.getOffsetAt(pos.lineNumber, pos.column),
+      getPositionAt: (offset: number) => model.getPositionAt(offset),
+      getVersionId: () => model.getVersionId(),
+      getAlternativeVersionId: () => this.altVersionId,
+      getLanguageId: () => model.getLanguageId(),
+    };
+  }
+
+  executeEdits(
+    _source: string | null | undefined,
+    edits: IIdentifiedSingleEditOperation[],
+  ): boolean {
+    if (this.readOnly || !edits.length) return false;
+    // Apply bottom-up so earlier offsets stay valid
+    const sorted = [...edits].sort((a, b) => {
+      if (a.range.startLineNumber !== b.range.startLineNumber) {
+        return b.range.startLineNumber - a.range.startLineNumber;
+      }
+      return b.range.startColumn - a.range.startColumn;
+    });
+    for (const edit of sorted) {
+      const start = this.model.getOffsetAt(
+        edit.range.startLineNumber,
+        edit.range.startColumn,
+      );
+      const end = this.model.getOffsetAt(
+        edit.range.endLineNumber,
+        edit.range.endColumn,
+      );
+      const text = edit.text ?? '';
+      if (end > start) this.model.delete(start, end);
+      if (text) this.model.insert(start, text);
+      const pos = this.model.getPositionAt(start + text.length);
+      this.selection.setCaret(pos.lineNumber, pos.column);
+    }
+    this.altVersionId++;
+    this.view.ensureCaretVisible();
+    this.syncTextarea();
+    this.view.paint();
+    this.emitContent();
+    this.emitCursorEvents(_source || 'executeEdits');
+    return true;
+  }
+
+  updateOptions(options: Partial<MonoEditorOptions>): void {
+    if (options.fontFamily != null) this.fontFamily = options.fontFamily;
+    if (options.fontSize != null) {
+      this.fontSize = options.fontSize;
+      if (options.lineHeight == null) {
+        this.lineHeight = Math.round(this.fontSize * 1.45);
+      }
+    }
+    if (options.lineHeight != null) this.lineHeight = options.lineHeight;
+    if (options.tabSize != null) this.tabSize = options.tabSize;
+    if (options.lineNumbers != null) this.lineNumbers = options.lineNumbers === 'on';
+    if (options.readOnly != null) {
+      this.readOnly = options.readOnly;
+      this.input.textarea.readOnly = options.readOnly;
+      this.commands?.setContext('editorReadonly', options.readOnly);
+    }
+    if (options.theme) {
+      this.theme = { ...this.theme, ...options.theme };
+      this.root.style.background = this.theme.background;
+    }
+    if (options.stickyScroll) this.view.setStickyScroll(options.stickyScroll);
+    if (options.language) this.setLanguageId(options.language);
+    if (options.value != null) this.setValue(options.value);
+    this.view.paint();
+    this.syncTextarea();
+  }
+
+  setTheme(theme: Partial<MonoEditorTheme> | string): void {
+    if (typeof theme === 'string') {
+      // Named themes can be extended later; built-in dark/light
+      if (theme === 'vs' || theme === 'light') {
+        this.theme = {
+          ...this.theme,
+          background: '#ffffff',
+          foreground: '#000000',
+          gutterBackground: '#f3f3f3',
+          gutterForeground: '#237893',
+          caret: '#000000',
+          selection: '#add6ff',
+          lineHighlight: '#f0f0f0',
+        };
+      } else {
+        // vs-dark / hc-black / default
+        this.theme = { ...DEFAULT_THEME, ...this.theme, background: '#1e1e1e', foreground: '#d4d4d4' };
+      }
+    } else {
+      this.theme = { ...this.theme, ...theme };
+    }
+    this.root.style.background = this.theme.background;
+    this.view.paint();
+  }
+
+  getAction(id: string): IMonoEditorAction | null {
+    const cmds = this.commands?.listCommands?.() as
+      | { id: string; handler: (...a: unknown[]) => unknown; title?: string }[]
+      | undefined;
+    // Fallback: try execute via registry
+    const self = this;
+    return {
+      id,
+      label: id,
+      run: () => self.commands.executeCommand(id),
+      isSupported: () => true,
+    };
+  }
+
+  onDidChangeCursorPosition(
+    listener: (e: ICursorPositionChangedEvent) => void,
+  ): MonoDisposable {
+    this.cursorPosListeners.add(listener);
+    return { dispose: () => this.cursorPosListeners.delete(listener) };
+  }
+
+  onDidChangeCursorSelection(
+    listener: (e: ICursorSelectionChangedEvent) => void,
+  ): MonoDisposable {
+    this.cursorSelListeners.add(listener);
+    return { dispose: () => this.cursorSelListeners.delete(listener) };
+  }
+
+  onDidScrollChange(listener: (e: IScrollEvent) => void): MonoDisposable {
+    this.scrollListeners.add(listener);
+    return { dispose: () => this.scrollListeners.delete(listener) };
+  }
+
+  onDidFocusEditorText(listener: () => void): MonoDisposable {
+    this.focusListeners.add(listener);
+    return { dispose: () => this.focusListeners.delete(listener) };
+  }
+
+  onDidBlurEditorText(listener: () => void): MonoDisposable {
+    this.blurListeners.add(listener);
+    return { dispose: () => this.blurListeners.delete(listener) };
+  }
+
+  // ── Bridge helpers ───────────────────────────────────
+
+  private toISelection(): ISelection {
+    const a = this.selection.anchor;
+    const b = this.selection.active;
+    const forward =
+      a.lineNumber < b.lineNumber ||
+      (a.lineNumber === b.lineNumber && a.column <= b.column);
+    const start = forward ? a : b;
+    const end = forward ? b : a;
+    return {
+      startLineNumber: start.lineNumber,
+      startColumn: start.column,
+      endLineNumber: end.lineNumber,
+      endColumn: end.column,
+      selectionStartLineNumber: a.lineNumber,
+      selectionStartColumn: a.column,
+      positionLineNumber: b.lineNumber,
+      positionColumn: b.column,
+    };
+  }
+
+  private emitCursorEvents(source: string): void {
+    const position = this.getPosition();
+    const selection = this.getSelection();
+    const posEv: ICursorPositionChangedEvent = {
+      position,
+      secondaryPositions: [],
+      reason: 0,
+      source,
+    };
+    const selEv: ICursorSelectionChangedEvent = {
+      selection,
+      secondarySelections: [],
+      modelVersionId: this.model.getVersionId(),
+      oldSelections: null,
+      oldModelVersionId: this.model.getVersionId(),
+      source,
+      reason: 0,
+    };
+    for (const l of this.cursorPosListeners) {
+      try {
+        l(posEv);
+      } catch {
+        /* */
+      }
+    }
+    for (const l of this.cursorSelListeners) {
+      try {
+        l(selEv);
+      } catch {
+        /* */
+      }
+    }
+    this.commands?.setContext('editorHasSelection', !this.selection.isEmpty);
+  }
+
+  private emitScrollEvent(topChanged: boolean, leftChanged: boolean): void {
+    if (!this.scrollListeners.size) return;
+    const m = this.metrics();
+    const ev: IScrollEvent = {
+      scrollTop: this.view.scrollTop,
+      scrollLeft: this.view.scrollLeft,
+      scrollWidth: this.view.cssWidth + this.view.scrollLeft + 200,
+      scrollHeight:
+        this.model.getLineCount() * m.lineHeight + m.paddingTop + 100,
+      scrollTopChanged: topChanged,
+      scrollLeftChanged: leftChanged,
+    };
+    for (const l of this.scrollListeners) {
+      try {
+        l(ev);
+      } catch {
+        /* */
+      }
+    }
+  }
+
+  private emitFocus(): void {
+    for (const l of this.focusListeners) {
+      try {
+        l();
+      } catch {
+        /* */
+      }
+    }
+  }
+
+  private emitBlur(): void {
+    for (const l of this.blurListeners) {
+      try {
+        l();
+      } catch {
+        /* */
+      }
+    }
+  }
+
+
   layout(): void {
     if (this.disposed) return;
     const rect = this.root.getBoundingClientRect();
@@ -354,6 +773,11 @@ export class MonoEditor implements IMonoEditor {
     }
     this.input.dispose();
     this.contentListeners.clear();
+    this.cursorPosListeners.clear();
+    this.cursorSelListeners.clear();
+    this.scrollListeners.clear();
+    this.focusListeners.clear();
+    this.blurListeners.clear();
     this.root.remove();
   }
 
@@ -717,13 +1141,20 @@ export class MonoEditor implements IMonoEditor {
   }
 
   private emitContent(): void {
+    this.altVersionId++;
     const e: MonoContentChangeEvent = { value: this.model.getValue() };
     for (const l of this.contentListeners) l(e);
   }
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
+    const pt = this.view.scrollTop;
+    const pl = this.view.scrollLeft;
     this.view.scrollBy(e.deltaX, e.deltaY);
+    this.emitScrollEvent(
+      this.view.scrollTop !== pt,
+      this.view.scrollLeft !== pl,
+    );
   };
 }
 

@@ -1,5 +1,13 @@
 export { createMonoEditor, MonoEditor } from './api/MonoEditor';
 export type {
+  IPosition,
+  ISelection,
+  ICursorPositionChangedEvent,
+  ICursorSelectionChangedEvent,
+  IScrollEvent,
+  IIdentifiedSingleEditOperation,
+  IMonoTextModel,
+  IMonoEditorAction,
   IMonoEditor,
   MonoEditorOptions,
   MonoEditorTheme,
