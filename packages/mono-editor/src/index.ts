@@ -52,3 +52,13 @@ export type {
   MonoRegisteredCommand,
 } from './commands';
 export { PaletteService } from './palette';
+
+
+// Find / Replace (in-editor widget + engine)
+export { FindController, findMatches } from './find';
+export type { FindMatch, FindOptions, FindState } from './find';
+
+export { codicon, registerExtraIcon, hasIcon, listCodicons, FIND_ICON_SVG, FIND_ICONS } from './icons';
+export type { CodiconId } from './icons';
+
+export { haptic, attachPressFeedback } from './util/haptic';

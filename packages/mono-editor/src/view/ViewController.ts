@@ -36,6 +36,11 @@ export class ViewController {
   lastSticky: StickyRenderLine[] = [];
   lastStickyHeight = 0;
   private paintRaf = 0;
+  /** Optional find highlights supplier */
+  private getFindDecorations: (() => {
+    matches: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }[];
+    currentIndex: number;
+  }) | null = null;
 
   constructor(
     model: TextModel,
@@ -82,6 +87,15 @@ export class ViewController {
 
   clampScrollPublic(): void {
     this.clampScroll();
+  }
+
+  setFindDecorationsProvider(
+    fn: (() => {
+      matches: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }[];
+      currentIndex: number;
+    }) | null,
+  ): void {
+    this.getFindDecorations = fn;
   }
 
   setStickyScroll(opts: MonoStickyScrollOptions): void {
@@ -184,6 +198,8 @@ export class ViewController {
         : undefined,
       freeHandle: this.freeHandle,
       stickyLines,
+      findMatches: this.getFindDecorations?.().matches ?? [],
+      findCurrentIndex: this.getFindDecorations?.().currentIndex ?? -1,
     });
   }
 

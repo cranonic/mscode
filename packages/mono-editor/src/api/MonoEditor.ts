@@ -21,6 +21,7 @@ import type { MonoKeybinding } from '../keybindings/KeybindingService';
 import { CommandService } from '../commands/CommandService';
 import { PaletteService } from '../palette/PaletteService';
 import type { MonoAction, MonoCommandHandler, MonoRegisteredCommand } from '../commands/types';
+import { FindController } from '../find/FindController';
 
 export class MonoEditor implements IMonoEditor {
   private host: HTMLElement;
@@ -46,6 +47,7 @@ export class MonoEditor implements IMonoEditor {
   private keybindings = new KeybindingService();
   private commands!: CommandService;
   private palette!: PaletteService;
+  private find!: FindController;
   private onDocPointerDown: ((e: PointerEvent) => void) | null = null;
   private onRootKeyDown: ((e: KeyboardEvent) => void) | null = null;
 
@@ -131,8 +133,27 @@ export class MonoEditor implements IMonoEditor {
     this.commands = new CommandService(this.keybindings);
     this.palette = new PaletteService(this.commands);
     this.commands.setContext('editorReadonly', !!options.readOnly);
+
+    this.find = new FindController(
+      this.root,
+      this.model,
+      this.selection,
+      this.view,
+      () => {
+        this.view.ensureCaretVisible();
+        this.syncTextarea();
+        this.view.paint();
+        this.emitContent();
+      },
+    );
+    this.view.setFindDecorationsProvider(() => ({
+      matches: this.find.getMatches(),
+      currentIndex: this.find.getCurrentIndex(),
+    }));
+
     this.registerDefaultKeybindings();
     this.registerDefaultActions();
+    this.registerFindCommands();
 
     // Single capture listener: only when focus is in this editor
     this.onRootKeyDown = (e: KeyboardEvent) => {
@@ -260,6 +281,14 @@ export class MonoEditor implements IMonoEditor {
     this.menu.hide();
   }
 
+  revealFind(): void {
+    this.find.startFind();
+  }
+
+  revealReplace(): void {
+    this.find.startFindReplace();
+  }
+
   // ── Commands / palette engine (Monaco-level) ──────────────────────────
   addAction(action: MonoAction): { dispose(): void } {
     return this.commands.addAction(action);
@@ -314,6 +343,7 @@ export class MonoEditor implements IMonoEditor {
     this.pointer.dispose();
     this.menu.dispose();
     this.commands?.dispose();
+    this.find?.dispose();
     if (this.onDocPointerDown) {
       document.removeEventListener('pointerdown', this.onDocPointerDown, true);
       this.onDocPointerDown = null;
@@ -398,6 +428,56 @@ export class MonoEditor implements IMonoEditor {
     this.selection.setCaret(pos.lineNumber, pos.column);
   }
 
+
+
+  private registerFindCommands(): void {
+    this.keybindings.addMany([
+      {
+        id: 'actions.find',
+        primary: 'ctrl+f',
+        weight: 5,
+        handler: () => this.find.startFind(),
+      },
+      {
+        id: 'editor.action.startFindReplaceAction',
+        primary: 'ctrl+h',
+        weight: 5,
+        handler: () => this.find.startFindReplace(),
+      },
+      {
+        id: 'editor.action.nextMatchFindAction',
+        primary: 'f3',
+        weight: 5,
+        handler: () => this.find.findNext(),
+      },
+      {
+        id: 'editor.action.previousMatchFindAction',
+        primary: 'shift+f3',
+        weight: 5,
+        handler: () => this.find.findPrevious(),
+      },
+    ]);
+
+    this.commands.registerCommand('actions.find', () => this.find.startFind(), {
+      title: 'Find',
+      category: 'Find',
+    });
+    this.commands.registerCommand(
+      'editor.action.startFindReplaceAction',
+      () => this.find.startFindReplace(),
+      { title: 'Replace', category: 'Find' },
+    );
+    this.commands.registerCommand(
+      'editor.action.nextMatchFindAction',
+      () => this.find.findNext(),
+      { title: 'Find Next', category: 'Find' },
+    );
+    this.commands.registerCommand(
+      'editor.action.previousMatchFindAction',
+      () => this.find.findPrevious(),
+      { title: 'Find Previous', category: 'Find' },
+    );
+  }
 
   private registerDefaultActions(): void {
     const titles: Record<string, { title: string; category: string; precondition?: string }> = {

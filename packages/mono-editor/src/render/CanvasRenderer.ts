@@ -104,6 +104,10 @@ export class CanvasRenderer {
     /** Optional syntax tokens for a line (1-based). Empty → plain foreground. */
     getLineTokens?: (lineNumber: number) => MonoToken[];
     stickyLines?: StickyRenderLine[];
+    /** Find matches to highlight (other matches) */
+    findMatches?: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }[];
+    /** Current match index (0-based) for stronger highlight */
+    findCurrentIndex?: number;
   }): void {
     const {
       model, selection, scrollTop, scrollLeft, cssWidth, cssHeight,
@@ -112,6 +116,8 @@ export class CanvasRenderer {
       freeHandle = null,
       getLineTokens,
       stickyLines = [],
+      findMatches = [],
+      findCurrentIndex = -1,
     } = opts;
 
     const { ctx } = this;
@@ -155,6 +161,25 @@ export class CanvasRenderer {
       }
 
       const content = model.getLineContent(line);
+
+      // Find match highlights (behind selection)
+      if (findMatches.length) {
+        for (let mi = 0; mi < findMatches.length; mi++) {
+          const fm = findMatches[mi]!;
+          if (line < fm.startLineNumber || line > fm.endLineNumber) continue;
+          let fromCol = 1;
+          let toCol = content.length + 1;
+          if (line === fm.startLineNumber) fromCol = fm.startColumn;
+          if (line === fm.endLineNumber) toCol = fm.endColumn;
+          const x1 = textX0 + (fromCol - 1) * metrics.charWidth;
+          const x2 = textX0 + (toCol - 1) * metrics.charWidth;
+          ctx.fillStyle =
+            mi === findCurrentIndex
+              ? (theme as any).findMatchHighlight || 'rgba(234, 92, 0, 0.55)'
+              : (theme as any).findMatch || 'rgba(234, 92, 0, 0.28)';
+          ctx.fillRect(x1, y, Math.max(2, x2 - x1), lineHeight);
+        }
+      }
 
       if (hasSelection && line >= range.startLine && line <= range.endLine) {
         let fromCol = 1;
