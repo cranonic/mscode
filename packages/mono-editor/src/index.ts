@@ -70,3 +70,23 @@ export { codicon, registerExtraIcon, hasIcon, listCodicons, FIND_ICON_SVG, FIND_
 export type { CodiconId } from './icons';
 
 export { haptic, attachPressFeedback } from './util/haptic';
+
+// Theme (Monaco-level defineTheme / setTheme)
+export {
+  monoThemeService,
+  MonoThemeService,
+  registerBuiltinThemes,
+  BUILTIN_THEME_IDS,
+  MSCODE_DARK_ID,
+  MSCODE_LIGHT_ID,
+  MSCODE_AMOLED_ID,
+  SOLARIZED_DARK_ID,
+  SOLARIZED_LIGHT_ID,
+} from './theme';
+export type {
+  MonoStandaloneThemeData,
+  MonoColorTheme,
+  MonoThemeBase,
+  MonoThemeRule,
+  ResolvedMonoEditorTheme,
+} from './theme';

@@ -108,7 +108,7 @@ export interface IMonoTextModel {
 export interface IMonoEditorAction {
   id: string;
   label?: string;
-  run: () => void | Promise<void>;
+  run: () => unknown | Promise<unknown>;
   isSupported?: () => boolean;
 }
 
@@ -128,7 +128,11 @@ export interface IMonoEditor {
 
   // ── Cursor / selection ───────────────────────────────
   getPosition(): IPosition;
-  setPosition(position: IPosition): void;
+  /**
+   * Monaco: setPosition({ lineNumber, column })
+   * App palette: setPosition(line, column?)
+   */
+  setPosition(positionOrLine: IPosition | number, column?: number): void;
   getSelection(): ISelection;
   setSelection(selection: ISelection): void;
   getSelections(): ISelection[];

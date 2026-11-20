@@ -152,7 +152,7 @@ export class FindWidget {
       pointerEvents: 'auto',
       // Prevent sticky :hover on touch
       touchAction: 'manipulation',
-    } as CSSStyleDeclaration);
+    } as unknown as CSSStyleDeclaration);
 
     // Chevron toggle replace
     const chevron = this.iconBtn(FIND_ICONS.expand, 'Toggle Replace', () => this.cbs.onToggleReplace());
@@ -336,7 +336,7 @@ export class FindWidget {
       transform: 'scale(1)',
       touchAction: 'manipulation',
       WebkitTapHighlightColor: 'transparent',
-    } as CSSStyleDeclaration);
+    } as unknown as CSSStyleDeclaration);
     b.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();

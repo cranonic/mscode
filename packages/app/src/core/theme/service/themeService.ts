@@ -12,6 +12,7 @@ import { notifyThemeChanged } from '@/core/native/statusBarSync';
 import { mscodeDarkTheme } from '../themes/mscode-dark';
 import { mscodeLightTheme } from '../themes/mscode-light';
 import { mscodeAmoledTheme } from '../themes/mscode-amoled';
+import { applyThemeToMonoEditor } from './monoThemeBridge';
 
 
 /**
@@ -205,6 +206,9 @@ class ThemeService {
       colors:  def.editorColors ?? {},
     });
     monaco.editor.setTheme(def.id);
+
+    // Sync canvas mono-editor (Monaco-level theme registry)
+    applyThemeToMonoEditor(def);
 
     console.log(`[ThemeService] Execution cycle completed: loaded "${def.name}" via [${source}]`);
   }

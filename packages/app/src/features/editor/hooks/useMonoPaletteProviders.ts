@@ -24,7 +24,7 @@ export type MonoEditorPaletteHost = {
   executeCommand?: (id: string, ...args: unknown[]) => Promise<unknown>;
   getLineCount?: () => number;
   revealLine?: (line: number, column?: number) => void;
-  setPosition?: (line: number, column?: number) => void;
+  setPosition?: (positionOrLine: number | { lineNumber: number; column: number }, column?: number) => void;
   focus?: () => void;
 };
 

@@ -27,6 +27,7 @@ import type { MonoMenuItem, MonoMenuStyle } from '../menu/types';
 import { KeybindingService, MonoCommands } from '../keybindings/KeybindingService';
 import type { MonoKeybinding } from '../keybindings/KeybindingService';
 import { CommandService } from '../commands/CommandService';
+import { monoThemeService, registerBuiltinThemes } from '../theme';
 import { PaletteService } from '../palette/PaletteService';
 import type { MonoAction, MonoCommandHandler, MonoRegisteredCommand } from '../commands/types';
 import { FindController } from '../find/FindController';
@@ -55,6 +56,7 @@ export class MonoEditor implements IMonoEditor {
   private tabSize = 2;
   private readOnly = false;
   private altVersionId = 1;
+  private themeUnsub: { dispose(): void } | null = null;
   private ro?: ResizeObserver;
   private disposed = false;
   private unsubModel: () => void;
@@ -69,6 +71,7 @@ export class MonoEditor implements IMonoEditor {
 
   constructor(host: HTMLElement, options: MonoEditorOptions = {}) {
     registerDefaultLanguages();
+    registerBuiltinThemes();
     this.host = host;
     this.fontFamily =
       options.fontFamily ?? 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
@@ -78,7 +81,20 @@ export class MonoEditor implements IMonoEditor {
     this.overscan = options.overscan ?? 3;
     this.tabSize = options.tabSize ?? 2;
     this.readOnly = !!options.readOnly;
-    this.theme = { ...DEFAULT_THEME, ...options.theme };
+    registerBuiltinThemes();
+    // Start from global mono theme, then allow constructor overrides
+    this.theme = {
+      ...DEFAULT_THEME,
+      ...monoThemeService.toPartialEditorTheme(),
+      ...options.theme,
+    };
+    this.themeUnsub = monoThemeService.onDidChangeColorTheme(() => {
+      if (this.disposed) return;
+      const partial = monoThemeService.toPartialEditorTheme();
+      this.theme = { ...this.theme, ...partial };
+      this.root.style.background = this.theme.background;
+      this.view.paint();
+    });
     this.model = new TextModel(options.value ?? '', options.language ?? 'plaintext');
     this.model.setSelectionCapture(() => {
       const a = this.selection.anchor;
@@ -354,10 +370,19 @@ export class MonoEditor implements IMonoEditor {
     return { lineNumber: p.lineNumber, column: p.column };
   }
 
-  setPosition(position: IPosition): void {
-    const line = Math.max(1, Math.min(this.model.getLineCount(), position.lineNumber | 0));
+  setPosition(positionOrLine: IPosition | number, column?: number): void {
+    let line: number;
+    let col: number;
+    if (typeof positionOrLine === 'number') {
+      line = positionOrLine;
+      col = column ?? 1;
+    } else {
+      line = positionOrLine.lineNumber;
+      col = positionOrLine.column;
+    }
+    line = Math.max(1, Math.min(this.model.getLineCount(), line | 0));
     const maxCol = this.model.getLineContent(line).length + 1;
-    const col = Math.max(1, Math.min(maxCol, position.column | 0));
+    col = Math.max(1, Math.min(maxCol, col | 0));
     this.selection.setCaret(line, col);
     this.view.ensureCaretVisible();
     this.syncTextarea();
@@ -578,21 +603,23 @@ export class MonoEditor implements IMonoEditor {
 
   setTheme(theme: Partial<MonoEditorTheme> | string): void {
     if (typeof theme === 'string') {
-      // Named themes can be extended later; built-in dark/light
-      if (theme === 'vs' || theme === 'light') {
+      registerBuiltinThemes();
+      // Named id → registry (mscode-dark, solarized-light, …)
+      if (monoThemeService.getTheme(theme)) {
+        monoThemeService.setTheme(theme);
+        // listener updates this.theme; force sync in case we are only instance
         this.theme = {
           ...this.theme,
-          background: '#ffffff',
-          foreground: '#000000',
-          gutterBackground: '#f3f3f3',
-          gutterForeground: '#237893',
-          caret: '#000000',
-          selection: '#add6ff',
-          lineHighlight: '#f0f0f0',
+          ...monoThemeService.toPartialEditorTheme(theme),
         };
+      } else if (theme === 'vs' || theme === 'light') {
+        monoThemeService.setTheme('mscode-light');
+        this.theme = { ...this.theme, ...monoThemeService.toPartialEditorTheme() };
+      } else if (theme === 'vs-dark' || theme === 'dark') {
+        monoThemeService.setTheme('mscode-dark');
+        this.theme = { ...this.theme, ...monoThemeService.toPartialEditorTheme() };
       } else {
-        // vs-dark / hc-black / default
-        this.theme = { ...DEFAULT_THEME, ...this.theme, background: '#1e1e1e', foreground: '#d4d4d4' };
+        console.warn(`[MonoEditor] Unknown theme id "${theme}"`);
       }
     } else {
       this.theme = { ...this.theme, ...theme };
@@ -602,15 +629,13 @@ export class MonoEditor implements IMonoEditor {
   }
 
   getAction(id: string): IMonoEditorAction | null {
-    const cmds = this.commands?.listCommands?.() as
-      | { id: string; handler: (...a: unknown[]) => unknown; title?: string }[]
-      | undefined;
-    // Fallback: try execute via registry
     const self = this;
     return {
       id,
       label: id,
-      run: () => self.commands.executeCommand(id),
+      run: async () => {
+        await self.commands.executeCommand(id);
+      },
       isSupported: () => true,
     };
   }
@@ -772,6 +797,8 @@ export class MonoEditor implements IMonoEditor {
       this.onRootKeyDown = null;
     }
     this.input.dispose();
+    this.themeUnsub?.dispose();
+    this.themeUnsub = null;
     this.contentListeners.clear();
     this.cursorPosListeners.clear();
     this.cursorSelListeners.clear();
