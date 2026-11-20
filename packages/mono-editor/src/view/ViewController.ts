@@ -18,6 +18,12 @@ import {
 export class ViewController {
   scrollTop = 0;
   scrollLeft = 0;
+  /** Teardrop handles drawn when true (hidden while typing / scrolling) */
+  handlesVisible = true;
+  /** 0..1 teardrop opacity */
+  handleAlpha = 1;
+  /** Bottom active-line sticky (viewport-local) */
+  lastBottomSticky: { lineNumber: number; caretColumn: number } | null = null;
   cssWidth = 0;
   cssHeight = 0;
   freeHandle: FreeHandleVisual | null = null;
@@ -115,14 +121,60 @@ export class ViewController {
   ensureCaretVisible(): void {
     const m = this.getMetrics();
     const line = this.selection.active.lineNumber;
+    const col = this.selection.active.column;
     const topY = m.paddingTop + (line - 1) * m.lineHeight;
+    // Vertical
     if (topY < this.scrollTop + m.paddingTop) {
       this.scrollTop = Math.max(0, topY - m.paddingTop);
     }
     if (topY + m.lineHeight > this.scrollTop + this.cssHeight) {
       this.scrollTop = topY + m.lineHeight - this.cssHeight;
     }
+    // Horizontal — keep caret inside content pane (never under gutter / past right edge)
+    const contentLeft = this.contentLeft;
+    const caretXDoc =
+      contentLeft + m.paddingLeft + Math.max(0, col - 1) * m.charWidth;
+    const margin = Math.max(m.charWidth * 2, 24);
+    const viewLeft = contentLeft + margin;
+    const viewRight = this.cssWidth - margin;
+    const screenX = caretXDoc - this.scrollLeft;
+    if (screenX < viewLeft) {
+      this.scrollLeft = Math.max(0, caretXDoc - viewLeft);
+    } else if (screenX > viewRight) {
+      this.scrollLeft = Math.max(0, caretXDoc - viewRight);
+    }
     this.clampScroll();
+  }
+
+  /** Max content width in CSS px (longest line), for horizontal scroll range */
+  private maxContentWidthPx(): number {
+    const m = this.getMetrics();
+    let maxChars = 0;
+    // Sample: caret line + nearby + full scan capped for perf
+    const n = this.model.getLineCount();
+    const caret = this.selection.active.lineNumber;
+    const from = Math.max(1, caret - 30);
+    const to = Math.min(n, caret + 30);
+    for (let i = from; i <= to; i++) {
+      maxChars = Math.max(maxChars, this.model.getLineContent(i).length);
+    }
+    // Also consider absolute longest if small file
+    if (n <= 2000) {
+      for (let i = 1; i <= n; i++) {
+        maxChars = Math.max(maxChars, this.model.getLineContent(i).length);
+      }
+    } else {
+      // light scan every k-th line
+      for (let i = 1; i <= n; i += 8) {
+        maxChars = Math.max(maxChars, this.model.getLineContent(i).length);
+      }
+    }
+    return (
+      this.contentLeft +
+      m.paddingLeft +
+      maxChars * m.charWidth +
+      m.charWidth * 4
+    );
   }
 
   /** CSS position of caret relative to root (for textarea placement). */
@@ -167,19 +219,60 @@ export class ViewController {
     let stickyLines: StickyRenderLine[] = [];
     if (this.stickyOpts.enabled) {
       this.scopeFinder.sync(this.model);
+      const caretLine = this.selection.active.lineNumber;
+      const caretCol = this.selection.active.column;
       const layout = layoutStickyForScroll(
         this.scopeFinder,
         renderTop,
         metrics,
         this.stickyOpts.maxLineCount,
         this.stickyOpts.scrollWithEditor,
+        caretLine,
+        caretCol,
+        this.stickyOpts.activeLineSticky,
       );
       stickyLines = layout.lines;
       this.lastSticky = stickyLines;
       this.lastStickyHeight = layout.height;
+
+      // Bottom sticky: stable hysteresis (no flicker while scrolling)
+      if (this.stickyOpts.bottomActiveSticky) {
+        const m = metrics;
+        const docY = m.paddingTop + (caretLine - 1) * m.lineHeight;
+        const viewBottom = renderTop + this.cssHeight;
+        const viewTop = renderTop + this.lastStickyHeight;
+        const lineBottom = docY + m.lineHeight;
+        // Fully inside content pane (with small margin)
+        const fullyVisible =
+          docY >= viewTop + 1 && lineBottom <= viewBottom - 1;
+        // Needs bottom pin: line crosses or sits past the bottom edge
+        const pastBottom = lineBottom > viewBottom - 2;
+        if (fullyVisible) {
+          this.lastBottomSticky = null;
+        } else if (pastBottom) {
+          this.lastBottomSticky = {
+            lineNumber: caretLine,
+            caretColumn: caretCol,
+          };
+        } else if (
+          this.lastBottomSticky &&
+          this.lastBottomSticky.lineNumber === caretLine
+        ) {
+          // Keep showing same line until fullyVisible clears it (hysteresis)
+          this.lastBottomSticky = {
+            lineNumber: caretLine,
+            caretColumn: caretCol,
+          };
+        } else {
+          this.lastBottomSticky = null;
+        }
+      } else {
+        this.lastBottomSticky = null;
+      }
     } else {
       this.lastSticky = [];
       this.lastStickyHeight = 0;
+      this.lastBottomSticky = null;
     }
 
     this.renderer.paint({
@@ -197,7 +290,10 @@ export class ViewController {
         ? (ln) => this.tokenization!.getLineTokens(this.model, ln)
         : undefined,
       freeHandle: this.freeHandle,
+      handlesVisible: this.handlesVisible,
+      handleAlpha: this.handleAlpha,
       stickyLines,
+      bottomSticky: this.lastBottomSticky,
       findMatches: this.getFindDecorations?.().matches ?? [],
       findCurrentIndex: this.getFindDecorations?.().currentIndex ?? -1,
     });
@@ -263,6 +359,7 @@ export class ViewController {
     const contentH = this.model.getLineCount() * m.lineHeight + m.paddingTop;
     const maxTop = Math.max(0, contentH - this.cssHeight);
     this.scrollTop = Math.max(0, Math.min(this.scrollTop, maxTop));
-    this.scrollLeft = Math.max(0, this.scrollLeft);
+    const maxLeft = Math.max(0, this.maxContentWidthPx() - this.cssWidth);
+    this.scrollLeft = Math.max(0, Math.min(this.scrollLeft, maxLeft));
   }
 }

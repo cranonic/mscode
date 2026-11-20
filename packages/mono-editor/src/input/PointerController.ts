@@ -17,7 +17,7 @@ export class PointerController {
   private view: ViewController;
   private getMetrics: () => RenderMetrics;
   private getTeardrops: () => TeardropHit[];
-  private onInteract: (kind: 'tap' | 'scroll' | 'select' | 'handle' | 'handleTap') => void;
+  private onInteract: (kind: 'tap' | 'scroll' | 'scrollEnd' | 'select' | 'handle' | 'handleTap') => void;
   private disposed = false;
 
   private active = false;
@@ -86,7 +86,7 @@ export class PointerController {
     view: ViewController,
     getMetrics: () => RenderMetrics,
     getTeardrops: () => TeardropHit[],
-    onInteract: (kind: 'tap' | 'scroll' | 'select' | 'handle' | 'handleTap') => void,
+    onInteract: (kind: 'tap' | 'scroll' | 'scrollEnd' | 'select' | 'handle' | 'handleTap') => void,
   ) {
     this.root = root;
     this.model = model;
@@ -347,6 +347,7 @@ export class PointerController {
           Math.abs(this.flingVy) < PointerController.MIN_FLING_STOP)
       ) {
         this.flingRaf = 0;
+        this.onInteract('scrollEnd');
         return;
       }
       this.flingRaf = requestAnimationFrame(step);
@@ -580,7 +581,9 @@ export class PointerController {
       this.view.freeHandle = null;
       this.view.ensureCaretVisible();
       this.view.schedulePaint();
-      this.onInteract('handle');
+      // Teardrop released after drag → treat as selection complete (menu show)
+      if (!this.selection.isEmpty) this.onInteract('select');
+      else this.onInteract('handle');
       return;
     }
 
@@ -596,6 +599,8 @@ export class PointerController {
       const { vx, vy } = this.computeVelocity(performance.now());
       this.startFling(vx, vy, axis);
       this.onInteract('scroll');
+      // If fling did not start, scroll is fully stopped now
+      if (!this.flingRaf) this.onInteract('scrollEnd');
       this.lastTapT = 0;
       this.clearSingleTap();
       return;

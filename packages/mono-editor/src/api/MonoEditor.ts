@@ -28,6 +28,7 @@ import { KeybindingService, MonoCommands } from '../keybindings/KeybindingServic
 import type { MonoKeybinding } from '../keybindings/KeybindingService';
 import { CommandService } from '../commands/CommandService';
 import { monoThemeService, registerBuiltinThemes } from '../theme';
+import { HandleVisibility } from '../view/HandleVisibility';
 import { PaletteService } from '../palette/PaletteService';
 import type { MonoAction, MonoCommandHandler, MonoRegisteredCommand } from '../commands/types';
 import { FindController } from '../find/FindController';
@@ -57,6 +58,7 @@ export class MonoEditor implements IMonoEditor {
   private readOnly = false;
   private altVersionId = 1;
   private themeUnsub: { dispose(): void } | null = null;
+  private handleVis: HandleVisibility | null = null;
   private ro?: ResizeObserver;
   private disposed = false;
   private unsubModel: () => void;
@@ -143,13 +145,33 @@ export class MonoEditor implements IMonoEditor {
       options.stickyScroll,
     );
 
-    this.input = new InputController(this.root, this.model, this.selection, () => {
-      this.view.ensureCaretVisible();
-      this.syncTextarea();
-      this.view.paint();
-      this.emitContent();
-      this.emitCursorEvents('keyboard');
+    this.handleVis = new HandleVisibility((state, alpha) => {
+      this.view.handlesVisible = state !== 'hidden';
+      this.view.handleAlpha = alpha;
+      this.view.schedulePaint();
     });
+
+    this.input = new InputController(
+      this.root,
+      this.model,
+      this.selection,
+      () => {
+        // Typing: hide menu + teardrops; fade back after 3s
+        this.menu?.hide();
+        this.handleVis?.onType();
+        this.view.ensureCaretVisible();
+        this.syncTextarea();
+        this.view.paint();
+        this.emitContent();
+        this.emitCursorEvents('keyboard');
+      },
+      {
+        tabSize: this.tabSize,
+        readOnly: this.readOnly,
+        pageSize: 40,
+        bracketEnterIndent: options.bracketEnterIndent !== false,
+      },
+    );
 
     this.menu = new ContextMenuController(
       this.root,
@@ -228,29 +250,34 @@ export class MonoEditor implements IMonoEditor {
       (kind) => {
         if (kind === 'scroll') {
           this.menu?.hide();
+          this.handleVis?.onScrollStart();
           this.emitScrollEvent(true, true);
           return;
         }
+        if (kind === 'scrollEnd') {
+          this.handleVis?.onScrollEnd();
+          return;
+        }
         if (kind === 'tap') {
-          // Plain caret placement — no menu (menu only on teardrop handleTap)
           this.menu?.hide();
+          this.handleVis?.onUserInteract();
           this.syncTextarea();
           this.input.focus();
           this.view.paint();
         } else if (kind === 'handle') {
-          // Teardrop drag / cursor move — never show menu while moving
           this.menu?.hide();
+          this.handleVis?.onUserInteract();
           this.syncTextarea();
           this.view.paint();
         } else if (kind === 'handleTap') {
-          // Single tap on teardrop (cursor or selection handles)
+          this.handleVis?.onUserInteract();
           this.syncTextarea();
           this.input.focus();
           this.view.paint();
           this.commands?.setContext('editorHasSelection', !this.selection.isEmpty);
           requestAnimationFrame(() => this.showEditorMenu());
         } else if (kind === 'select') {
-          // Selection finished (long-press / double-tap / drag-end)
+          this.handleVis?.onUserInteract();
           this.syncTextarea();
           this.view.paint();
           this.commands?.setContext('editorHasSelection', !this.selection.isEmpty);
@@ -583,11 +610,14 @@ export class MonoEditor implements IMonoEditor {
       }
     }
     if (options.lineHeight != null) this.lineHeight = options.lineHeight;
-    if (options.tabSize != null) this.tabSize = options.tabSize;
+    if (options.tabSize != null) {
+      this.tabSize = options.tabSize;
+      this.input?.setTabSize?.(options.tabSize);
+    }
     if (options.lineNumbers != null) this.lineNumbers = options.lineNumbers === 'on';
     if (options.readOnly != null) {
       this.readOnly = options.readOnly;
-      this.input.textarea.readOnly = options.readOnly;
+      this.input?.setReadOnly?.(options.readOnly);
       this.commands?.setContext('editorReadonly', options.readOnly);
     }
     if (options.theme) {
@@ -595,6 +625,9 @@ export class MonoEditor implements IMonoEditor {
       this.root.style.background = this.theme.background;
     }
     if (options.stickyScroll) this.view.setStickyScroll(options.stickyScroll);
+    if (options.bracketEnterIndent != null) {
+      this.input?.setBracketEnterIndent?.(options.bracketEnterIndent);
+    }
     if (options.language) this.setLanguageId(options.language);
     if (options.value != null) this.setValue(options.value);
     this.view.paint();
@@ -772,6 +805,9 @@ export class MonoEditor implements IMonoEditor {
     if (this.disposed) return;
     const rect = this.root.getBoundingClientRect();
     this.view.setSize(rect.width, rect.height);
+    const m = this.metrics();
+    const pages = Math.max(1, Math.floor(rect.height / Math.max(1, m.lineHeight)) - 2);
+    this.input?.setPageSize?.(pages);
     this.syncTextarea();
   }
   onDidChangeModelContent(listener: (e: MonoContentChangeEvent) => void): MonoDisposable {
@@ -798,6 +834,8 @@ export class MonoEditor implements IMonoEditor {
     }
     this.input.dispose();
     this.themeUnsub?.dispose();
+    this.handleVis?.dispose();
+    this.handleVis = null;
     this.themeUnsub = null;
     this.contentListeners.clear();
     this.cursorPosListeners.clear();
@@ -1175,6 +1213,8 @@ export class MonoEditor implements IMonoEditor {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
+    this.menu?.hide();
+    this.handleVis?.onScrollStart();
     const pt = this.view.scrollTop;
     const pl = this.view.scrollLeft;
     this.view.scrollBy(e.deltaX, e.deltaY);
@@ -1182,6 +1222,9 @@ export class MonoEditor implements IMonoEditor {
       this.view.scrollTop !== pt,
       this.view.scrollLeft !== pl,
     );
+    // Debounced scroll end for wheel
+    window.clearTimeout((this as any)._wheelEndT);
+    (this as any)._wheelEndT = window.setTimeout(() => this.handleVis?.onScrollEnd(), 150);
   };
 }
 

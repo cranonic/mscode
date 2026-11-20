@@ -86,13 +86,13 @@ Multi-cursor, folding, word wrap, minimap, decorations/markers, suggest/hover/si
 
 | Task | Status | File hints |
 |------|--------|------------|
-| `CodeEditor.tsx` creates Mono not Monaco | 🟡 | may still mix shims |
+| `CodeEditor.tsx` creates Mono not Monaco | ✅ | + bridge hook |
 | Remove deep `monaco-editor/esm/...` imports | 🟡/❌ | prior UNLOADABLE_DEPENDENCY |
-| Cursor/scroll restore on tab switch | ❌ | |
+| Cursor/scroll restore on tab switch | ✅ | useMonoEditorBridge |
 | Hot-exit / backup version id | ❌ | needs `getAlternativeVersionId` |
 | `pendingNavigation` (go-to-line) | ❌ | |
 | `commands.setActiveEditor` | ❌ | |
-| ThemeDefinition → MonoEditorTheme | ❌ | stop hardcoded `#1e1e1e` |
+| ThemeDefinition → MonoEditorTheme | 🟡 | monoThemeService + settings theme id |
 | Outside-focus (sidebar search) no steal | ✅ | recent InputController fix |
 
 **Exit criteria:** Open file → type → save path works without Monaco runtime.
@@ -105,13 +105,13 @@ Multi-cursor, folding, word wrap, minimap, decorations/markers, suggest/hover/si
 |---------|--------|------------------|
 | Tab size from options | 🟡 | InputController use `tabSize` |
 | readOnly guards all edit paths | 🟡 | |
-| Auto-indent on Enter | ❌ | |
+| Auto-indent on Enter | ✅ | |
 | Auto-close brackets/quotes | ❌ | |
 | Indent/Outdent selection (Tab / Shift+Tab) | ❌ | |
 | Toggle line / block comment | ❌ | language config |
 | Word nav Ctrl+←/→, Ctrl+Backspace/Delete | ❌ | |
 | Goal column | ❌ | |
-| PageUp/PageDown, Ctrl+Home/End | ❌ | |
+| PageUp/PageDown, Ctrl+Home/End | ✅ | |
 | Move/Duplicate/Delete line | ❌ | |
 | Undo grouping (typing coalesced) | ❌ | EditStack |
 | IME / composition | ❌ | Android critical |
@@ -235,8 +235,8 @@ Replace / rewire these (from check.md) one by one:
 Week-shaped slices (adjust to capacity):
 
 [ ] Slice A — PART 1.1 Bridge API on IMonoEditor
-[ ] Slice B — PART 1.2 CodeEditor.tsx + lifecycle/sync hooks compile & run
-[ ] Slice C — PART 2 must-have edits (tabSize, readOnly, word nav, page keys, undo group)
+[x] Slice B — PART 1.2 CodeEditor.tsx + lifecycle/sync hooks compile & run
+[x] Slice C — PART 2 must-have edits (tabSize, readOnly, word nav, page keys; undo group still open)
 [ ] Slice D — PART 3 incremental model (before big-file complaints return)
 [ ] Slice E — PART 5 markers + diagnostics popup
 [ ] Slice F — PART 6 completion + hover (one language)

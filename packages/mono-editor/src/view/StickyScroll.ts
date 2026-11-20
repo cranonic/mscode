@@ -19,6 +19,16 @@ export interface MonoStickyScrollOptions {
   maxLineCount?: number;
   defaultModel?: 'indentationModel' | 'outlineModel';
   scrollWithEditor?: boolean;
+  /**
+   * When the active (caret) line scrolls above the top sticky region,
+   * pin it as an extra sticky row (shows caret column). Default true.
+   */
+  activeLineSticky?: boolean;
+  /**
+   * When the active line sits at/under the bottom of the viewport,
+   * show a bottom sticky bar (status-bar above). Default true.
+   */
+  bottomActiveSticky?: boolean;
 }
 
 export const DEFAULT_STICKY_SCROLL: Required<MonoStickyScrollOptions> = {
@@ -26,6 +36,8 @@ export const DEFAULT_STICKY_SCROLL: Required<MonoStickyScrollOptions> = {
   maxLineCount: 5,
   defaultModel: 'indentationModel',
   scrollWithEditor: true,
+  activeLineSticky: false,
+  bottomActiveSticky: true,
 };
 
 export interface Scope {
@@ -46,6 +58,10 @@ export interface StickyRenderLine {
   y: number;
   /** 1 = full, <1 when partially pushed off */
   visibility: number;
+  /** Active-line sticky: show caret at this 1-based column */
+  caretColumn?: number;
+  /** 'scope' | 'active' */
+  kind?: 'scope' | 'active';
 }
 
 const MAX_DEPTH = 32;
@@ -233,24 +249,22 @@ export function layoutStickyForScroll(
   metrics: RenderMetrics,
   maxLineCount: number,
   scrollWithEditor: boolean,
+  activeLine?: number,
+  activeColumn?: number,
+  activeLineSticky?: boolean,
 ): StickyLayoutResult {
   const { lineHeight, paddingTop } = metrics;
   if (maxLineCount <= 0) return { lines: [], height: 0, pushPx: 0, pushed: -1 };
 
-  // Row under bottom of slot 0 (Acode: rowAtHeight(top + lh - 0.01))
   const probeY = scrollTop + lineHeight - 0.01;
   const probeLine = Math.max(1, Math.floor((probeY - paddingTop) / lineHeight) + 1);
 
   const headers = finder.headers(probeLine, maxLineCount);
-  if (!headers.lines.length) {
-    return { lines: [], height: 0, pushPx: 0, pushed: -1 };
-  }
 
   let pushPx = 0;
-  if (scrollWithEditor && headers.pushed >= 0) {
+  if (headers.lines.length && scrollWithEditor && headers.pushed >= 0) {
     const row = probeLine + headers.pushed;
-    const docY = paddingTop + (row - 1) * lineHeight; // absolute doc top of that line
-    // min(0, rowTop - (scrollTop + (pushed+1)*lh))
+    const docY = paddingTop + (row - 1) * lineHeight;
     pushPx = Math.min(0, docY - (scrollTop + (headers.pushed + 1) * lineHeight));
   }
 
@@ -260,11 +274,42 @@ export function layoutStickyForScroll(
     const visibility = isPushed
       ? Math.max(0, Math.min(1, (lineHeight + pushPx) / lineHeight))
       : 1;
-    return { lineNumber, y, visibility };
+    return { lineNumber, y, visibility, kind: 'scope' as const };
   });
 
-  const height = headers.lines.length * lineHeight + pushPx;
-  return { lines: out, height: Math.max(0, height), pushPx, pushed: headers.pushed };
+  // Active line sticky: caret line scrolled above the sticky stack → pin as extra row
+  if (
+    activeLineSticky &&
+    activeLine != null &&
+    activeLine >= 1
+  ) {
+    const activeDocY = paddingTop + (activeLine - 1) * lineHeight;
+    const stackH = out.length * lineHeight;
+    // Active line is above the viewport content area (under sticky stack)
+    if (activeDocY + lineHeight <= scrollTop + stackH + 0.5) {
+      const already = out.some((l) => l.lineNumber === activeLine);
+      if (!already && out.length < maxLineCount) {
+        out.push({
+          lineNumber: activeLine,
+          y: out.length * lineHeight,
+          visibility: 1,
+          kind: 'active',
+          caretColumn: activeColumn,
+        });
+      } else if (already) {
+        const row = out.find((l) => l.lineNumber === activeLine);
+        if (row) {
+          row.kind = 'active';
+          row.caretColumn = activeColumn;
+        }
+      }
+    }
+  }
+
+  const height = out.length
+    ? Math.max(...out.map((l) => l.y + lineHeight), out.length * lineHeight)
+    : 0;
+  return { lines: out, height, pushPx, pushed: headers.pushed };
 }
 
 // ---- legacy names used by ViewController (thin wrappers) ----

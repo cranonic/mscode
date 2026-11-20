@@ -1,11 +1,17 @@
 // Default engine: Mono Editor (canvas). Monaco removed from this path.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { createMonoEditor, type IMonoEditor } from '@mono/editor';
+import {
+  createMonoEditor,
+  type IMonoEditor,
+  monoThemeService,
+  registerBuiltinThemes,
+} from '@mono/editor';
 import { useSettingsStore } from '@/features/settings/store/settingsStore';
 import { useFileLoader } from './hooks/useFileLoader';
 import { useEditorViewStateStore } from '@/features/editor/store/editorViewStateStore';
 import { useTerminalBoot } from '@/features/termis/components/terminal/hooks/useTerminalBoot';
 import { useMonoPaletteProviders } from './hooks/useMonoPaletteProviders';
+import { useMonoEditorBridge } from './hooks/useMonoEditorBridge';
 import './CodeEditor.css';
 
 interface CodeEditorProps {
@@ -30,41 +36,43 @@ function guessLanguage(filePath: string): string {
 export const CodeEditor: React.FC<CodeEditorProps> = ({ tabId, filePath }) => {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<IMonoEditor | null>(null);
-  /** State so palette hook re-runs when editor is ready */
   const [paletteHost, setPaletteHost] = useState<IMonoEditor | null>(null);
   const settings = useSettingsStore((s) => s.settings);
   const updateViewState = useEditorViewStateStore((s) => s.updateViewState);
   const { initialContent, isLoading, handleEditorChange } = useFileLoader({ tabId, filePath });
 
   useTerminalBoot();
-
-  // CRITICAL: registers paletteStore providers (>, :, help).
-  // Without this, CommandPalette shows "No matching workspace actions found".
   useMonoPaletteProviders(paletteHost);
+  useMonoEditorBridge({
+    editor: paletteHost,
+    tabId,
+    filePath,
+    settings: settings as Record<string, unknown>,
+    isLoading,
+  });
 
   const fontSize = Number(settings['editor.fontSize'] ?? 14);
   const lineNumbers = settings['editor.lineNumbers'] === 'off' ? 'off' : 'on';
+  const tabSize = Number(settings['editor.tabSize'] ?? 2);
   const language = useMemo(() => guessLanguage(filePath), [filePath]);
 
+  // Create / dispose editor
   useEffect(() => {
     const host = hostRef.current;
     if (!host || isLoading) return;
+
+    registerBuiltinThemes();
+    const themePartial = monoThemeService.toPartialEditorTheme();
 
     const editor = createMonoEditor(host, {
       value: initialContent,
       language,
       fontSize,
+      tabSize,
       lineNumbers: lineNumbers as 'on' | 'off',
-      theme: {
-        background: '#1e1e1e',
-        foreground: '#d4d4d4',
-        gutterBackground: '#1e1e1e',
-        gutterForeground: '#858585',
-        caret: '#aeafad',
-        selection: '#264f78',
-        lineHighlight: '#2a2a2a',
-      },
+      theme: themePartial,
     });
+
     editorRef.current = editor;
     setPaletteHost(editor);
 
@@ -72,16 +80,26 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tabId, filePath }) => {
       handleEditorChange(e.value);
     });
 
+    // Layout when host size changes
+    const ro = new ResizeObserver(() => {
+      editor.layout();
+    });
+    ro.observe(host);
+
     editor.focus();
 
     return () => {
+      ro.disconnect();
       sub.dispose();
       editor.dispose();
       editorRef.current = null;
       setPaletteHost(null);
     };
+    // Mount once per tab/file; content/settings applied via other effects
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, filePath, isLoading]);
 
+  // External content load (disk / cache)
   useEffect(() => {
     const ed = editorRef.current;
     if (!ed || isLoading) return;
@@ -90,10 +108,12 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tabId, filePath }) => {
     }
   }, [initialContent, isLoading]);
 
+  // Language
   useEffect(() => {
     editorRef.current?.setLanguageId(language);
     updateViewState(filePath, { languageId: language });
-  }, [language, filePath, updateViewState]);
+    updateViewState(tabId, { languageId: language });
+  }, [language, filePath, tabId, updateViewState]);
 
   return (
     <div

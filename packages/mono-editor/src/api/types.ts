@@ -26,6 +26,11 @@ export interface MonoEditorOptions {
   overscan?: number;
   /** VS Code / Monaco sticky scroll */
   stickyScroll?: import('../view/StickyScroll').MonoStickyScrollOptions;
+  /**
+   * Enter between {|} [|] (|) opens a new indented line (VS Code).
+   * Default true.
+   */
+  bracketEnterIndent?: boolean;
 }
 
 export interface MonoContentChangeEvent {

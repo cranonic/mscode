@@ -100,10 +100,14 @@ export class CanvasRenderer {
     showLineNumbers: boolean;
     overscan: number;
     showTeardrops?: boolean;
-    freeHandle?: FreeHandleVisual | null;
+    handlesVisible?: boolean;
+    handleAlpha?: number;
+  freeHandle?: FreeHandleVisual | null;
     /** Optional syntax tokens for a line (1-based). Empty → plain foreground. */
     getLineTokens?: (lineNumber: number) => MonoToken[];
     stickyLines?: StickyRenderLine[];
+    /** Active line pinned at bottom of editor */
+    bottomSticky?: { lineNumber: number; caretColumn: number } | null;
     /** Find matches to highlight (other matches) */
     findMatches?: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }[];
     /** Current match index (0-based) for stronger highlight */
@@ -113,9 +117,12 @@ export class CanvasRenderer {
       model, selection, scrollTop, scrollLeft, cssWidth, cssHeight,
       metrics, theme, showLineNumbers, overscan,
       showTeardrops = true,
+      handlesVisible = true,
+      handleAlpha = 1,
       freeHandle = null,
       getLineTokens,
       stickyLines = [],
+      bottomSticky = null,
       findMatches = [],
       findCurrentIndex = -1,
     } = opts;
@@ -253,8 +260,10 @@ export class CanvasRenderer {
 
 
     this.lastTeardrops = [];
-    if (showTeardrops) {
+    if (showTeardrops && handlesVisible && handleAlpha > 0.01) {
       const dropColor = theme.caret || '#007acc';
+      const prevA = ctx.globalAlpha;
+      ctx.globalAlpha = handleAlpha;
       if (hasSelection) {
         this.paintTeardropAt(
           range.startLine, range.startCol, 'start',
@@ -270,6 +279,7 @@ export class CanvasRenderer {
           model, metrics, scrollTop, scrollLeft, showLineNumbers, dropColor, freeHandle,
         );
       }
+      ctx.globalAlpha = prevA;
     }
 
     // --- Sticky scroll overlay (outer on top; gutter above sticky text) ---
@@ -342,7 +352,14 @@ export class CanvasRenderer {
           }
           if (col <= content.length) emit(col, content.length + 1, 'plain');
         }
-        ctx.globalAlpha = 1;
+        
+        // Active sticky caret
+        if (s.caretColumn != null && s.kind === 'active') {
+          const cx = textX0s + Math.max(0, (s.caretColumn - 1)) * cw;
+          ctx.fillStyle = theme.caret || '#007acc';
+          ctx.fillRect(cx, y + 2, 2, lineHeight - 4);
+        }
+ctx.globalAlpha = 1;
         ctx.restore(); // end content clip
 
         // Gutter ON TOP of any scrolled text that tried to enter left strip
@@ -378,12 +395,76 @@ export class CanvasRenderer {
       }
       ctx.restore();
     }
+
+    // --- Bottom active-line sticky ---
+    if (bottomSticky && bottomSticky.lineNumber >= 1) {
+      const bl = bottomSticky.lineNumber;
+      const y = cssHeight - lineHeight;
+      const content = model.getLineContent(bl);
+      const textY = y + (lineHeight - fontSize) / 2;
+      const contentLeft = showLineNumbers ? gutterWidth : 0;
+      const cw = metrics.charWidth;
+
+      ctx.save();
+      ctx.fillStyle = theme.background;
+      ctx.fillRect(0, y, cssWidth, lineHeight);
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(0, y, cssWidth, 1);
+
+      if (showLineNumbers) {
+        ctx.fillStyle = theme.gutterBackground;
+        ctx.fillRect(0, y, gutterWidth, lineHeight);
+        ctx.fillStyle = theme.gutterForeground;
+        ctx.textAlign = 'right';
+        ctx.fillText(String(bl), gutterWidth - 8, textY);
+        ctx.textAlign = 'left';
+      }
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(contentLeft, y, Math.max(0, cssWidth - contentLeft), lineHeight);
+      ctx.clip();
+
+      const textX0 = contentLeft + paddingLeft - scrollLeft;
+      const tokens = getLineTokens?.(bl) ?? [];
+      if (!tokens.length) {
+        ctx.fillStyle = theme.foreground;
+        ctx.fillText(content, textX0, textY);
+      } else {
+        const colors = { ...DEFAULT_TOKEN_COLORS, ...(theme.tokenColors ?? {}) };
+        let col = 1;
+        const emit = (from: number, to: number, type: string) => {
+          if (to <= from) return;
+          const slice = content.slice(from - 1, to - 1);
+          if (!slice) return;
+          ctx.fillStyle = (colors as any)[type] ?? theme.foreground;
+          ctx.fillText(slice, textX0 + (from - 1) * cw, textY);
+        };
+        for (const tok of tokens) {
+          if (tok.startColumn > col) emit(col, tok.startColumn, 'plain');
+          emit(tok.startColumn, tok.endColumn, tok.type);
+          col = Math.max(col, tok.endColumn);
+        }
+        if (col <= content.length) emit(col, content.length + 1, 'plain');
+      }
+
+      const cx =
+        contentLeft +
+        paddingLeft -
+        scrollLeft +
+        Math.max(0, (bottomSticky.caretColumn ?? 1) - 1) * cw;
+      ctx.fillStyle = theme.caret || '#007acc';
+      ctx.fillRect(cx, y + 2, 2, lineHeight - 4);
+      ctx.restore();
+      ctx.restore();
+    }
   }
 
   private paintTeardropAt(
     line: number, col: number, type: 'cursor' | 'start' | 'end',
     model: TextModel, metrics: RenderMetrics,
     scrollTop: number, scrollLeft: number, showLineNumbers: boolean, color: string,
+    handlesVisible?: boolean,
     freeHandle?: FreeHandleVisual | null,
   ): void {
     const { lineHeight, paddingTop, paddingLeft, gutterWidth } = metrics;
