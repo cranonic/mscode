@@ -89,7 +89,7 @@ export class FindController {
     this.seedFromSelection();
     this.isRevealed = true;
     this.isReplaceRevealed = false;
-    this.widget.reveal(false);
+    this.widget.reveal(false, true, true);
     this.research(true);
     this.ensureModelWatch();
   }
@@ -99,7 +99,7 @@ export class FindController {
     this.seedFromSelection();
     this.isRevealed = true;
     this.isReplaceRevealed = true;
-    this.widget.reveal(true);
+    this.widget.reveal(true, true, true);
     this.research(true);
     this.ensureModelWatch();
   }
@@ -235,7 +235,8 @@ export class FindController {
 
   private syncWidget(): void {
     if (this.isRevealed) {
-      this.widget.reveal(this.isReplaceRevealed);
+      // Layout only — do NOT focus/select (that was resetting the find input every keystroke)
+      this.widget.reveal(this.isReplaceRevealed, false, false);
       this.widget.update(this.getState());
     }
   }

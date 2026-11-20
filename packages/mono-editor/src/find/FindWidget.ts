@@ -39,11 +39,22 @@ export class FindWidget {
     return !!this.el;
   }
 
-  reveal(replace: boolean): void {
+  /**
+   * @param focusInput when true, focus find box (open gesture only — not on every keystroke)
+   * @param selectAll when true, select all text (only on first open / Ctrl+F)
+   */
+  reveal(replace: boolean, focusInput = true, selectAll = false): void {
     if (!this.el) this.build();
     this.setReplaceVisible(replace);
-    this.findInput?.focus();
-    this.findInput?.select();
+    if (focusInput && this.findInput) {
+      // Don't steal selection while user is typing
+      if (document.activeElement !== this.findInput) {
+        this.findInput.focus();
+        if (selectAll) this.findInput.select();
+      } else if (selectAll) {
+        this.findInput.select();
+      }
+    }
   }
 
   hide(): void {
@@ -59,10 +70,19 @@ export class FindWidget {
 
   update(state: FindState): void {
     if (!this.el) return;
-    if (this.findInput && this.findInput.value !== state.searchString) {
+    // Never rewrite value while the user is typing in that field (preserves caret)
+    if (
+      this.findInput &&
+      this.findInput.value !== state.searchString &&
+      document.activeElement !== this.findInput
+    ) {
       this.findInput.value = state.searchString;
     }
-    if (this.replaceInput && this.replaceInput.value !== state.replaceString) {
+    if (
+      this.replaceInput &&
+      this.replaceInput.value !== state.replaceString &&
+      document.activeElement !== this.replaceInput
+    ) {
       this.replaceInput.value = state.replaceString;
     }
     this.setReplaceVisible(state.isReplaceRevealed);
