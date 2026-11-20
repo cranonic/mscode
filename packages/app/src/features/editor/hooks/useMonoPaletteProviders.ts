@@ -1,18 +1,16 @@
 /**
- * Registers command-palette providers into the APP paletteStore
- * (CommandPalette.tsx reads providers[prefix] only — not mono-editor PaletteService).
+ * Registers providers into APP paletteStore (CommandPalette UI reads this).
+ * Must be called from a mounted component (e.g. CodeEditor).
  *
- * Package name: @mono/editor
- *
- * Usage (editor shell):
- *   useMonoPaletteProviders(monoEditorInstance); // or null — app commands still list
+ * Expected:
+ *   query ""  → help items (Show Commands, Go to Line, …)
+ *   query ">" → full command list (editor + app registry)
  */
 import { useEffect } from 'react';
 import { usePaletteStore, type QuickPickItem } from '@/store/paletteStore';
 import { commands } from '@/core/extensionAPI/registry/commandRegistry';
 import { keybindingManager } from '@/core/keybindings/keybindingManager';
 
-/** Structural — avoids hard type coupling if build order lags */
 export type MonoEditorPaletteHost = {
   getCommandsForPalette?: (filter?: string) => Array<{
     id: string;
@@ -30,45 +28,33 @@ export type MonoEditorPaletteHost = {
   focus?: () => void;
 };
 
-function appCommandItems(filter: string): QuickPickItem[] {
+function appItems(filter: string): QuickPickItem[] {
   const q = (filter || '').toLowerCase().trim();
-  const list = commands.getCommandsForPalette() || [];
-  return list
-    .filter((c) => {
-      if (!c.title) return false;
+  const raw = commands.getCommandsForPalette?.() || [];
+  return raw
+    .filter((c: any) => {
+      if (!c?.title) return false;
       if (!q) return true;
-      return (
-        (c.title || '').toLowerCase().includes(q) ||
-        (c.category || '').toLowerCase().includes(q) ||
-        (c.id || '').toLowerCase().includes(q)
-      );
+      return `${c.title} ${c.category || ''} ${c.id}`.toLowerCase().includes(q);
     })
-    .map((c) => {
+    .map((c: any) => {
       let shortcut = c.shortcut;
       try {
-        shortcut =
-          (keybindingManager as any).getShortcutLabel?.(c.id) || c.shortcut;
-      } catch {
-        /* */
-      }
+        shortcut = (keybindingManager as any)?.getShortcutLabel?.(c.id) || c.shortcut;
+      } catch { /* */ }
       return {
         id: c.id,
         label: c.title || c.id,
         description: c.category,
-        leftIcon: (c.icon as string) || 'terminal',
+        leftIcon: c.icon || 'terminal',
         shortcut,
-        onSelect: () => {
-          void commands.executeCommand(c.id);
-        },
-      } satisfies QuickPickItem;
+        onSelect: () => { void commands.executeCommand(c.id); },
+      } as QuickPickItem;
     });
 }
 
-function editorCommandItems(
-  editor: MonoEditorPaletteHost,
-  filter: string,
-): QuickPickItem[] {
-  if (!editor.getCommandsForPalette) return [];
+function editorItems(editor: MonoEditorPaletteHost | null | undefined, filter: string): QuickPickItem[] {
+  if (!editor?.getCommandsForPalette) return [];
   try {
     return (editor.getCommandsForPalette(filter) || []).map((c) => ({
       id: c.id,
@@ -83,33 +69,22 @@ function editorCommandItems(
       },
     }));
   } catch (e) {
-    console.warn('[useMonoPaletteProviders] getCommandsForPalette failed', e);
+    console.warn('[palette] editor commands failed', e);
     return [];
   }
 }
 
-function mergeCommands(
-  editor: MonoEditorPaletteHost | null | undefined,
-  filter: string,
-): QuickPickItem[] {
-  const fromEditor = editor ? editorCommandItems(editor, filter) : [];
-  const seen = new Set(fromEditor.map((i) => i.id));
-  const fromApp = appCommandItems(filter).filter((i) => !seen.has(i.id));
-  return [...fromEditor, ...fromApp].sort((a, b) =>
-    (a.label || '').localeCompare(b.label || ''),
-  );
+function merge(editor: MonoEditorPaletteHost | null | undefined, filter: string): QuickPickItem[] {
+  const a = editorItems(editor, filter);
+  const seen = new Set(a.map((i) => i.id));
+  const b = appItems(filter).filter((i) => !seen.has(i.id));
+  return [...a, ...b].sort((x, y) => (x.label || '').localeCompare(y.label || ''));
 }
 
-/**
- * Primary registration path for Mono Studio CommandPalette UI.
- */
-export function useMonoPaletteProviders(
-  editor: MonoEditorPaletteHost | null | undefined,
-) {
+export function useMonoPaletteProviders(editor: MonoEditorPaletteHost | null | undefined) {
   useEffect(() => {
     const { registerProvider, unregisterProvider } = usePaletteStore.getState();
 
-    // ── Help (empty prefix) ───────────────────────────────────────────
     registerProvider({
       prefix: '',
       name: 'Help & Menu',
@@ -130,36 +105,25 @@ export function useMonoPaletteProviders(
             id: 'help-line',
             label: 'Go to Line/Column...',
             inlineDetail: ':',
-            shortcut: 'Ctrl+G',
             leftIcon: 'arrow-right',
             keepOpen: true,
             onSelect: () => setQuery(':'),
-          },
-          {
-            id: 'help-recent',
-            label: 'Recent Opened...',
-            inlineDetail: '/',
-            leftIcon: 'folder',
-            keepOpen: true,
-            onSelect: () => setQuery('/'),
           },
         ];
       },
     });
 
-    // ── Commands (>) — MUST always return a list ─────────────────────
     registerProvider({
       prefix: '>',
       name: 'Show and Run Commands',
-      placeholder: 'Type a command name...',
       provideItems: (search) => {
-        const items = mergeCommands(editor, search || '');
+        const items = merge(editor, search || '');
         if (items.length === 0) {
           return [
             {
-              id: 'no-cmds',
-              label: 'No commands registered yet',
-              description: 'Register via editor.addAction or commands.registerCommand',
+              id: 'empty-cmds',
+              label: 'No commands registered',
+              description: 'Add title via commands.registerCommand(..., { title }) or editor.addAction',
               readonly: true,
             },
           ];
@@ -168,22 +132,13 @@ export function useMonoPaletteProviders(
       },
     });
 
-    // ── Go to line (:) ───────────────────────────────────────────────
     registerProvider({
       prefix: ':',
       name: 'Go to Line/Column',
       provideItems: (search) => {
-        const total =
-          editor?.getLineCount?.() ??
-          99999;
+        const total = editor?.getLineCount?.() ?? 1;
         if (!search) {
-          return [
-            {
-              id: 'hint',
-              label: `Type a line number (1–${total === 99999 ? '…' : total})`,
-              readonly: true,
-            },
-          ];
+          return [{ id: 'hint', label: `Type a line number (1–${total})`, readonly: true }];
         }
         const parts = search.split(',');
         let line = parseInt(parts[0]!, 10);
@@ -191,8 +146,7 @@ export function useMonoPaletteProviders(
         if (Number.isNaN(line)) {
           return [{ id: 'err', label: 'Invalid line number', readonly: true }];
         }
-        if (total !== 99999) line = Math.max(1, Math.min(total, line));
-        else line = Math.max(1, line);
+        line = Math.max(1, Math.min(total, line));
         return [
           {
             id: 'goto',
@@ -208,24 +162,14 @@ export function useMonoPaletteProviders(
       },
     });
 
-    // Keep '/' if recent provider not registered elsewhere — minimal stub
-    registerProvider({
-      prefix: '/',
-      name: 'Recent',
-      provideItems: () => [
-        {
-          id: 'recent-stub',
-          label: 'Use workspace Recent list (explorer)',
-          readonly: true,
-        },
-      ],
-    });
+    if (typeof console !== 'undefined') {
+      console.debug('[palette] providers registered for >, :, help; editor=', !!editor);
+    }
 
     return () => {
       unregisterProvider('');
       unregisterProvider('>');
       unregisterProvider(':');
-      unregisterProvider('/');
     };
   }, [editor]);
 }

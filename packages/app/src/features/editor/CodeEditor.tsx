@@ -1,10 +1,11 @@
 // Default engine: Mono Editor (canvas). Monaco removed from this path.
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createMonoEditor, type IMonoEditor } from '@mono/editor';
 import { useSettingsStore } from '@/features/settings/store/settingsStore';
 import { useFileLoader } from './hooks/useFileLoader';
 import { useEditorViewStateStore } from '@/features/editor/store/editorViewStateStore';
 import { useTerminalBoot } from '@/features/termis/components/terminal/hooks/useTerminalBoot';
+import { useMonoPaletteProviders } from './hooks/useMonoPaletteProviders';
 import './CodeEditor.css';
 
 interface CodeEditorProps {
@@ -29,11 +30,17 @@ function guessLanguage(filePath: string): string {
 export const CodeEditor: React.FC<CodeEditorProps> = ({ tabId, filePath }) => {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<IMonoEditor | null>(null);
+  /** State so palette hook re-runs when editor is ready */
+  const [paletteHost, setPaletteHost] = useState<IMonoEditor | null>(null);
   const settings = useSettingsStore((s) => s.settings);
   const updateViewState = useEditorViewStateStore((s) => s.updateViewState);
   const { initialContent, isLoading, handleEditorChange } = useFileLoader({ tabId, filePath });
 
   useTerminalBoot();
+
+  // CRITICAL: registers paletteStore providers (>, :, help).
+  // Without this, CommandPalette shows "No matching workspace actions found".
+  useMonoPaletteProviders(paletteHost);
 
   const fontSize = Number(settings['editor.fontSize'] ?? 14);
   const lineNumbers = settings['editor.lineNumbers'] === 'off' ? 'off' : 'on';
@@ -59,6 +66,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tabId, filePath }) => {
       },
     });
     editorRef.current = editor;
+    setPaletteHost(editor);
 
     const sub = editor.onDidChangeModelContent((e) => {
       handleEditorChange(e.value);
@@ -70,6 +78,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tabId, filePath }) => {
       sub.dispose();
       editor.dispose();
       editorRef.current = null;
+      setPaletteHost(null);
     };
   }, [tabId, filePath, isLoading]);
 
