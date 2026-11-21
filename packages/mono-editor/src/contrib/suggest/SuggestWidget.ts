@@ -229,9 +229,9 @@ export class SuggestWidget {
     this.onAccept = handlers.onAccept;
     this.onDismiss = handlers.onDismiss;
     this.opts = {
-      maxHeight: 264,
+      maxHeight: 150,
       maxWidth: 460,
-      minWidth: 220,
+      minWidth: 250,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
       fontSize: 14,
       className: '',
