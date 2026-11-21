@@ -40,6 +40,8 @@ export function registerEditorEditActions(): void {
   commands.registerCommand(
     'actions.find',
     (editorArg?: any) => {
+      const mono = (window as any).__monoEditor;
+      if (mono?.revealFind) { mono.revealFind(); return; }
       const editor = editorArg || getActiveMonacoEditor() || commands.getActiveEditor?.();
       if (editor) {
         editor.trigger('keyboard', 'actions.find', null);
@@ -53,7 +55,11 @@ export function registerEditorEditActions(): void {
 
   commands.registerCommand(
     'editor.action.startFindReplaceAction',
-    () => triggerOnActiveEditor('editor.action.startFindReplaceAction'),
+    () => {
+      const mono = (window as any).__monoEditor;
+      if (mono?.revealReplace) { mono.revealReplace(); return; }
+      triggerOnActiveEditor('editor.action.startFindReplaceAction');
+    },
     { title: 'Edit: Replace', category: 'Edit', icon: 'replace', shortcut: 'Ctrl+H' },
   );
 

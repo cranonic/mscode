@@ -65,7 +65,41 @@ function editorItems(editor: MonoEditorPaletteHost | null | undefined, filter: s
       readonly: c.enabled === false,
       onSelect: () => {
         if (c.enabled === false) return;
-        void editor.executeCommand?.(c.id);
+        console.log('[palette] select', c.id);
+        const mono = (window as any).__monoEditor || editor;
+
+        // Direct Mono calls for editor commands (bypass registry)
+        if (c.id === 'actions.find' || c.id === 'editor.action.startFindAction') {
+          mono?.revealFind?.() || mono?.executeCommand?.('actions.find');
+          return;
+        }
+        if (c.id === 'editor.action.startFindReplaceAction') {
+          mono?.revealReplace?.() || mono?.executeCommand?.('editor.action.startFindReplaceAction');
+          return;
+        }
+        if (c.id === 'editor.action.selectAll') {
+          mono?.executeCommand?.('editor.action.selectAll');
+          return;
+        }
+
+        // Workbench / app commands
+        if (c.id.startsWith('workbench.') || commands.hasCommand?.(c.id)) {
+          if (commands.hasCommand?.(c.id)) {
+            void commands.executeCommand(c.id);
+          } else {
+            console.warn('[palette] command missing in registry:', c.id);
+            // Direct fallbacks for common ones
+            if (c.id === 'workbench.action.closeAllEditors') {
+              import('@/store/tabStore').then(m => m.useTabStore.getState().clearTabs());
+            } else if (c.id === 'workbench.action.openSettings') {
+              import('@/store/tabStore').then(m => m.useTabStore.getState().addTab({
+                id: 'mscode://internal/settings.ui', type: 'settings', title: 'Settings', icon: 'settings',
+              }));
+            }
+          }
+          return;
+        }
+        void mono?.executeCommand?.(c.id);
       },
     }));
   } catch (e) {

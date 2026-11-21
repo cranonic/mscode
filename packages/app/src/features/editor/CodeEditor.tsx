@@ -14,6 +14,7 @@ import { useMonoPaletteProviders } from './hooks/useMonoPaletteProviders';
 import { useMonoEditorBridge } from './hooks/useMonoEditorBridge';
 import { usePaletteStore } from '@/store/paletteStore';
 import { commands } from '@/core/extensionAPI/registry/commandRegistry';
+// debug: log a few critical commands on mount
 import './CodeEditor.css';
 
 interface CodeEditorProps {
@@ -81,6 +82,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tabId, filePath }) => {
     // Expose for Eruda / console testing
     const w = window as any;
     w.__monoEditor = editor;
+    console.log('[palette] closeAll registered?', commands.hasCommand?.('workbench.action.closeAllEditors'));
+    console.log('[palette] openSettings registered?', commands.hasCommand?.('workbench.action.openSettings'));
     if (!w.__monoEditors) w.__monoEditors = new Set();
     w.__monoEditors.add(editor);
     w.__testMarkers = () => {

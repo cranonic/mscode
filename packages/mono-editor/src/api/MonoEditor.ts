@@ -459,14 +459,14 @@ export class MonoEditor implements IMonoEditor {
   }
 
   executeCommand(id: string, ...args: unknown[]): Promise<unknown> {
-    try {
-      const result = this.commands.executeCommand(id, ...args);
-      return Promise.resolve(result);
-    } catch {
-      // Unknown to Mono — let app registry handle it
+    // Mono registry returns undefined (no throw) when command is missing.
+    // Detect that and let the app registry handle it.
+    const known = this.commands.getCommands?.().some((c: any) => c.id === id);
+    if (!known) {
       window.dispatchEvent(new CustomEvent('mono:executeCommand', { detail: { id, args } }));
       return Promise.resolve(undefined);
     }
+    return this.commands.executeCommand(id, ...args);
   }
 
   getCommandsForPalette(filter?: string) {
