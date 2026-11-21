@@ -143,6 +143,17 @@ export class ContextMenuController {
     const gap = opts?.gap ?? 8;
     const rect = this.host.getBoundingClientRect();
     const menu = this.el.getBoundingClientRect();
+
+    if (opts?.placement) {
+      const p = opts.placement(
+        { width: menu.width, height: menu.height },
+        { width: rect.width, height: rect.height },
+      );
+      this.el.style.left = `${p.left}px`;
+      this.el.style.top = `${p.top}px`;
+      return;
+    }
+
     let left = localX - menu.width / 2;
     left = Math.max(pad, Math.min(left, rect.width - menu.width - pad));
 
@@ -262,8 +273,7 @@ export class ContextMenuController {
       const bOff = this.model.getOffsetAt(b.lineNumber, b.column);
       const start = Math.min(aOff, bOff);
       const end = Math.max(aOff, bOff);
-      this.model.delete(start, end);
-      this.model.insert(start, text);
+      this.model.replaceRange(start, end, text);
       const pos = this.model.getPositionAt(start + text.length);
       this.selection.setCaret(pos.lineNumber, pos.column);
     } else {

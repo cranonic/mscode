@@ -431,6 +431,20 @@ export class PointerController {
         this.pointerId = null;
         return;
       }
+      // Bottom active-line sticky click → jump to that line
+      // (teardrops keep priority so a handle near the bottom edge can still be dragged)
+      const bottomHit = this.hitTeardrop(e.clientX, e.clientY)
+        ? null
+        : this.view.hitTestBottomSticky(localX, localY);
+      if (bottomHit) {
+        e.preventDefault();
+        this.stopFling();
+        this.view.revealBottomStickyLine(bottomHit.lineNumber, localX);
+        this.onInteract('tap');
+        this.active = false;
+        this.pointerId = null;
+        return;
+      }
     }
 
     const hit = this.pendingDouble ? null : this.hitTeardrop(e.clientX, e.clientY);

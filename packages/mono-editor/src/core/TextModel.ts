@@ -81,7 +81,16 @@ export class TextModel {
     };
   }
 
-  applyEdit(edit: ModelEdit, record = true): void {
+  applyEdit(
+    edit: ModelEdit,
+    record = true,
+    afterSelOverride?: {
+      aLine: number;
+      aCol: number;
+      bLine: number;
+      bCol: number;
+    },
+  ): void {
     const value = this.getValue();
     const replaced = value.slice(edit.startOffset, edit.endOffset);
     const beforeSel = record ? this.selCapture?.() ?? undefined : undefined;
@@ -93,7 +102,7 @@ export class TextModel {
     this.bump();
     if (record) {
       const endPos = this.getPositionAt(edit.startOffset + edit.text.length);
-      const afterSel = {
+      const afterSel = afterSelOverride ?? {
         aLine: endPos.lineNumber,
         aCol: endPos.column,
         bLine: endPos.lineNumber,
@@ -136,6 +145,21 @@ export class TextModel {
 
   redo(): boolean {
     return this.redoEntry() != null;
+  }
+
+  /**
+   * Replace [start, end) with `text` as ONE undo step.
+   * (delete + insert would push two stack entries → undo needs two presses
+   * and the first press restores only the caret, not the selection.)
+   */
+  replaceRange(
+    startOffset: number,
+    endOffset: number,
+    text: string,
+    afterSel?: { aLine: number; aCol: number; bLine: number; bCol: number },
+  ): void {
+    if (endOffset <= startOffset && text === '') return;
+    this.applyEdit({ startOffset, endOffset, text }, true, afterSel);
   }
 
   insert(offset: number, text: string): void {

@@ -464,7 +464,6 @@ ctx.globalAlpha = 1;
     line: number, col: number, type: 'cursor' | 'start' | 'end',
     model: TextModel, metrics: RenderMetrics,
     scrollTop: number, scrollLeft: number, showLineNumbers: boolean, color: string,
-    handlesVisible?: boolean,
     freeHandle?: FreeHandleVisual | null,
   ): void {
     const { lineHeight, paddingTop, paddingLeft, gutterWidth } = metrics;

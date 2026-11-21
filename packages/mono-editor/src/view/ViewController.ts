@@ -322,6 +322,43 @@ export class ViewController {
   }
 
   /**
+   * Bottom active-line sticky hit-test (bar drawn at the very bottom of the
+   * viewport, one line tall). Returns the pinned line or null.
+   */
+  hitTestBottomSticky(localX: number, localY: number): { lineNumber: number } | null {
+    const b = this.lastBottomSticky;
+    if (!b || localX < 0 || localX > this.cssWidth) return null;
+    const lh = this.getMetrics().lineHeight;
+    if (localY < this.cssHeight - lh - 1 || localY > this.cssHeight) return null;
+    return { lineNumber: b.lineNumber };
+  }
+
+  /**
+   * Click on bottom sticky → jump to that line: scroll it into the middle of the
+   * viewport (works whether the line is below OR above the viewport) and put the
+   * caret at the clicked column.
+   */
+  revealBottomStickyLine(lineNumber: number, localX?: number): void {
+    const m = this.getMetrics();
+    const line = Math.max(1, Math.min(this.model.getLineCount(), lineNumber));
+    const docY = m.paddingTop + (line - 1) * m.lineHeight;
+    this.scrollTop = Math.max(0, docY - (this.cssHeight - m.lineHeight) / 2);
+    this.clampScroll();
+
+    let col = this.selection.active.column;
+    if (localX != null) {
+      const textX = localX - this.contentLeft - m.paddingLeft + this.scrollLeft;
+      const content = this.model.getLineContent(line);
+      col = Math.floor(textX / Math.max(1, m.charWidth)) + 1;
+      col = Math.max(1, Math.min(content.length + 1, col));
+    }
+    this.selection.setCaret(line, col);
+    // line is fully visible now → drop the pinned bar immediately
+    this.lastBottomSticky = null;
+    this.paint();
+  }
+
+  /**
    * VS Code / Acode: scroll so `lineNumber` sits exactly in sticky slot `index`
    * (the sticky header appears to stay put) and place caret on that line.
    */

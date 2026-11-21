@@ -88,6 +88,5 @@ export function replaceMatch(
       /* use literal */
     }
   }
-  model.delete(start, end);
-  model.insert(start, replacement);
+  model.replaceRange(start, end, replacement);
 }

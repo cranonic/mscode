@@ -1,6 +1,6 @@
 import { TextModel } from '../core/TextModel';
 import { SelectionState } from '../core/Selection';
-import { CanvasRenderer } from '../render/CanvasRenderer';
+import { CanvasRenderer, TEARDROP } from '../render/CanvasRenderer';
 import { InputController } from '../input/InputController';
 import { PointerController } from '../input/PointerController';
 import { ViewController } from '../view/ViewController';
@@ -68,6 +68,8 @@ export class MonoEditor implements IMonoEditor {
   private commands!: CommandService;
   private palette!: PaletteService;
   private find!: FindController;
+  /** Menu was open when scrolling started → bring it back when scroll+touch ended */
+  private menuRestore = false;
   private onDocPointerDown: ((e: PointerEvent) => void) | null = null;
   private onRootKeyDown: ((e: KeyboardEvent) => void) | null = null;
 
@@ -157,6 +159,7 @@ export class MonoEditor implements IMonoEditor {
       this.selection,
       () => {
         // Typing: hide menu + teardrops; fade back after 3s
+        this.menuRestore = false;
         this.menu?.hide();
         this.handleVis?.onType();
         this.view.ensureCaretVisible();
@@ -249,22 +252,25 @@ export class MonoEditor implements IMonoEditor {
       () => this.renderer.lastTeardrops,
       (kind) => {
         if (kind === 'scroll') {
-          this.menu?.hide();
+          this.hideMenuForScroll();
           this.handleVis?.onScrollStart();
           this.emitScrollEvent(true, true);
           return;
         }
         if (kind === 'scrollEnd') {
           this.handleVis?.onScrollEnd();
+          this.restoreMenuAfterScroll();
           return;
         }
         if (kind === 'tap') {
+          this.menuRestore = false;
           this.menu?.hide();
           this.handleVis?.onUserInteract();
           this.syncTextarea();
           this.input.focus();
           this.view.paint();
         } else if (kind === 'handle') {
+          this.menuRestore = false;
           this.menu?.hide();
           this.handleVis?.onUserInteract();
           this.syncTextarea();
@@ -284,6 +290,7 @@ export class MonoEditor implements IMonoEditor {
           if (!this.selection.isEmpty) {
             requestAnimationFrame(() => this.showEditorMenu());
           } else {
+            this.menuRestore = false;
             this.menu?.hide();
           }
         }
@@ -587,8 +594,8 @@ export class MonoEditor implements IMonoEditor {
         edit.range.endColumn,
       );
       const text = edit.text ?? '';
-      if (end > start) this.model.delete(start, end);
-      if (text) this.model.insert(start, text);
+      // single undo entry per edit (delete+insert would be two)
+      this.model.replaceRange(start, end, text);
       const pos = this.model.getPositionAt(start + text.length);
       this.selection.setCaret(pos.lineNumber, pos.column);
     }
@@ -1067,8 +1074,7 @@ export class MonoEditor implements IMonoEditor {
         const bOff = this.model.getOffsetAt(b.lineNumber, b.column);
         const start = Math.min(aOff, bOff);
         const end = Math.max(aOff, bOff);
-        this.model.delete(start, end);
-        this.model.insert(start, text);
+        this.model.replaceRange(start, end, text);
         const pos = this.model.getPositionAt(start + text.length);
         this.selection.setCaret(pos.lineNumber, pos.column);
       } else {
@@ -1169,34 +1175,110 @@ export class MonoEditor implements IMonoEditor {
     this.showEditorMenu();
   }
 
+  /** Scroll started: hide the menu but remember it was open. */
+  private hideMenuForScroll(): void {
+    if (this.menu?.isOpen()) this.menuRestore = true;
+    this.menu?.hide();
+  }
+
+  /** Scroll fully stopped (finger up + fling done): show the menu again. */
+  private restoreMenuAfterScroll(): void {
+    if (!this.menuRestore || this.disposed) return;
+    this.menuRestore = false;
+    requestAnimationFrame(() => {
+      if (!this.disposed) this.showEditorMenu();
+    });
+  }
+
   /**
-   * Prefer above caret; if flipped below, start under lowest teardrop.
-   * Shown only on teardrop handleTap (or selection complete).
+   * Selection / caret floating menu.
+   *
+   * Placement order (first that fits the viewport and doesn't cover a teardrop):
+   *   1. above the START of the selection
+   *   2. below the START teardrop
+   *   3. above the END of the selection
+   *   4. below the END teardrop
+   * If the anchors are scrolled out of view, the menu is clamped INSIDE the
+   * viewport: selection above → pinned to the top, selection below → pinned to
+   * the bottom, selection spanning the whole viewport → top.
    */
   private showEditorMenu(): void {
     if (!this.menu || this.disposed) return;
+    this.menuRestore = false;
     const m = this.metrics();
-    const line = this.selection.active.lineNumber;
-    const col = this.selection.active.column;
-    const x =
-      (this.lineNumbers ? m.gutterWidth : 0) +
-      m.paddingLeft +
-      Math.max(0, col - 1) * m.charWidth -
-      this.view.scrollLeft;
-    const y =
-      m.paddingTop + (line - 1) * m.lineHeight - this.view.scrollTop;
+    const contentLeft = this.lineNumbers ? m.gutterWidth : 0;
+    const lh = m.lineHeight;
+    const a = this.selection.anchor;
+    const b = this.selection.active;
+    const aBefore =
+      a.lineNumber < b.lineNumber ||
+      (a.lineNumber === b.lineNumber && a.column <= b.column);
+    const s = aBefore ? a : b;
+    const e = aBefore ? b : a;
+    const toLocal = (p: { lineNumber: number; column: number }) => ({
+      x:
+        contentLeft +
+        m.paddingLeft +
+        Math.max(0, p.column - 1) * m.charWidth -
+        this.view.scrollLeft,
+      top: m.paddingTop + (p.lineNumber - 1) * lh - this.view.scrollTop,
+    });
+    const sp = toLocal(s);
+    const ep = toLocal(e);
+    const sameLine = s.lineNumber === e.lineNumber;
+    const drop = TEARDROP.h;
+    const gap = 8;
+    const pad = 8;
+    const handlesShown = this.view.handlesVisible && this.view.handleAlpha > 0.01;
 
-    let avoidBelowY = y + m.lineHeight + 36;
-    const drops = this.renderer.lastTeardrops;
-    if (drops && drops.length) {
-      for (const d of drops) {
-        avoidBelowY = Math.max(avoidBelowY, d.y + d.h);
-      }
-    }
+    this.menu.showAt(sp.x, sp.top, {
+      gap,
+      placement: (size, host) => {
+        const minTop = Math.max(pad, this.view.lastStickyHeight + 4);
+        const maxTop = Math.max(
+          minTop,
+          host.height - size.height - (this.view.lastBottomSticky ? lh : 0) - pad,
+        );
+        const clampLeft = (cx: number) =>
+          Math.max(pad, Math.min(cx - size.width / 2, host.width - size.width - pad));
 
-    this.menu.showAt(Math.max(0, x), Math.max(0, y), {
-      avoidBelowY,
-      gap: 8,
+        // Teardrop bodies hang BELOW their line (tip at line bottom)
+        const handleRects: { x1: number; x2: number; y1: number; y2: number }[] = [];
+        if (handlesShown) {
+          const pts = this.selection.isEmpty ? [sp] : [sp, ep];
+          for (const p of pts) {
+            const tip = p.top + lh - 1;
+            handleRects.push({ x1: p.x - 22, x2: p.x + 22, y1: tip, y2: tip + drop + 8 });
+          }
+        }
+        const overlapsHandle = (left: number, top: number) =>
+          handleRects.some(
+            (r) =>
+              left < r.x2 &&
+              left + size.width > r.x1 &&
+              top < r.y2 &&
+              top + size.height > r.y1,
+          );
+
+        const midX = (sp.x + ep.x) / 2;
+        const candidates: { top: number; cx: number }[] = [
+          { top: sp.top - size.height - gap, cx: sameLine ? midX : sp.x },
+          { top: sp.top + lh + drop + gap, cx: sameLine ? midX : sp.x },
+          { top: ep.top - size.height - gap, cx: sameLine ? midX : ep.x },
+          { top: ep.top + lh + drop + gap, cx: sameLine ? midX : ep.x },
+        ];
+        for (const c of candidates) {
+          if (c.top < minTop || c.top > maxTop) continue;
+          const left = clampLeft(c.cx);
+          if (overlapsHandle(left, c.top)) continue;
+          return { left, top: c.top };
+        }
+
+        // Anchors out of view → stick to the nearest viewport edge
+        if (ep.top + lh < minTop) return { left: clampLeft(ep.x), top: minTop };
+        if (sp.top > host.height) return { left: clampLeft(sp.x), top: maxTop };
+        return { left: clampLeft((contentLeft + host.width) / 2), top: minTop };
+      },
     });
   }
 
@@ -1213,7 +1295,7 @@ export class MonoEditor implements IMonoEditor {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
-    this.menu?.hide();
+    this.hideMenuForScroll();
     this.handleVis?.onScrollStart();
     const pt = this.view.scrollTop;
     const pl = this.view.scrollLeft;
@@ -1224,7 +1306,10 @@ export class MonoEditor implements IMonoEditor {
     );
     // Debounced scroll end for wheel
     window.clearTimeout((this as any)._wheelEndT);
-    (this as any)._wheelEndT = window.setTimeout(() => this.handleVis?.onScrollEnd(), 150);
+    (this as any)._wheelEndT = window.setTimeout(() => {
+      this.handleVis?.onScrollEnd();
+      this.restoreMenuAfterScroll();
+    }, 150);
   };
 }
 

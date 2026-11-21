@@ -113,7 +113,7 @@ Multi-cursor, folding, word wrap, minimap, decorations/markers, suggest/hover/si
 | Goal column | ❌ | |
 | PageUp/PageDown, Ctrl+Home/End | ✅ | |
 | Move/Duplicate/Delete line | ❌ | |
-| Undo grouping (typing coalesced) | ❌ | EditStack |
+| Undo grouping (typing coalesced) | 🟡 | replace-selection / paste / find-replace / block indent are now ONE undo step (`TextModel.replaceRange`). Typing-burst coalescing still open |
 | IME / composition | ❌ | Android critical |
 | Horizontal caret follow (scrollLeft) | ❌ | bug list in check.md |
 

@@ -242,8 +242,8 @@ export class InputController {
       const bOff = model.getOffsetAt(b.lineNumber, b.column);
       const start = Math.min(aOff, bOff);
       const end = Math.max(aOff, bOff);
-      model.delete(start, end);
-      model.insert(start, text);
+      // ONE undo step: undo restores the old text AND the old selection together
+      model.replaceRange(start, end, text);
       const pos = model.getPositionAt(start + text.length);
       selection.setCaret(pos.lineNumber, pos.column);
     } else {
@@ -268,12 +268,21 @@ export class InputController {
       this.replaceSelection(pad);
       return;
     }
-    for (let ln = startLine; ln <= endLine; ln++) {
-      const off = model.getOffsetAt(ln, 1);
-      model.insert(off, pad);
-    }
-    selection.anchor = { lineNumber: a.lineNumber, column: a.column + this.tabSize };
-    selection.active = { lineNumber: b.lineNumber, column: b.column + this.tabSize };
+    // Whole block = ONE undo step
+    const from = model.getOffsetAt(startLine, 1);
+    const to = model.getOffsetAt(endLine, model.getLineContent(endLine).length + 1);
+    const lines: string[] = [];
+    for (let ln = startLine; ln <= endLine; ln++) lines.push(pad + model.getLineContent(ln));
+    const nextA = { lineNumber: a.lineNumber, column: a.column + this.tabSize };
+    const nextB = { lineNumber: b.lineNumber, column: b.column + this.tabSize };
+    model.replaceRange(from, to, lines.join('\n'), {
+      aLine: nextA.lineNumber,
+      aCol: nextA.column,
+      bLine: nextB.lineNumber,
+      bCol: nextB.column,
+    });
+    selection.anchor = nextA;
+    selection.active = nextB;
     this.onChange();
   }
 
@@ -285,6 +294,8 @@ export class InputController {
     const startLine = Math.min(a.lineNumber, b.lineNumber);
     const endLine = Math.max(a.lineNumber, b.lineNumber);
     const removedAt: Record<number, number> = {};
+    const lines: string[] = [];
+    let any = false;
     for (let ln = startLine; ln <= endLine; ln++) {
       const content = model.getLineContent(ln);
       let remove = 0;
@@ -295,10 +306,10 @@ export class InputController {
         }
       }
       if (remove > 0) {
-        const off = model.getOffsetAt(ln, 1);
-        model.delete(off, off + remove);
         removedAt[ln] = remove;
+        any = true;
       }
+      lines.push(content.slice(remove));
     }
     const adj = (pos: { lineNumber: number; column: number }) => {
       const r = removedAt[pos.lineNumber] ?? 0;
@@ -307,8 +318,21 @@ export class InputController {
         column: Math.max(1, pos.column - r),
       };
     };
-    selection.anchor = adj(a);
-    selection.active = adj(b);
+    const nextA = adj(a);
+    const nextB = adj(b);
+    if (any) {
+      // Whole block = ONE undo step
+      const from = model.getOffsetAt(startLine, 1);
+      const to = model.getOffsetAt(endLine, model.getLineContent(endLine).length + 1);
+      model.replaceRange(from, to, lines.join('\n'), {
+        aLine: nextA.lineNumber,
+        aCol: nextA.column,
+        bLine: nextB.lineNumber,
+        bCol: nextB.column,
+      });
+    }
+    selection.anchor = nextA;
+    selection.active = nextB;
     this.goalColumn = null;
     this.onChange();
   }
@@ -331,9 +355,16 @@ export class InputController {
         const inner = indent + ' '.repeat(this.tabSize);
         const off = model.getOffsetAt(lineNumber, column);
         const insert = '\n' + inner + '\n' + indent;
-        model.insert(off, insert);
-        const pos = model.getPositionAt(off + 1 + inner.length);
-        selection.setCaret(pos.lineNumber, pos.column);
+        // caret goes on the inner line; tell the stack so redo lands there too
+        const caretLine = lineNumber + 1;
+        const caretCol = inner.length + 1;
+        model.replaceRange(off, off, insert, {
+          aLine: caretLine,
+          aCol: caretCol,
+          bLine: caretLine,
+          bCol: caretCol,
+        });
+        selection.setCaret(caretLine, caretCol);
         this.goalColumn = null;
         this.onChange();
         return;

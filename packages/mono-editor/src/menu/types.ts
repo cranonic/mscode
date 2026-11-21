@@ -79,4 +79,13 @@ export interface MonoMenuShowOptions {
   avoidBelowY?: number;
   /** Extra gap between teardrop/caret and menu (default 8) */
   gap?: number;
+  /**
+   * Full control over placement. Receives the measured menu size and host
+   * size (CSS px) and returns host-local left/top. When set, `avoidBelowY`
+   * and the default above/below heuristic are ignored.
+   */
+  placement?: (
+    menu: { width: number; height: number },
+    host: { width: number; height: number },
+  ) => { left: number; top: number };
 }
