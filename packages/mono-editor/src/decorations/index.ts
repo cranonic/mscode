@@ -13,4 +13,3 @@ export { MarkerSeverity } from './types';
 export { DecorationsCollection } from './DecorationsCollection';
 export { MarkerService } from './MarkerService';
 
-export type { DecorationRenderItem as DecorationsRenderItem };

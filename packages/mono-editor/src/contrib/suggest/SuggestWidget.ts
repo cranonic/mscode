@@ -29,7 +29,7 @@ const DEFAULTS: Required<SuggestWidgetOptions> = {
   className: '',
 };
 
-function kindLabel(k?: CompletionItemKind): string {
+function kindLabel(k?: number): string {
   if (k == null) return '';
   const names: Record<number, string> = {
     [Kind.Method]: 'method',

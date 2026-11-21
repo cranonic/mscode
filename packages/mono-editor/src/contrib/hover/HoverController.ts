@@ -67,8 +67,11 @@ export class HoverController {
           p.provideHover(modelLike, { lineNumber: line, column }, token),
         );
         if (my !== this.seq) return;
-        if (!h?.contents?.length) continue;
-        for (const c of h.contents) {
+        if (!h?.contents) continue;
+        const raw = h.contents;
+        const arr = Array.isArray(raw) ? raw : [raw];
+        if (!arr.length) continue;
+        for (const c of arr) {
           parts.push(typeof c === 'string' ? c : (c as any).value || '');
         }
       } catch (e) {
