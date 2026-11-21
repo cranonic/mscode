@@ -1,6 +1,6 @@
 import type { IMarker, IMarkerData, MarkerSeverity } from './types';
 import { MarkerSeverity as Sev } from './types';
-import type { DecorationsRenderItem } from './types';
+import type { DecorationRenderItem } from './types';
 
 /**
  * Monaco MarkerService subset: setModelMarkers / getModelMarkers by owner.
@@ -37,8 +37,8 @@ export class MarkerService {
     else this.byOwner.clear();
   }
 
-  toRenderItems(): DecorationsRenderItem[] {
-    const items: DecorationsRenderItem[] = [];
+  toRenderItems(): DecorationRenderItem[] {
+    const items: DecorationRenderItem[] = [];
     for (const m of this.getModelMarkers()) {
       const color =
         m.severity >= Sev.Error

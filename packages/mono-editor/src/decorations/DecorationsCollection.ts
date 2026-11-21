@@ -45,11 +45,11 @@ export class DecorationsCollection {
   }
 
   /** Flatten for canvas paint */
-  toRenderItems(): DecorationsRenderItem[] {
-    const items: DecorationsRenderItem[] = [];
+  toRenderItems(): DecorationRenderItem[] {
+    const items: DecorationRenderItem[] = [];
     for (const d of this.map.values()) {
       const o = d.options;
-      let underline: DecorationsRenderItem['underline'] = o.monoUnderline ?? 'none';
+      let underline: DecorationRenderItem['underline'] = o.monoUnderline ?? 'none';
       let color = o.monoUnderlineColor ?? '#cccccc';
       if (underline === 'none' && o.inlineClassName) {
         // Heuristic class names

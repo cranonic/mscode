@@ -5,7 +5,7 @@ export type {
   IModelDecoration,
   IModelDecorationOptions,
   IModelDeltaDecoration,
-  DecorationsRenderItem,
+  DecorationRenderItem,
   MarkerSeverity as MarkerSeverityType,
 } from './types';
 export { MarkerSeverity } from './types';

@@ -105,3 +105,17 @@ export type {
   IModelDecorationOptions,
   IRange,
 } from './decorations';
+
+
+// Language features (completion / hover)
+export {
+  languageFeatures,
+  CompletionItemKind,
+} from './language/features';
+export type {
+  CompletionItem,
+  CompletionList,
+  Hover,
+  CompletionProvider,
+  HoverProvider,
+} from './language/features';
