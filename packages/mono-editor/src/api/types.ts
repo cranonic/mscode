@@ -184,6 +184,13 @@ export interface IMonoEditor {
   // ── Commands ─────────────────────────────────────────
   addAction?(action: import('../commands/types').MonoAction): MonoDisposable;
   getAction(id: string): IMonoEditorAction | null;
+
+  /** Monaco-compatible decorations */
+  deltaDecorations(oldDecorations: string[], newDecorations: import('../decorations').IModelDeltaDecoration[]): string[];
+  /** LSP / problems markers */
+  setModelMarkers(owner: string, markers: import('../decorations').IMarkerData[]): void;
+  getModelMarkers(filter?: { owner?: string; take?: number }): import('../decorations').IMarker[];
+
   executeCommand?(id: string, ...args: unknown[]): Promise<unknown>;
 
   // ── Menu / keybindings / sticky (Mono extensions) ────

@@ -32,6 +32,8 @@ import { HandleVisibility } from '../view/HandleVisibility';
 import { PaletteService } from '../palette/PaletteService';
 import type { MonoAction, MonoCommandHandler, MonoRegisteredCommand } from '../commands/types';
 import { FindController } from '../find/FindController';
+import { DecorationsCollection, MarkerService } from '../decorations';
+import type { IMarkerData, IModelDeltaDecoration } from '../decorations';
 
 export class MonoEditor implements IMonoEditor {
   private host: HTMLElement;
@@ -68,6 +70,8 @@ export class MonoEditor implements IMonoEditor {
   private commands!: CommandService;
   private palette!: PaletteService;
   private find!: FindController;
+  private decorations = new DecorationsCollection();
+  private markers = new MarkerService();
   /** Menu was open when scrolling started → bring it back when scroll+touch ended */
   private menuRestore = false;
   private onDocPointerDown: ((e: PointerEvent) => void) | null = null;
@@ -210,6 +214,10 @@ export class MonoEditor implements IMonoEditor {
       matches: this.find.getMatches(),
       currentIndex: this.find.getCurrentIndex(),
     }));
+    this.view.setDecorationRenderProvider(() => [
+      ...this.markers.toRenderItems(),
+      ...this.decorations.toRenderItems(),
+    ]);
 
     this.registerDefaultKeybindings();
     this.registerDefaultActions();
@@ -350,6 +358,25 @@ export class MonoEditor implements IMonoEditor {
 
   hideContextMenu(): void {
     this.menu.hide();
+  }
+
+
+  deltaDecorations(
+    oldDecorations: string[],
+    newDecorations: IModelDeltaDecoration[],
+  ): string[] {
+    const ids = this.decorations.deltaDecorations(oldDecorations, newDecorations);
+    this.view.paint();
+    return ids;
+  }
+
+  setModelMarkers(owner: string, markers: IMarkerData[]): void {
+    this.markers.setModelMarkers(owner, markers);
+    this.view.paint();
+  }
+
+  getModelMarkers(filter?: { owner?: string; take?: number }) {
+    return this.markers.getModelMarkers(filter);
   }
 
   revealFind(): void {

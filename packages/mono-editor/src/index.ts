@@ -90,3 +90,18 @@ export type {
   MonoThemeRule,
   ResolvedMonoEditorTheme,
 } from './theme';
+
+
+// Decorations / markers (diagnostics)
+export {
+  DecorationsCollection,
+  MarkerService,
+  MarkerSeverity,
+} from './decorations';
+export type {
+  IMarker,
+  IMarkerData,
+  IModelDeltaDecoration,
+  IModelDecorationOptions,
+  IRange,
+} from './decorations';

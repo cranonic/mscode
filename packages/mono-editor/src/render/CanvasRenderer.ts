@@ -112,6 +112,19 @@ export class CanvasRenderer {
     findMatches?: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }[];
     /** Current match index (0-based) for stronger highlight */
     findCurrentIndex?: number;
+    /** Diagnostics / decorations underlines */
+    decorations?: {
+      range: {
+        startLineNumber: number;
+        startColumn: number;
+        endLineNumber: number;
+        endColumn: number;
+      };
+      underline: 'none' | 'squiggle' | 'solid' | 'dots';
+      color: string;
+      background?: string;
+      isWholeLine?: boolean;
+    }[];
   }): void {
     const {
       model, selection, scrollTop, scrollLeft, cssWidth, cssHeight,
@@ -125,6 +138,7 @@ export class CanvasRenderer {
       bottomSticky = null,
       findMatches = [],
       findCurrentIndex = -1,
+      decorations = [],
     } = opts;
 
     const { ctx } = this;
@@ -187,6 +201,27 @@ export class CanvasRenderer {
           ctx.fillRect(x1, y, Math.max(2, x2 - x1), lineHeight);
         }
       }
+      // Decoration backgrounds
+      if (decorations.length) {
+        for (const d of decorations) {
+          if (!d.background && !d.isWholeLine) continue;
+          if (line < d.range.startLineNumber || line > d.range.endLineNumber) continue;
+          if (d.isWholeLine && d.background) {
+            ctx.fillStyle = d.background;
+            ctx.fillRect(contentLeft, y, cssWidth - contentLeft, lineHeight);
+            continue;
+          }
+          if (!d.background) continue;
+          let fromCol = 1;
+          let toCol = content.length + 1;
+          if (line === d.range.startLineNumber) fromCol = d.range.startColumn;
+          if (line === d.range.endLineNumber) toCol = d.range.endColumn;
+          const x1 = textX0 + (fromCol - 1) * metrics.charWidth;
+          const x2 = textX0 + (toCol - 1) * metrics.charWidth;
+          ctx.fillStyle = d.background;
+          ctx.fillRect(x1, y, Math.max(2, x2 - x1), lineHeight);
+        }
+      }
 
       if (hasSelection && line >= range.startLine && line <= range.endLine) {
         let fromCol = 1;
@@ -226,6 +261,45 @@ export class CanvasRenderer {
             col = Math.max(col, tok.endColumn);
           }
           if (col <= content.length) emit(col, content.length + 1, 'plain');
+        }
+      }
+
+
+      // Diagnostic / decoration underlines
+      if (decorations.length) {
+        for (const d of decorations) {
+          if (!d.underline || d.underline === 'none') continue;
+          if (line < d.range.startLineNumber || line > d.range.endLineNumber) continue;
+          let fromCol = 1;
+          let toCol = content.length + 1;
+          if (line === d.range.startLineNumber) fromCol = d.range.startColumn;
+          if (line === d.range.endLineNumber) toCol = d.range.endColumn;
+          const x1 = textX0 + (fromCol - 1) * metrics.charWidth;
+          const x2 = textX0 + Math.max(fromCol, toCol - 1) * metrics.charWidth;
+          const baseY = y + lineHeight - 3;
+          ctx.strokeStyle = d.color;
+          ctx.lineWidth = 1.25;
+          ctx.beginPath();
+          if (d.underline === 'solid') {
+            ctx.moveTo(x1, baseY);
+            ctx.lineTo(Math.max(x1 + 2, x2), baseY);
+          } else if (d.underline === 'dots') {
+            for (let x = x1; x < x2; x += 4) {
+              ctx.moveTo(x, baseY);
+              ctx.lineTo(Math.min(x + 2, x2), baseY);
+            }
+          } else {
+            // squiggle
+            const amp = 1.6;
+            const step = 3;
+            let up = true;
+            ctx.moveTo(x1, baseY);
+            for (let x = x1 + step; x <= x2; x += step) {
+              ctx.lineTo(x, baseY + (up ? -amp : amp));
+              up = !up;
+            }
+          }
+          ctx.stroke();
         }
       }
 

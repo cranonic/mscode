@@ -43,6 +43,8 @@ export class ViewController {
   lastStickyHeight = 0;
   private paintRaf = 0;
   /** Optional find highlights supplier */
+  private getDecorationRender: (() => import('../decorations').DecorationsRenderItem[]) | null = null;
+
   private getFindDecorations: (() => {
     matches: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }[];
     currentIndex: number;
@@ -93,6 +95,12 @@ export class ViewController {
 
   clampScrollPublic(): void {
     this.clampScroll();
+  }
+
+  setDecorationRenderProvider(
+    fn: (() => import('../decorations').DecorationsRenderItem[]) | null,
+  ): void {
+    this.getDecorationRender = fn;
   }
 
   setFindDecorationsProvider(
@@ -289,6 +297,7 @@ export class ViewController {
       handleAlpha: this.handleAlpha,
       stickyLines,
       bottomSticky: this.lastBottomSticky,
+      decorations: this.getDecorationRender?.() ?? [],
       findMatches: this.getFindDecorations?.().matches ?? [],
       findCurrentIndex: this.getFindDecorations?.().currentIndex ?? -1,
     });
