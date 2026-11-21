@@ -278,7 +278,7 @@ export class CanvasRenderer {
           const x2 = textX0 + Math.max(fromCol, toCol - 1) * metrics.charWidth;
           const baseY = y + lineHeight - 3;
           ctx.strokeStyle = d.color;
-          ctx.lineWidth = 1.25;
+          ctx.lineWidth = 2;
           ctx.beginPath();
           if (d.underline === 'solid') {
             ctx.moveTo(x1, baseY);
@@ -290,8 +290,8 @@ export class CanvasRenderer {
             }
           } else {
             // squiggle
-            const amp = 1.6;
-            const step = 3;
+            const amp = 2.4;
+            const step = 4;
             let up = true;
             ctx.moveTo(x1, baseY);
             for (let x = x1 + step; x <= x2; x += step) {

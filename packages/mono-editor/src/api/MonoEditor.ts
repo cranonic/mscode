@@ -141,23 +141,13 @@ export class MonoEditor implements IMonoEditor {
     this.root.appendChild(canvas);
     host.appendChild(this.root);
 
-    // Diagnostic hover tooltip
     this.diagHover = document.createElement('div');
     Object.assign(this.diagHover.style, {
-      position: 'absolute',
-      display: 'none',
-      zIndex: '100',
-      maxWidth: '360px',
-      padding: '6px 8px',
-      borderRadius: '4px',
-      fontSize: '12px',
-      lineHeight: '1.4',
-      pointerEvents: 'none',
-      background: '#252526',
-      color: '#cccccc',
-      border: '1px solid #454545',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-      whiteSpace: 'pre-wrap',
+      position: 'absolute', display: 'none', zIndex: '100',
+      maxWidth: '360px', padding: '6px 8px', borderRadius: '4px',
+      fontSize: '12px', lineHeight: '1.4', pointerEvents: 'none',
+      background: '#252526', color: '#cccccc', border: '1px solid #454545',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.4)', whiteSpace: 'pre-wrap',
     });
     this.root.appendChild(this.diagHover);
 
@@ -244,6 +234,17 @@ export class MonoEditor implements IMonoEditor {
     ]);
 
     this.registerDefaultKeybindings();
+    // App command palette (Ctrl+Shift+P)
+    this.commands.registerCommand('workbench.action.showCommands', () => {
+      window.dispatchEvent(new CustomEvent('mono:showCommands'));
+    });
+    this.keybindings.add({
+      id: 'workbench.action.showCommands',
+      primary: 'ctrl+shift+p',
+      handler: () => {
+        window.dispatchEvent(new CustomEvent('mono:showCommands'));
+      },
+    });
     this.registerDefaultActions();
     this.registerFindCommands();
 
@@ -396,12 +397,9 @@ export class MonoEditor implements IMonoEditor {
 
   setModelMarkers(owner: string, markers: IMarkerData[]): void {
     this.markers.setModelMarkers(owner, markers);
-    this.view.paint();
-    this.emitMarkers();
-  }
-
-  private emitMarkers(): void {
     const all = this.markers.getModelMarkers();
+    console.log('[Mono] setModelMarkers', owner, 'count=', all.length, all);
+    this.view.paint();
     for (const l of this.markerListeners) {
       try { l(all); } catch { /* */ }
     }
@@ -410,6 +408,29 @@ export class MonoEditor implements IMonoEditor {
   onDidChangeMarkers(listener: (markers: import("../decorations").IMarker[]) => void): { dispose(): void } {
     this.markerListeners.add(listener);
     return { dispose: () => this.markerListeners.delete(listener) };
+  }
+
+  private scheduleDiagHover(): void {
+    if (this.diagHoverTimer) clearTimeout(this.diagHoverTimer);
+    this.diagHoverTimer = setTimeout(() => this.updateDiagHover(), 400);
+  }
+
+  private updateDiagHover(): void {
+    if (!this.diagHover || this.disposed) return;
+    const pos = this.selection.active;
+    const markers = this.markers.getModelMarkers();
+    const hit = markers.find(m =>
+      pos.lineNumber >= m.startLineNumber && pos.lineNumber <= m.endLineNumber &&
+      (pos.lineNumber !== m.startLineNumber || pos.column >= m.startColumn) &&
+      (pos.lineNumber !== m.endLineNumber || pos.column <= m.endColumn)
+    );
+    if (!hit) { this.diagHover.style.display = 'none'; return; }
+    const sev = hit.severity >= 8 ? 'Error' : hit.severity >= 4 ? 'Warning' : hit.severity >= 2 ? 'Info' : 'Hint';
+    this.diagHover.textContent = sev + ': ' + hit.message;
+    this.diagHover.style.display = 'block';
+    const screen = this.view.caretScreenPos();
+    this.diagHover.style.left = Math.max(4, screen.x) + 'px';
+    this.diagHover.style.top = Math.max(4, screen.y - 28) + 'px';
   }
 
   getModelMarkers(filter?: { owner?: string; take?: number }) {
@@ -438,7 +459,14 @@ export class MonoEditor implements IMonoEditor {
   }
 
   executeCommand(id: string, ...args: unknown[]): Promise<unknown> {
-    return this.commands.executeCommand(id, ...args);
+    try {
+      const result = this.commands.executeCommand(id, ...args);
+      return Promise.resolve(result);
+    } catch {
+      // Unknown to Mono — let app registry handle it
+      window.dispatchEvent(new CustomEvent('mono:executeCommand', { detail: { id, args } }));
+      return Promise.resolve(undefined);
+    }
   }
 
   getCommandsForPalette(filter?: string) {
@@ -888,38 +916,6 @@ export class MonoEditor implements IMonoEditor {
     this.contentListeners.add(listener);
     return { dispose: () => this.contentListeners.delete(listener) };
   }
-
-  private scheduleDiagHover(): void {
-    if (this.diagHoverTimer) clearTimeout(this.diagHoverTimer);
-    this.diagHoverTimer = setTimeout(() => this.updateDiagHover(), 400);
-  }
-
-  private updateDiagHover(): void {
-    if (!this.diagHover || this.disposed) return;
-    const pos = this.selection.active;
-    const markers = this.markers.getModelMarkers();
-    const hit = markers.find(m =>
-      pos.lineNumber >= m.startLineNumber &&
-      pos.lineNumber <= m.endLineNumber &&
-      (pos.lineNumber !== m.startLineNumber || pos.column >= m.startColumn) &&
-      (pos.lineNumber !== m.endLineNumber || pos.column <= m.endColumn)
-    );
-    if (!hit) {
-      this.diagHover.style.display = 'none';
-      return;
-    }
-    const sev =
-      hit.severity >= 8 ? 'Error' :
-      hit.severity >= 4 ? 'Warning' :
-      hit.severity >= 2 ? 'Info' : 'Hint';
-    this.diagHover.textContent = sev + ': ' + hit.message;
-    this.diagHover.style.display = 'block';
-    // Position near caret
-    const screen = this.view.caretScreenPos();
-    this.diagHover.style.left = Math.max(4, screen.x) + 'px';
-    this.diagHover.style.top = Math.max(4, screen.y - 28) + 'px';
-  }
-
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;

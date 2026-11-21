@@ -64,7 +64,7 @@ export interface IModelDecoration {
   options: IModelDecorationOptions;
 }
 
-export interface DecorationsRenderItem {
+export interface DecorationRenderItem {
   range: IRange;
   underline: 'none' | 'squiggle' | 'solid' | 'dots';
   color: string;

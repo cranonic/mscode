@@ -17,7 +17,7 @@ Legend: ✅ hoyeche, 🟡 aangshik, ❌ baki
 | Undo grouping (typing ek group, pause e break) | ❌ | Ekhon proti char alada undo |
 | CRLF / EOL handling | ❌ | `split('\n')` e `\r` theke jay |
 | Multiple models / model URI | ❌ | Ekhon editor-per-model |
-| Decorations / markers API | 🟡 | Squiggle + setModelMarkers + onDidChangeMarkers + hover tooltip |
+| Decorations / markers API | ❌ | Squiggle, highlight, gutter icon er base |
 
 ## 2. Cursor & Selection
 | Feature | Status |

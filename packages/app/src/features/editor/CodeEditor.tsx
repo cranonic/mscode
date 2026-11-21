@@ -12,6 +12,8 @@ import { useEditorViewStateStore } from '@/features/editor/store/editorViewState
 import { useTerminalBoot } from '@/features/termis/components/terminal/hooks/useTerminalBoot';
 import { useMonoPaletteProviders } from './hooks/useMonoPaletteProviders';
 import { useMonoEditorBridge } from './hooks/useMonoEditorBridge';
+import { usePaletteStore } from '@/store/paletteStore';
+import { commands } from '@/core/extensionAPI/registry/commandRegistry';
 import './CodeEditor.css';
 
 interface CodeEditorProps {
@@ -76,6 +78,33 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tabId, filePath }) => {
     editorRef.current = editor;
     setPaletteHost(editor);
 
+    // Expose for Eruda / console testing
+    const w = window as any;
+    w.__monoEditor = editor;
+    if (!w.__monoEditors) w.__monoEditors = new Set();
+    w.__monoEditors.add(editor);
+    w.__testMarkers = () => {
+      editor.setModelMarkers('test', [
+        { severity: 8, message: 'Unexpected token', startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 10 },
+        { severity: 4, message: 'Unused variable', startLineNumber: 5, startColumn: 3, endLineNumber: 5, endColumn: 15 },
+      ]);
+      console.log('markers set, count=', editor.getModelMarkers().length);
+    };
+
+    // Ctrl+Shift+P from Mono → open app command palette
+    const onShowCommands = () => {
+      usePaletteStore.setState({ isOpen: true, isQuickPick: false, query: '>' });
+    };
+    window.addEventListener('mono:showCommands', onShowCommands);
+
+    const onExecuteCommand = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.id) {
+        void commands.executeCommand(detail.id, ...(detail.args || []));
+      }
+    };
+    window.addEventListener('mono:executeCommand', onExecuteCommand);
+
     const sub = editor.onDidChangeModelContent((e) => {
       handleEditorChange(e.value);
     });
@@ -91,6 +120,11 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tabId, filePath }) => {
     return () => {
       ro.disconnect();
       sub.dispose();
+      const w = window as any;
+      if (w.__monoEditor === editor) w.__monoEditor = null;
+      w.__monoEditors?.delete(editor);
+      window.removeEventListener('mono:showCommands', onShowCommands);
+      window.removeEventListener('mono:executeCommand', onExecuteCommand);
       editor.dispose();
       editorRef.current = null;
       setPaletteHost(null);

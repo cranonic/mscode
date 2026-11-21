@@ -57,6 +57,11 @@ export class MarkerService {
         },
         underline: m.severity >= Sev.Hint && m.severity < Sev.Info ? 'dots' : 'squiggle',
         color,
+        background: m.severity >= Sev.Error
+          ? 'rgba(241,76,76,0.18)'
+          : m.severity >= Sev.Warning
+            ? 'rgba(204,167,0,0.15)'
+            : 'rgba(55,148,255,0.12)',
         severity: m.severity,
       });
     }

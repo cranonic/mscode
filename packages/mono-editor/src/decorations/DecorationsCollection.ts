@@ -1,7 +1,7 @@
 import type {
   IModelDecoration,
   IModelDeltaDecoration,
-  DecorationsRenderItem,
+  DecorationRenderItem,
 } from './types';
 
 /**
