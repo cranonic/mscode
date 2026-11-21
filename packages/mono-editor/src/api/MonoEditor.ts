@@ -108,6 +108,7 @@ export class MonoEditor implements IMonoEditor {
       const partial = monoThemeService.toPartialEditorTheme();
       this.theme = { ...this.theme, ...partial };
       this.root.style.background = this.theme.background;
+      this.applySuggestStyle();
       this.view.paint();
     });
     this.model = new TextModel(options.value ?? '', options.language ?? 'plaintext');
@@ -244,6 +245,8 @@ export class MonoEditor implements IMonoEditor {
       },
     );
 
+    this.applySuggestStyle();
+
     this.hover = new HoverController(
       this.root,
       this.model,
@@ -333,6 +336,10 @@ export class MonoEditor implements IMonoEditor {
           this.handleVis?.onScrollEnd();
           this.restoreMenuAfterScroll();
           return;
+        }
+        // Any touch that moves/changes the cursor closes the completion list
+        if (kind === 'tap' || kind === 'handle' || kind === 'handleTap' || kind === 'select') {
+          this.suggest?.cancel();
         }
         if (kind === 'tap') {
           this.menuRestore = false;
@@ -767,6 +774,9 @@ export class MonoEditor implements IMonoEditor {
       this.theme = { ...this.theme, ...options.theme };
       this.root.style.background = this.theme.background;
     }
+    if (options.fontFamily != null || options.fontSize != null || options.theme) {
+      this.applySuggestStyle();
+    }
     if (options.stickyScroll) this.view.setStickyScroll(options.stickyScroll);
     if (options.bracketEnterIndent != null) {
       this.input?.setBracketEnterIndent?.(options.bracketEnterIndent);
@@ -872,6 +882,7 @@ export class MonoEditor implements IMonoEditor {
   }
 
   private emitCursorEvents(source: string): void {
+    this.suggest?.syncCursor();
     const position = this.getPosition();
     const selection = this.getSelection();
     const posEv: ICursorPositionChangedEvent = {
@@ -907,6 +918,9 @@ export class MonoEditor implements IMonoEditor {
   }
 
   private emitScrollEvent(topChanged: boolean, leftChanged: boolean): void {
+    // before the early return: the completion list must follow / hide on scroll
+    // even when the app registered no scroll listener
+    if (this.suggest?.isOpen?.()) this.suggest.updatePosition();
     if (!this.scrollListeners.size) return;
     const m = this.metrics();
     const ev: IScrollEvent = {
@@ -925,7 +939,6 @@ export class MonoEditor implements IMonoEditor {
         /* */
       }
     }
-    if (this.suggest?.isOpen?.()) this.suggest.updatePosition();
   }
 
   private emitFocus(): void {
@@ -1424,6 +1437,31 @@ export class MonoEditor implements IMonoEditor {
         if (sp.top > host.height) return { left: clampLeft(sp.x), top: maxTop };
         return { left: clampLeft((contentLeft + host.width) / 2), top: minTop };
       },
+    });
+  }
+
+  /** Completion list follows the editor font and theme (dark / light + VS Code colour keys). */
+  private applySuggestStyle(): void {
+    if (!this.suggest) return;
+    const bg = this.theme.background || '#1e1e1e';
+    const m = /^#?([0-9a-f]{6})$/i.exec(bg.trim());
+    let dark = true;
+    if (m) {
+      const n = parseInt(m[1]!, 16);
+      const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+      dark = lum < 0.5;
+    }
+    let colors: Record<string, string> = {};
+    try {
+      colors = monoThemeService.resolve().colors;
+    } catch {
+      /* no theme registered */
+    }
+    this.suggest.setWidgetOptions({
+      fontFamily: this.fontFamily,
+      fontSize: this.fontSize,
+      themeType: dark ? 'dark' : 'light',
+      themeColors: colors,
     });
   }
 

@@ -62,26 +62,34 @@ export function createIcon(id: string, size = 16): HTMLElement {
   return span;
 }
 
-/** Map CompletionItemKind → codicon id */
+/** Map CompletionItemKind → codicon id (same glyphs VS Code uses) */
 export function kindToCodicon(kind?: number): string {
   const map: Record<number, string> = {
     0: 'symbol-text',
     1: 'symbol-method',
     2: 'symbol-function',
-    3: 'symbol-class',
+    3: 'symbol-constructor',
     4: 'symbol-field',
     5: 'symbol-variable',
     6: 'symbol-class',
     7: 'symbol-interface',
     8: 'symbol-module',
     9: 'symbol-property',
+    10: 'symbol-ruler',
+    11: 'symbol-enum',
     12: 'symbol-enum',
     13: 'symbol-keyword',
     14: 'symbol-snippet',
     15: 'symbol-color',
+    16: 'symbol-file',
+    17: 'references',
+    18: 'symbol-folder',
     19: 'symbol-enum-member',
     20: 'symbol-constant',
+    21: 'symbol-structure',
     22: 'symbol-event',
+    23: 'symbol-operator',
+    24: 'symbol-parameter',
   };
   return map[kind ?? 0] ?? 'symbol-text';
 }

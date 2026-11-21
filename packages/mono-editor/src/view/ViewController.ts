@@ -181,6 +181,28 @@ export class ViewController {
   }
 
   /** CSS position of caret relative to root (for textarea placement). */
+  /** Root-local CSS position of an arbitrary line/column (top-left of that character cell). */
+  screenPosOf(line: number, col: number): { x: number; y: number; h: number } {
+    const m = this.getMetrics();
+    const content = this.model.getLineContent(line);
+    const prefix = content.slice(0, Math.max(0, col - 1));
+    const x = this.contentLeft + m.paddingLeft + prefix.length * m.charWidth - this.scrollLeft;
+    const y = m.paddingTop + (line - 1) * m.lineHeight - this.scrollTop;
+    return { x, y, h: m.lineHeight };
+  }
+
+  /**
+   * Is any part of `line` on screen, i.e. inside the viewport and not hidden
+   * behind the sticky-scroll header or the bottom active-line bar?
+   */
+  isLineInView(line: number): boolean {
+    const m = this.getMetrics();
+    const top = m.paddingTop + (line - 1) * m.lineHeight - this.scrollTop;
+    const visibleTop = this.lastStickyHeight;
+    const visibleBottom = this.cssHeight - (this.lastBottomSticky ? m.lineHeight : 0);
+    return top + m.lineHeight > visibleTop && top < visibleBottom;
+  }
+
   caretScreenPos(): { x: number; y: number; h: number } {
     const m = this.getMetrics();
     const line = this.selection.active.lineNumber;
