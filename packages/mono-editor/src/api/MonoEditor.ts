@@ -296,8 +296,9 @@ export class MonoEditor implements IMonoEditor {
         }
       },
     );
-    this.unsubModel = this.model.onDidChange(() => {
-      this.tokenization.invalidate();
+    this.unsubModel = this.model.onDidChange((versionId, change) => {
+      // Incremental: only the touched lines get re-tokenized (lazily, on paint)
+      this.tokenization.applyChange(change, versionId);
       this.view.invalidateScopes();
       this.view.paint();
     });
@@ -1289,7 +1290,16 @@ export class MonoEditor implements IMonoEditor {
 
   private emitContent(): void {
     this.altVersionId++;
-    const e: MonoContentChangeEvent = { value: this.model.getValue() };
+    if (!this.contentListeners.size) return;
+    // `value` is computed on first read: a 20k-line join per keystroke is wasted
+    // work when nobody reads it (listeners that only mark "dirty" etc.).
+    const model = this.model;
+    let cached: string | undefined;
+    const e: MonoContentChangeEvent = {
+      get value(): string {
+        return cached ?? (cached = model.getValue());
+      },
+    };
     for (const l of this.contentListeners) l(e);
   }
 

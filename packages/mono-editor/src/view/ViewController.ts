@@ -146,33 +146,28 @@ export class ViewController {
     this.clampScroll();
   }
 
+  /** longest line (chars) — recomputed once per model version, not per scroll frame */
+  private maxCharsCache: { version: number; lines: number; chars: number } | null = null;
+
   /** Max content width in CSS px (longest line), for horizontal scroll range */
   private maxContentWidthPx(): number {
     const m = this.getMetrics();
-    let maxChars = 0;
-    // Sample: caret line + nearby + full scan capped for perf
-    const n = this.model.getLineCount();
-    const caret = this.selection.active.lineNumber;
-    const from = Math.max(1, caret - 30);
-    const to = Math.min(n, caret + 30);
-    for (let i = from; i <= to; i++) {
-      maxChars = Math.max(maxChars, this.model.getLineContent(i).length);
-    }
-    // Also consider absolute longest if small file
-    if (n <= 2000) {
+    const version = this.model.getVersionId();
+    let c = this.maxCharsCache;
+    if (!c || c.version !== version) {
+      let maxChars = 0;
+      const n = this.model.getLineCount();
       for (let i = 1; i <= n; i++) {
-        maxChars = Math.max(maxChars, this.model.getLineContent(i).length);
+        const len = this.model.getLineContent(i).length;
+        if (len > maxChars) maxChars = len;
       }
-    } else {
-      // light scan every k-th line
-      for (let i = 1; i <= n; i += 8) {
-        maxChars = Math.max(maxChars, this.model.getLineContent(i).length);
-      }
+      c = { version, lines: n, chars: maxChars };
+      this.maxCharsCache = c;
     }
     return (
       this.contentLeft +
       m.paddingLeft +
-      maxChars * m.charWidth +
+      c.chars * m.charWidth +
       m.charWidth * 4
     );
   }

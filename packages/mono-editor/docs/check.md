@@ -13,7 +13,7 @@ Legend: ✅ hoyeche, 🟡 aangshik, ❌ baki
 | Undo/Redo stack (200 limit, selection restore) | ✅ | Monaco-style |
 | Version id, language id | ✅ | |
 | `getAlternativeVersionId` (dirty tracking) | ❌ | `useAutoSaveAndBackup` eta chay |
-| Incremental edit (shudhu changed line update) | ❌ | Ekhon proti keystroke e `getValue()` diye puro text rebuild hoy, boro file e dhire hobe |
+| Incremental edit (shudhu changed line update) | ✅ | Slice D: line-splice, `getValue()` cached/lazy |
 | Undo grouping (typing ek group, pause e break) | ❌ | Ekhon proti char alada undo |
 | CRLF / EOL handling | ❌ | `split('\n')` e `\r` theke jay |
 | Multiple models / model URI | ❌ | Ekhon editor-per-model |
@@ -102,7 +102,7 @@ Legend: ✅ hoyeche, 🟡 aangshik, ❌ baki
 | Template string `${}` nested, multiline | 🟡 |
 | Java, C/C++, Rust, Go, Kotlin, Markdown, YAML, Shell, SQL, XML, PHP, etc. | ❌ |
 | Embedded languages (HTML er `<script>`/`<style>`) | ❌ |
-| Incremental tokenization | ❌ (edit hole line 1 theke abar) |
+| Incremental tokenization | ✅ (Slice D: shudhu changed line + state change hole porer line, viewport lazy) |
 | TextMate grammar / tree-sitter support | ❌ |
 | Semantic tokens (LSP) | ❌ |
 | Theme theke token color (`tokenColors` scope map) | ❌ (app er `mscode-dark.ts` er scope-based theme Mono te map hoyni) |
@@ -204,10 +204,10 @@ Ar `CodeEditor.tsx` e: cursor/scroll restore, hot-exit backup, `pendingNavigatio
 | Item | Status |
 |---|---|
 | Piece-table / chunked buffer (boro file) | ❌ |
-| Incremental tokenizer + scope cache | ❌ |
+| Incremental tokenizer + scope cache | 🟡 (tokenizer ✅; indent scope cache ekhono full invalidate) |
 | Large file mode | ❌ |
 | Screen reader / a11y | ❌ |
-| Unit tests | ❌ |
+| Unit tests | 🟡 (`tests/slice-d.test.mts` — model + tokenizer fuzz) |
 
 ---
 

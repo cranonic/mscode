@@ -125,8 +125,8 @@ Multi-cursor, folding, word wrap, minimap, decorations/markers, suggest/hover/si
 
 | Feature | Status |
 |---------|--------|
-| Incremental TextModel (no full `getValue` rebuild each key) | ❌ |
-| Incremental tokenizer + line cache invalidate range | 🟡 | cache exists; full-line path |
+| Incremental TextModel (no full `getValue` rebuild each key) | ✅ | line-splice `applyEdit`, lazy offset prefix cache, cached `getValue`, `ModelChange` info on `onDidChange` |
+| Incremental tokenizer + line cache invalidate range | ✅ | lazy (viewport only) + stops when end-state matches; fuzz-tested vs full re-tokenize |
 | Large-file mode / piece table | ❌ |
 | Scroll paint: no measureText jitter | ✅ | charWidth path |
 
@@ -225,7 +225,7 @@ Replace / rewire these (from check.md) one by one:
 | More language token providers | 🟡 | JS/TS/JSON/CSS/HTML/Python ✅ |
 | Semantic highlighting | ❌ |
 | a11y / screen reader | ❌ |
-| Unit tests | ❌ |
+| Unit tests | 🟡 | `tests/slice-d.test.mts` (model + tokenizer fuzz) — run `npx tsx tests/slice-d.test.mts` |
 
 ---
 
@@ -237,7 +237,7 @@ Week-shaped slices (adjust to capacity):
 [ ] Slice A — PART 1.1 Bridge API on IMonoEditor
 [x] Slice B — PART 1.2 CodeEditor.tsx + lifecycle/sync hooks compile & run
 [x] Slice C — PART 2 must-have edits (tabSize, readOnly, word nav, page keys; undo group still open)
-[ ] Slice D — PART 3 incremental model (before big-file complaints return)
+[x] Slice D — PART 3 incremental model + tokenizer (20k lines: ~82ms → ~0.9ms / keystroke on desktop Node; verify on Android WebView)
 [ ] Slice E — PART 5 markers + diagnostics popup
 [ ] Slice F — PART 6 completion + hover (one language)
 [ ] Slice G — PART 4 folding + scrollbar + wrap
