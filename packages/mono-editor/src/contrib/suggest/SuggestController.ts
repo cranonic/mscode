@@ -164,6 +164,12 @@ export class SuggestController {
     return false;
   }
 
+  updatePosition(): void {
+    if (!this.open) return;
+    const a = this.caretScreen();
+    this.widget.reposition(a.x, a.y);
+  }
+
   cancel(): void {
     this.open = false;
     this.seq++;

@@ -925,6 +925,7 @@ export class MonoEditor implements IMonoEditor {
         /* */
       }
     }
+    if (this.suggest?.isOpen?.()) this.suggest.updatePosition();
   }
 
   private emitFocus(): void {

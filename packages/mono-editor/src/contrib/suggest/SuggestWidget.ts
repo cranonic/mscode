@@ -198,20 +198,31 @@ export class SuggestWidget {
     el.style.minWidth = '280px';
   }
 
+  private lastAnchor = { x: 0, y: 0 };
+
   private position(x: number, y: number): void {
     if (!this.el) return;
+    this.lastAnchor = { x, y };
     const hostBox = this.host.getBoundingClientRect();
-    const maxW = this.opts.maxWidth;
+    const w = Math.min(this.opts.maxWidth, hostBox.width - 16);
     let left = x;
-    let top = y + 4;
-    // keep on screen inside host
-    if (left + maxW > hostBox.width - 8) left = Math.max(8, hostBox.width - maxW - 8);
-    if (left < 4) left = 4;
-    if (top + this.opts.maxHeight > hostBox.height - 8) {
-      top = Math.max(4, y - this.opts.maxHeight - 4);
+    let top = y + 2;
+    // Prefer below caret; flip above if not enough room
+    const h = Math.min(this.opts.maxHeight, this.el.offsetHeight || 120);
+    if (top + h > hostBox.height - 4 && y - h > 4) {
+      top = y - h - 2;
     }
+    // Clamp horizontally but keep near caret
+    if (left + w > hostBox.width - 4) left = Math.max(4, hostBox.width - w - 4);
+    if (left < 4) left = 4;
     this.el.style.left = `${left}px`;
     this.el.style.top = `${top}px`;
+    this.el.style.width = `${w}px`;
+  }
+
+  /** Call on scroll so the widget stays near the caret. */
+  reposition(x: number, y: number): void {
+    if (this.el && this.el.style.display !== 'none') this.position(x, y);
   }
 
   private renderList(): void {
@@ -261,11 +272,12 @@ export class SuggestWidget {
       const detail = document.createElement('span');
       detail.textContent = item.detail ?? kindLabel(item.kind);
       Object.assign(detail.style, {
-        color: '#858585',
+        color: i === this.index ? '#ffffff' : '#cccccc',
         fontSize: '11px',
-        marginLeft: '12px',
-        flexShrink: '0',
+        fontWeight: '400',
+        opacity: '0.7',
         marginLeft: '8px',
+        flexShrink: '0',
       });
       row.appendChild(kind);
       row.appendChild(lab);
