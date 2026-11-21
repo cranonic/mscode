@@ -47,6 +47,20 @@ export class SuggestController {
       '*',
       createWordBasedCompletionProvider(),
     );
+    // Demo keywords so Ctrl+Space always shows something
+    languageFeatures.registerCompletionItemProvider('*', {
+      provideCompletionItems() {
+        const kws = ['function', 'const', 'let', 'if', 'else', 'return', 'for', 'while', 'class', 'import', 'export', 'async', 'await', 'true', 'false', 'null', 'undefined'];
+        return {
+          suggestions: kws.map((k) => ({
+            label: k,
+            kind: 13,
+            detail: 'keyword',
+            insertText: k,
+          })),
+        };
+      },
+    });
   }
 
   setWidgetOptions(opts: SuggestWidgetOptions): void {
@@ -67,6 +81,7 @@ export class SuggestController {
     };
     const lang = this.model.getLanguageId();
     const providers = languageFeatures.getCompletionProviders(lang);
+    console.log('[suggest] trigger', lang, 'providers=', providers.length);
     const context: CompletionContext = {
       triggerKind: triggerCharacter ? 1 : 0,
       triggerCharacter,
@@ -104,13 +119,15 @@ export class SuggestController {
 
     this.open = true;
     const anchor = this.caretScreen();
-    this.widget.show(unique, anchor);
+    const prefix = this.currentPrefix();
+    this.widget.show(unique, anchor, prefix);
   }
 
   /** Called after typing — soft retrigger */
   async onType(ch: string): Promise<void> {
     const lang = this.model.getLanguageId();
     const providers = languageFeatures.getCompletionProviders(lang);
+    console.log('[suggest] trigger', lang, 'providers=', providers.length);
     const triggers = new Set<string>();
     for (const p of providers) {
       for (const t of p.triggerCharacters ?? []) triggers.add(t);
@@ -185,28 +202,21 @@ export class SuggestController {
     this.onEdit();
   }
 
+  private currentPrefix(): string {
+    const pos = this.selection.active;
+    const line = this.model.getLineContent(pos.lineNumber);
+    const before = line.slice(0, Math.max(0, pos.column - 1));
+    const m = before.match(/[A-Za-z0-9_$]*$/);
+    return m ? m[0] : '';
+  }
+
   private caretScreen(): { x: number; y: number } {
-    // Approximate from view metrics — ViewController may expose better later
-    const m = (this.view as any).getMetrics?.() ?? {
-      lineHeight: 20,
-      charWidth: 8,
-      paddingTop: 4,
-      paddingLeft: 4,
-      gutterWidth: 48,
-    };
-    const line = this.selection.active.lineNumber;
-    const col = this.selection.active.column;
-    const x =
-      (m.gutterWidth ?? 0) +
-      (m.paddingLeft ?? 0) +
-      Math.max(0, col - 1) * (m.charWidth ?? 8) -
-      (this.view.scrollLeft || 0);
-    const y =
-      (m.paddingTop ?? 0) +
-      (line - 1) * (m.lineHeight ?? 20) -
-      (this.view.scrollTop || 0) +
-      (m.lineHeight ?? 20);
-    return { x: Math.max(0, x), y: Math.max(0, y) };
+    const pos = (this.view as any).caretScreenPos?.();
+    if (pos && typeof pos.x === 'number') {
+      return { x: pos.x, y: pos.y + (pos.h || 18) };
+    }
+    // fallback
+    return { x: 60, y: 40 };
   }
 
   private modelAsLike() {

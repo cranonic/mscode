@@ -26,31 +26,69 @@ export type MonoEditorPaletteHost = {
   revealLine?: (line: number, column?: number) => void;
   setPosition?: (positionOrLine: number | { lineNumber: number; column: number }, column?: number) => void;
   focus?: () => void;
+  revealFind?: () => void;
+  revealReplace?: () => void;
 };
 
-function appItems(filter: string): QuickPickItem[] {
-  const q = (filter || '').toLowerCase().trim();
-  const raw = commands.getCommandsForPalette?.() || [];
-  return raw
-    .filter((c: any) => {
-      if (!c?.title) return false;
-      if (!q) return true;
-      return `${c.title} ${c.category || ''} ${c.id}`.toLowerCase().includes(q);
-    })
-    .map((c: any) => {
-      let shortcut = c.shortcut;
-      try {
-        shortcut = (keybindingManager as any)?.getShortcutLabel?.(c.id) || c.shortcut;
-      } catch { /* */ }
-      return {
-        id: c.id,
-        label: c.title || c.id,
-        description: c.category,
-        leftIcon: c.icon || 'terminal',
-        shortcut,
-        onSelect: () => { void commands.executeCommand(c.id); },
-      } as QuickPickItem;
+async function runCommand(id: string, editor?: MonoEditorPaletteHost | null) {
+  const mono = (window as any).__monoEditor || editor;
+  console.log('[palette] run', id);
+
+  // Mono editor commands
+  if (id === 'actions.find' || id === 'editor.action.startFindAction') {
+    mono?.revealFind?.();
+    return;
+  }
+  if (id === 'editor.action.startFindReplaceAction') {
+    mono?.revealReplace?.();
+    return;
+  }
+  if (
+    id === 'editor.action.selectAll' ||
+    id === 'editor.action.undo' ||
+    id === 'undo' ||
+    id === 'editor.action.redo' ||
+    id === 'redo'
+  ) {
+    mono?.executeCommand?.(id);
+    return;
+  }
+
+  // Direct handlers for known IDE commands
+  if (id === 'workbench.action.closeAllEditors') {
+    const m = await import('@/store/tabStore');
+    m.useTabStore.getState().clearTabs();
+    return;
+  }
+  if (id === 'workbench.action.openSettings') {
+    const m = await import('@/store/tabStore');
+    m.useTabStore.getState().addTab({
+      id: 'mscode://internal/settings.ui',
+      type: 'settings',
+      title: 'Settings',
+      icon: 'settings',
     });
+    return;
+  }
+  if (id === 'workbench.action.closeFolder') {
+    const exp = await import('@/features/explorer/store/exploreStore');
+    const tab = await import('@/store/tabStore');
+    exp.useExplorerStore.getState().setWorkspace(null, null);
+    await tab.useTabStore.getState().initTabs(null);
+    return;
+  }
+  if (id === 'workbench.action.files.save' || id === 'workbench.action.files.saveAll') {
+    console.warn('[palette] save not wired yet');
+    return;
+  }
+
+  // Fallback to registry or Mono
+  if (commands.hasCommand?.(id)) {
+    void commands.executeCommand(id);
+    return;
+  }
+  void mono?.executeCommand?.(id);
+  console.warn('[palette] unhandled', id);
 }
 
 function editorItems(editor: MonoEditorPaletteHost | null | undefined, filter: string): QuickPickItem[] {
@@ -65,41 +103,7 @@ function editorItems(editor: MonoEditorPaletteHost | null | undefined, filter: s
       readonly: c.enabled === false,
       onSelect: () => {
         if (c.enabled === false) return;
-        console.log('[palette] select', c.id);
-        const mono = (window as any).__monoEditor || editor;
-
-        // Direct Mono calls for editor commands (bypass registry)
-        if (c.id === 'actions.find' || c.id === 'editor.action.startFindAction') {
-          mono?.revealFind?.() || mono?.executeCommand?.('actions.find');
-          return;
-        }
-        if (c.id === 'editor.action.startFindReplaceAction') {
-          mono?.revealReplace?.() || mono?.executeCommand?.('editor.action.startFindReplaceAction');
-          return;
-        }
-        if (c.id === 'editor.action.selectAll') {
-          mono?.executeCommand?.('editor.action.selectAll');
-          return;
-        }
-
-        // Workbench / app commands
-        if (c.id.startsWith('workbench.') || commands.hasCommand?.(c.id)) {
-          if (commands.hasCommand?.(c.id)) {
-            void commands.executeCommand(c.id);
-          } else {
-            console.warn('[palette] command missing in registry:', c.id);
-            // Direct fallbacks for common ones
-            if (c.id === 'workbench.action.closeAllEditors') {
-              import('@/store/tabStore').then(m => m.useTabStore.getState().clearTabs());
-            } else if (c.id === 'workbench.action.openSettings') {
-              import('@/store/tabStore').then(m => m.useTabStore.getState().addTab({
-                id: 'mscode://internal/settings.ui', type: 'settings', title: 'Settings', icon: 'settings',
-              }));
-            }
-          }
-          return;
-        }
-        void mono?.executeCommand?.(c.id);
+        void runCommand(c.id, editor);
       },
     }));
   } catch (e) {
@@ -108,10 +112,39 @@ function editorItems(editor: MonoEditorPaletteHost | null | undefined, filter: s
   }
 }
 
+function appItems(filter: string, editor?: MonoEditorPaletteHost | null): QuickPickItem[] {
+  const q = (filter || '').toLowerCase().trim();
+  const raw = commands.getCommandsForPalette?.() || [];
+  return raw
+    .filter((c: any) => {
+      if (!c?.title) return false;
+      if (!q) return true;
+      return `${c.title} ${c.category || ''} ${c.id}`.toLowerCase().includes(q);
+    })
+    .map((c: any) => {
+      let shortcut = c.shortcut;
+      try {
+        shortcut = (keybindingManager as any)?.getShortcutLabel?.(c.id) || c.shortcut;
+      } catch {
+        /* */
+      }
+      return {
+        id: c.id,
+        label: c.title || c.id,
+        description: c.category,
+        leftIcon: c.icon || 'terminal',
+        shortcut,
+        onSelect: () => {
+          void runCommand(c.id, editor);
+        },
+      };
+    });
+}
+
 function merge(editor: MonoEditorPaletteHost | null | undefined, filter: string): QuickPickItem[] {
   const a = editorItems(editor, filter);
   const seen = new Set(a.map((i) => i.id));
-  const b = appItems(filter).filter((i) => !seen.has(i.id));
+  const b = appItems(filter, editor).filter((i) => !seen.has(i.id));
   return [...a, ...b].sort((x, y) => (x.label || '').localeCompare(y.label || ''));
 }
 

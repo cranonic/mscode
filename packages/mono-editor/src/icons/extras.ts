@@ -2,7 +2,7 @@
  * Icons not available as standard codicons (or different size/style).
  * Register into the codicon API at module load.
  */
-import { registerExtraIcon } from './codicons';
+import { registerExtraIcon } from './index';
 
 /** Context-menu style (24px material-like) — not in 16px codicon set */
 const MENU_EXTRA = {

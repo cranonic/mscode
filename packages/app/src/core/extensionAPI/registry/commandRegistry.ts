@@ -106,21 +106,20 @@ class CommandRegistry {
   // ── executeCommand ──────────────────────────────────────────────────────────
 
   async executeCommand(id: string, ...args: any[]): Promise<any> {
-    
-    // CLOSURE TRAP BYPASS
-    const targetEditor = (args[0] && typeof args[0].getAction === 'function') ? args[0] : this.activeMonacoEditor;
-    
-    // 1. First checking is this monaco native actions or not  (like: actions.find)
-    // -> If this is native monaco actions : then remove old command and run directly with editor 
-    if (targetEditor) {
-      const action = targetEditor.getAction(id);
-      if (action) {
-        targetEditor.focus();
-        return await Promise.resolve(action.run()); 
+    // Prefer app registry for workbench / non-editor commands.
+    // Mono getAction used to return a stub for every id, which swallowed these.
+    const isWorkbench = id.startsWith('workbench.') || id.startsWith('explorer.');
+    if (!isWorkbench) {
+      const targetEditor = (args[0] && typeof args[0].getAction === 'function') ? args[0] : this.activeMonacoEditor;
+      if (targetEditor) {
+        const action = targetEditor.getAction?.(id);
+        if (action) {
+          targetEditor.focus?.();
+          return await Promise.resolve(action.run());
+        }
       }
     }
 
-    // 2. If non monaco commands like : workbench.action...
     const cmd = this.commands.get(id);
     if (cmd) {
       return await Promise.resolve(cmd.handler(...args));

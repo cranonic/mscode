@@ -170,8 +170,8 @@ Multi-cursor, folding, word wrap, minimap, decorations/markers, suggest/hover/si
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Completion / suggest widget | ❌ | |
-| Hover | ❌ | |
+| Completion / suggest widget | 🟡 | Ctrl+Space + word fallback |
+| Hover | 🟡 | dwell on tap |
 | Signature help | ❌ | |
 | Definition / references / rename | ❌ | |
 | Format doc/selection/on-save | ❌ | `formattersAPI` |
@@ -238,8 +238,8 @@ Week-shaped slices (adjust to capacity):
 [x] Slice B — PART 1.2 CodeEditor.tsx + lifecycle/sync hooks compile & run
 [x] Slice C — PART 2 must-have edits (tabSize, readOnly, word nav, page keys; undo group still open)
 [x] Slice D — PART 3 incremental model + tokenizer (20k lines: ~82ms → ~0.9ms / keystroke on desktop Node; verify on Android WebView)
-[ ] Slice E — PART 5 markers + diagnostics popup
-[ ] Slice F — PART 6 completion + hover (one language)
+[x] Slice E — PART 5 markers + diagnostics popup
+[~] Slice F — PART 6 completion + hover (one language) — wired, word fallback + Ctrl+Space
 [ ] Slice G — PART 4 folding + scrollbar + wrap
 [ ] Slice H — PART 8 multi-cursor / diff as needed
 ```

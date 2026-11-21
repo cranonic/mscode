@@ -16,7 +16,8 @@ import { useEditorViewStateStore } from '@/features/editor/store/editorViewState
 import { EditorContextMenu } from '@/features/editor/components/EditorMenu/EditorMenu';
 import { useSettingsStore } from '@/features/settings/store/settingsStore';
 import { useExtensionStore } from '@/features/extensions/store/extensionStore';
-import { CommandPalette } from '@/ui/components/CommandPalette/CommandPalette'; 
+import { CommandPalette } from '@/ui/components/CommandPalette/CommandPalette';
+import { useAppPaletteProviders } from '@/features/editor/hooks/registerAppPaletteProviders'; 
 
 import { keybindingManager } from '@/core/keybindings/keybindingManager';
 import { userKeybindingStore } from '@/core/keybindings/userKeybindingStore';
@@ -69,6 +70,7 @@ const preloadUserSnippets = async () => {
 };
 
 const App = () => {
+  useAppPaletteProviders();
   const initWorkspace = useExplorerStore(state => state.initWorkspace);
   const initTabs = useTabStore(state => state.initTabs); 
   // const initLayout = useLayoutStore(state => state.initLayout); 

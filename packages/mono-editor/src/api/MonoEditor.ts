@@ -32,6 +32,8 @@ import { HandleVisibility } from '../view/HandleVisibility';
 import { PaletteService } from '../palette/PaletteService';
 import type { MonoAction, MonoCommandHandler, MonoRegisteredCommand } from '../commands/types';
 import { FindController } from '../find/FindController';
+import { SuggestController } from '../contrib/suggest/SuggestController';
+import { HoverController } from '../contrib/hover/HoverController';
 import { DecorationsCollection, MarkerService } from '../decorations';
 import type { IMarkerData, IModelDeltaDecoration } from '../decorations';
 
@@ -73,6 +75,8 @@ export class MonoEditor implements IMonoEditor {
   private commands!: CommandService;
   private palette!: PaletteService;
   private find!: FindController;
+  private suggest!: SuggestController;
+  private hover!: HoverController;
   private decorations = new DecorationsCollection();
   private markers = new MarkerService();
   /** Menu was open when scrolling started → bring it back when scroll+touch ended */
@@ -178,6 +182,8 @@ export class MonoEditor implements IMonoEditor {
         // Typing: hide menu + teardrops; fade back after 3s
         this.menuRestore = false;
         this.menu?.hide();
+        this.suggest?.cancel();
+        this.hover?.hide();
         this.handleVis?.onType();
         this.view.ensureCaretVisible();
         this.syncTextarea();
@@ -224,6 +230,26 @@ export class MonoEditor implements IMonoEditor {
         this.emitContent();
       },
     );
+
+    this.suggest = new SuggestController(
+      this.root,
+      this.model,
+      this.selection,
+      this.view,
+      () => {
+        this.view.ensureCaretVisible();
+        this.syncTextarea();
+        this.view.paint();
+        this.emitContent();
+      },
+    );
+
+    this.hover = new HoverController(
+      this.root,
+      this.model,
+      this.selection,
+      this.view,
+    );
     this.view.setFindDecorationsProvider(() => ({
       matches: this.find.getMatches(),
       currentIndex: this.find.getCurrentIndex(),
@@ -234,6 +260,14 @@ export class MonoEditor implements IMonoEditor {
     ]);
 
     this.registerDefaultKeybindings();
+    this.keybindings.add({
+      id: 'editor.action.triggerSuggest',
+      primary: 'ctrl+space',
+      handler: () => { void this.suggest.trigger(); },
+    });
+    this.commands.registerCommand('editor.action.triggerSuggest', () => {
+      void this.suggest.trigger();
+    }, { title: 'Trigger Suggest', category: 'Edit' });
     // App command palette (Ctrl+Shift+P)
     this.commands.registerCommand('workbench.action.showCommands', () => {
       window.dispatchEvent(new CustomEvent('mono:showCommands'));
@@ -256,6 +290,11 @@ export class MonoEditor implements IMonoEditor {
         active === this.input.textarea ||
         (active != null && this.root.contains(active));
       if (!inEditor) return;
+      if (this.suggest?.handleKey(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (this.keybindings.dispatch(e)) {
         e.preventDefault();
         e.stopPropagation();
@@ -302,6 +341,8 @@ export class MonoEditor implements IMonoEditor {
           this.syncTextarea();
           this.input.focus();
           this.view.paint();
+          const p = this.selection.active;
+          this.hover?.schedule(p.lineNumber, p.column, 600);
         } else if (kind === 'handle') {
           this.menuRestore = false;
           this.menu?.hide();
@@ -764,6 +805,10 @@ export class MonoEditor implements IMonoEditor {
   }
 
   getAction(id: string): IMonoEditorAction | null {
+    // Only return an action for commands Mono actually owns.
+    // Unknown IDs must return null so the app registry can handle them.
+    const known = this.commands.getCommands?.().some((c: any) => c.id === id);
+    if (!known) return null;
     const self = this;
     return {
       id,

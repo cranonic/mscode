@@ -124,6 +124,7 @@ export interface FoldingRangeProvider {
 export function createWordBasedCompletionProvider(): CompletionProvider {
   return {
     provideCompletionItems(model, position) {
+      if (!completionOptions.wordBasedSuggestions) return { suggestions: [] };
       const line = model.getLineContent(position.lineNumber) || '';
       const before = line.slice(0, Math.max(0, position.column - 1));
       const m = before.match(/[A-Za-z_][A-Za-z0-9_]*$/);
@@ -146,6 +147,10 @@ export function createWordBasedCompletionProvider(): CompletionProvider {
     },
   };
 }
+
+export const completionOptions = {
+  wordBasedSuggestions: true, // Monaco-like: enable/disable local word suggestions
+};
 
 class LanguageFeaturesRegistry {
   private completion = new Map<string, CompletionProvider[]>();
@@ -189,7 +194,9 @@ class LanguageFeaturesRegistry {
   }
 
   getCompletionProviders(languageId: string): CompletionProvider[] {
-    return this.completion.get(languageId) ?? [];
+    const specific = this.completion.get(languageId) ?? [];
+    const star = this.completion.get('*') ?? [];
+    return [...specific, ...star];
   }
 
   getHoverProviders(languageId: string): HoverProvider[] {

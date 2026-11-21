@@ -1,6 +1,7 @@
 import type { CompletionItem, CompletionItemKind } from '../../language/features';
 import { CompletionItemKind as Kind } from '../../language/features';
 import { attachPressFeedback, haptic } from '../../util/haptic';
+import { createIcon, kindToCodicon, ensureCodicons } from '../../icons';
 
 export interface SuggestWidgetOptions {
   maxHeight?: number;
@@ -17,18 +18,35 @@ export interface SuggestWidgetOptions {
 }
 
 const DEFAULTS: Required<SuggestWidgetOptions> = {
-  maxHeight: 280,
-  maxWidth: 420,
-  fontFamily: 'system-ui, -apple-system, sans-serif',
-  fontSize: 13,
+  maxHeight: 220,
+  maxWidth: 460,
+  fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+  fontSize: 12.5,
   background: '#252526',
   border: '1px solid #454545',
-  selectedBackground: '#04395e',
+  selectedBackground: '#094771',
   foreground: '#cccccc',
-  detailForeground: '#808080',
+  detailForeground: '#858585',
   className: '',
 };
 
+
+function kindColor(k?: number): string {
+  const colors: Record<number, string> = {
+    1: '#b180d7', 2: '#b180d7', 5: '#75beff', 6: '#ee9d28',
+    13: '#569cd6', 14: '#d7ba7d',
+  };
+  return colors[k ?? 0] ?? '#c5c5c5';
+}
+function highlightMatch(label: string, filter: string): string {
+  if (!filter) return label;
+  const idx = label.toLowerCase().indexOf(filter.toLowerCase());
+  if (idx < 0) return label;
+  const before = label.slice(0, idx);
+  const match = label.slice(idx, idx + filter.length);
+  const after = label.slice(idx + filter.length);
+  return before + '<span style="color:#4fc1ff;font-weight:600">' + match + '</span>' + after;
+}
 function kindLabel(k?: number): string {
   if (k == null) return '';
   const names: Record<number, string> = {
@@ -89,8 +107,9 @@ export class SuggestWidget {
     return !!this.el;
   }
 
-  show(items: CompletionItem[], anchor: { x: number; y: number }): void {
+  show(items: CompletionItem[], anchor: { x: number; y: number }, filter?: string): void {
     this.items = items;
+    (this as any)._filter = filter || "";
     this.index = Math.max(
       0,
       items.findIndex((i) => i.preselect),
@@ -146,7 +165,7 @@ export class SuggestWidget {
       display: 'flex',
       flexDirection: 'column',
       boxSizing: 'border-box',
-      borderRadius: '6px',
+      borderRadius: '4px',
       boxShadow: '0 4px 16px rgba(0,0,0,0.45)',
       overflow: 'hidden',
       pointerEvents: 'auto',
@@ -162,6 +181,8 @@ export class SuggestWidget {
     });
     this.listEl = list;
     el.appendChild(list);
+    list.addEventListener('pointerdown', (e) => e.stopPropagation());
+    list.addEventListener('wheel', (e) => e.stopPropagation());
     el.addEventListener('pointerdown', (e) => e.stopPropagation());
     this.host.appendChild(el);
     this.el = el;
@@ -174,7 +195,7 @@ export class SuggestWidget {
     el.style.fontSize = `${this.opts.fontSize}px`;
     el.style.color = this.opts.foreground;
     el.style.maxWidth = `${this.opts.maxWidth}px`;
-    el.style.minWidth = '180px';
+    el.style.minWidth = '280px';
   }
 
   private position(x: number, y: number): void {
@@ -203,37 +224,64 @@ export class SuggestWidget {
       Object.assign(row.style, {
         display: 'flex',
         alignItems: 'center',
-        gap: '8px',
-        padding: '4px 10px',
+        padding: '1px 10px',
         cursor: 'pointer',
         background: i === this.index ? this.opts.selectedBackground : 'transparent',
         whiteSpace: 'nowrap',
+        height: '22px',
+        boxSizing: 'border-box',
       });
-      const kind = document.createElement('span');
-      kind.textContent = kindLabel(item.kind);
+      ensureCodicons();
+      const kind = createIcon(kindToCodicon(item.kind), 16);
       Object.assign(kind.style, {
-        fontSize: '10px',
-        color: this.opts.detailForeground,
-        width: '36px',
+        width: '16px',
+        height: '16px',
         flexShrink: '0',
-        textTransform: 'uppercase',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: kindColor(item.kind),
+        marginRight: '3px',
       });
+      const svg = kind.querySelector('svg');
+      if (svg) {
+        svg.style.width = '16px';
+        svg.style.height = '16px';
+      }
       const lab = document.createElement('span');
-      lab.textContent = labelOf(item);
-      lab.style.flex = '1';
-      lab.style.overflow = 'hidden';
-      lab.style.textOverflow = 'ellipsis';
+      const filter = (this as any)._filter || '';
+      lab.innerHTML = highlightMatch(labelOf(item), filter);
+      Object.assign(lab.style, {
+        flex: '1',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        color: i === this.index ? '#ffffff' : '#cccccc',
+        fontSize: '12.5px',
+      });
       const detail = document.createElement('span');
-      detail.textContent = item.detail ?? '';
+      detail.textContent = item.detail ?? kindLabel(item.kind);
       Object.assign(detail.style, {
-        color: this.opts.detailForeground,
-        fontSize: '12px',
+        color: '#858585',
+        fontSize: '11px',
+        marginLeft: '12px',
+        flexShrink: '0',
         marginLeft: '8px',
       });
       row.appendChild(kind);
       row.appendChild(lab);
       if (item.detail) row.appendChild(detail);
+      let startY = 0;
+      let moved = false;
       row.addEventListener('pointerdown', (e) => {
+        startY = e.clientY;
+        moved = false;
+        e.stopPropagation();
+      });
+      row.addEventListener('pointermove', (e) => {
+        if (Math.abs(e.clientY - startY) > 4) moved = true;
+      });
+      row.addEventListener('pointerup', (e) => {
+        if (moved) return; // was a scroll
         e.preventDefault();
         e.stopPropagation();
         this.index = i;
