@@ -1,16 +1,10 @@
-
-packages/docs-site
-packages/msce
+node_modules/
+**/node_modules/
 .vercel
 .keystore
 Trust
 Trust2
-packages : alpine proot -v
-packages  menu , modal , storage update
 key.note
-app (1)
-app (2)
-app (3)
-app (4)
-app (5)
-node_modules
+app (*).apk
+packages/docs-site
+packages/msce
