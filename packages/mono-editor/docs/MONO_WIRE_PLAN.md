@@ -70,8 +70,8 @@ Multi-cursor, folding, word wrap, minimap, decorations/markers, suggest/hover/si
 | `hasTextFocus` | ✅ | |
 | `getModel()` | ✅ | thin IMonoTextModel adapter |
 | `executeEdits` | ✅ | |
-| `deltaDecorations` | ❌ | can no-op until PART 4 |
-| `setModelMarkers` / `getModelMarkers` | ❌ | until decorations |
+| `deltaDecorations` | ✅ | DecorationsCollection + canvas squiggle |
+| `setModelMarkers` / `getModelMarkers` | ✅ | + onDidChangeMarkers |
 | `updateOptions` | ✅ | font, lineNumbers, readOnly, tabSize, sticky… |
 | `setTheme` / theme id map | 🟡 | Partial MonoEditorTheme + vs/vs-dark names |
 | `getAction(id).run()` | ✅ | bridges CommandService.executeCommand |
@@ -238,7 +238,7 @@ Week-shaped slices (adjust to capacity):
 [x] Slice B — PART 1.2 CodeEditor.tsx + lifecycle/sync hooks compile & run
 [x] Slice C — PART 2 must-have edits (tabSize, readOnly, word nav, page keys; undo group still open)
 [x] Slice D — PART 3 incremental model + tokenizer (20k lines: ~82ms → ~0.9ms / keystroke on desktop Node; verify on Android WebView)
-[ ] Slice E — PART 5 markers + diagnostics popup
+[🟡] Slice E — PART 5 markers + diagnostics popup (squiggle + hover + event; app Problems panel wire still pending)
 [ ] Slice F — PART 6 completion + hover (one language)
 [ ] Slice G — PART 4 folding + scrollbar + wrap
 [ ] Slice H — PART 8 multi-cursor / diff as needed

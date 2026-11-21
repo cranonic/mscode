@@ -56,6 +56,9 @@ export class MonoEditor implements IMonoEditor {
   private scrollListeners = new Set<(e: IScrollEvent) => void>();
   private focusListeners = new Set<() => void>();
   private blurListeners = new Set<() => void>();
+  private markerListeners = new Set<(markers: import("../decorations").IMarker[]) => void>();
+  private diagHover: HTMLDivElement | null = null;
+  private diagHoverTimer: ReturnType<typeof setTimeout> | null = null;
   private tabSize = 2;
   private readOnly = false;
   private altVersionId = 1;
@@ -138,6 +141,26 @@ export class MonoEditor implements IMonoEditor {
     this.root.appendChild(canvas);
     host.appendChild(this.root);
 
+    // Diagnostic hover tooltip
+    this.diagHover = document.createElement('div');
+    Object.assign(this.diagHover.style, {
+      position: 'absolute',
+      display: 'none',
+      zIndex: '100',
+      maxWidth: '360px',
+      padding: '6px 8px',
+      borderRadius: '4px',
+      fontSize: '12px',
+      lineHeight: '1.4',
+      pointerEvents: 'none',
+      background: '#252526',
+      color: '#cccccc',
+      border: '1px solid #454545',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+      whiteSpace: 'pre-wrap',
+    });
+    this.root.appendChild(this.diagHover);
+
     this.renderer = new CanvasRenderer(canvas);
     this.view = new ViewController(
       this.model,
@@ -171,6 +194,7 @@ export class MonoEditor implements IMonoEditor {
         this.view.paint();
         this.emitContent();
         this.emitCursorEvents('keyboard');
+        this.scheduleDiagHover();
       },
       {
         tabSize: this.tabSize,
@@ -373,6 +397,19 @@ export class MonoEditor implements IMonoEditor {
   setModelMarkers(owner: string, markers: IMarkerData[]): void {
     this.markers.setModelMarkers(owner, markers);
     this.view.paint();
+    this.emitMarkers();
+  }
+
+  private emitMarkers(): void {
+    const all = this.markers.getModelMarkers();
+    for (const l of this.markerListeners) {
+      try { l(all); } catch { /* */ }
+    }
+  }
+
+  onDidChangeMarkers(listener: (markers: import("../decorations").IMarker[]) => void): { dispose(): void } {
+    this.markerListeners.add(listener);
+    return { dispose: () => this.markerListeners.delete(listener) };
   }
 
   getModelMarkers(filter?: { owner?: string; take?: number }) {
@@ -450,6 +487,7 @@ export class MonoEditor implements IMonoEditor {
     this.syncTextarea();
     this.view.paint();
     this.emitCursorEvents('api');
+    this.scheduleDiagHover();
   }
 
   getSelection(): ISelection {
@@ -477,6 +515,7 @@ export class MonoEditor implements IMonoEditor {
     this.syncTextarea();
     this.view.paint();
     this.emitCursorEvents('api');
+    this.scheduleDiagHover();
   }
 
   getSelections(): ISelection[] {
@@ -849,6 +888,38 @@ export class MonoEditor implements IMonoEditor {
     this.contentListeners.add(listener);
     return { dispose: () => this.contentListeners.delete(listener) };
   }
+
+  private scheduleDiagHover(): void {
+    if (this.diagHoverTimer) clearTimeout(this.diagHoverTimer);
+    this.diagHoverTimer = setTimeout(() => this.updateDiagHover(), 400);
+  }
+
+  private updateDiagHover(): void {
+    if (!this.diagHover || this.disposed) return;
+    const pos = this.selection.active;
+    const markers = this.markers.getModelMarkers();
+    const hit = markers.find(m =>
+      pos.lineNumber >= m.startLineNumber &&
+      pos.lineNumber <= m.endLineNumber &&
+      (pos.lineNumber !== m.startLineNumber || pos.column >= m.startColumn) &&
+      (pos.lineNumber !== m.endLineNumber || pos.column <= m.endColumn)
+    );
+    if (!hit) {
+      this.diagHover.style.display = 'none';
+      return;
+    }
+    const sev =
+      hit.severity >= 8 ? 'Error' :
+      hit.severity >= 4 ? 'Warning' :
+      hit.severity >= 2 ? 'Info' : 'Hint';
+    this.diagHover.textContent = sev + ': ' + hit.message;
+    this.diagHover.style.display = 'block';
+    // Position near caret
+    const screen = this.view.caretScreenPos();
+    this.diagHover.style.left = Math.max(4, screen.x) + 'px';
+    this.diagHover.style.top = Math.max(4, screen.y - 28) + 'px';
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -878,6 +949,10 @@ export class MonoEditor implements IMonoEditor {
     this.scrollListeners.clear();
     this.focusListeners.clear();
     this.blurListeners.clear();
+    this.markerListeners.clear();
+    if (this.diagHoverTimer) clearTimeout(this.diagHoverTimer);
+    this.diagHover?.remove();
+    this.diagHover = null;
     this.root.remove();
   }
 
