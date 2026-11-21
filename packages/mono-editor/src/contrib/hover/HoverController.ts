@@ -69,7 +69,7 @@ export class HoverController {
         if (my !== this.seq) return;
         if (!h?.contents?.length) continue;
         for (const c of h.contents) {
-          parts.push(typeof c === 'string' ? c : c.value);
+          parts.push(typeof c === 'string' ? c : (c as any).value || '');
         }
       } catch (e) {
         console.warn('[mono hover]', e);

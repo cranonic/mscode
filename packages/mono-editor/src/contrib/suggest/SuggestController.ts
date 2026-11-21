@@ -81,7 +81,8 @@ export class SuggestController {
           p.provideCompletionItems(modelLike, pos, context, token),
         );
         if (my !== this.seq) return;
-        if (list?.suggestions?.length) all.push(...list.suggestions);
+        const items = Array.isArray(list) ? list : list?.suggestions;
+        if (items?.length) all.push(...items);
       } catch (e) {
         console.warn('[mono suggest]', e);
       }
@@ -90,7 +91,7 @@ export class SuggestController {
     // Dedupe by label
     const seen = new Set<string>();
     const unique = all.filter((it) => {
-      const lab = typeof it.label === 'string' ? it.label : it.label.label;
+      const lab = typeof it.label === 'string' ? it.label : (it.label as any)?.label || '';
       if (seen.has(lab)) return false;
       seen.add(lab);
       return true;

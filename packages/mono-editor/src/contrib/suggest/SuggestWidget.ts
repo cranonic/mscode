@@ -49,7 +49,7 @@ function kindLabel(k?: CompletionItemKind): string {
 }
 
 function labelOf(item: CompletionItem): string {
-  return typeof item.label === 'string' ? item.label : item.label.label;
+  return typeof item.label === 'string' ? item.label : (item.label as any)?.label || '';
 }
 
 /**
